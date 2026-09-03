@@ -64,9 +64,10 @@ bool TagLibrary::loadTagsFromFile(const std::filesystem::path &file_path_utf8)
                 type_color_[type] = "#FFC0CB";
             }
 
+            // 无论该类型是否有标签 都在 type_tags_ 登记（空类型也保留）
+            auto &tag_vec = type_tags_[type];
             if (group_obj.contains("tags") && group_obj["tags"].is_array())
             {
-                auto &tag_vec = type_tags_[type];
                 for (const auto &tag_obj : group_obj["tags"])
                 {
                     if (tag_obj.is_string())
@@ -100,7 +101,8 @@ bool TagLibrary::saveTagsToFile() const
     nlohmann::json root;
     root["groups"] = nlohmann::json::array();
 
-    for (const auto &[type, tags] : type_tags_)
+    // 以 type_color_ 的键为准遍历(类型以颜色确认存在) 保证空类型(tags 为 0)也会被保存
+    for (const auto &type : getAllTypeNames())
     {
         nlohmann::json group_obj;
         group_obj["type"] = type;
@@ -108,7 +110,15 @@ bool TagLibrary::saveTagsToFile() const
         auto color_it = type_color_.find(type);
         group_obj["color"] = (color_it != type_color_.end()) ? color_it->second : "";
 
-        group_obj["tags"] = tags;
+        auto tags_it = type_tags_.find(type);
+        if (tags_it != type_tags_.end())
+        {
+            group_obj["tags"] = tags_it->second;
+        }
+        else
+        {
+            group_obj["tags"] = nlohmann::json::array();
+        }
         root["groups"].push_back(group_obj);
     }
 
@@ -215,6 +225,7 @@ bool TagLibrary::addType(const std::string &type, std::string &color)
     }
 
     type_color_[type] = color;
+    type_tags_[type]; // 登记空类型：0 标签的类型同样存在（保持 type_tags_ 与 type_color_ 键一致）
     error_string_.clear();
     return true;
 }
