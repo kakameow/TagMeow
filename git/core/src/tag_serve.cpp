@@ -534,15 +534,16 @@ bool TagServe::updateFile(const std::filesystem::path &file_path_utf8)
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (!std::filesystem::exists(file_path_utf8) || !std::filesystem::is_regular_file(file_path_utf8))
+    if (!std::filesystem::exists(file_path_utf8)
+        || (!std::filesystem::is_regular_file(file_path_utf8) && !std::filesystem::is_directory(file_path_utf8)))
     {
-        error_string_ = "[warning] File does not exist or is not a regular file: " + file_path_utf8.u8string();
+        error_string_ = "[warning] Path does not exist or is not a regular file/directory: " + file_path_utf8.u8string();
         return false;
     }
 
     std::error_code ec;
     auto ftime = std::filesystem::last_write_time(file_path_utf8, ec);
-    auto size = std::filesystem::file_size(file_path_utf8, ec);
+    auto size = std::filesystem::is_directory(file_path_utf8) ? 0 : std::filesystem::file_size(file_path_utf8, ec);
 
     if (ec)
     {
