@@ -78,6 +78,12 @@ private:
 };
 
 // UDP 广播接收器 scan() 阻塞收集所有合法广播后返回
+//   已知限制(设计如此 未改动): 接收器必须绑定 UDP_DEFAULT_PORT(11451) 才能收到服务端发往该端口的广播。
+//   同一台机器同时运行多个实例时该端口会被多个接收器同时占用:
+//   Windows 下重复绑定(SO_REUSEADDR)后广播报文只投递给其中一个接收者(通常先占用的实例)
+//   后启动实例的 scan() 收不到任何报文(或绑定失败) 表现为"客户端搜索不到设备"
+//   关闭先启动的实例释放端口后, 后启动实例才能正常扫描
+//   跨机器(局域网不同主机)测试无此限制 同机多实例自测需错开运行或改用不同机器/虚拟机
 class BroadcastReceiver
 {
 public:
@@ -133,8 +139,8 @@ public:
     bool receiveByte(char &value, std::error_code &ec, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000));
     // 设置套接字收发超时 毫秒 0 = 无限 使文件传输级阻塞 I/O 有界
     void setTimeouts(int send_timeout_ms, int recv_timeout_ms, std::error_code &ec);
-    // 打断阻塞中的接收（原子标志 线程安全）：正在等待数据的接收将在下一个轮询周期返回
-    // ec = errc::operation_canceled；用于上层主动断开时唤醒接收线程（不直接操作套接字 无竞态）
+    // 打断阻塞中的接收（原子标志 线程安全） 正在等待数据的接收将在下一个轮询周期返回
+    // ec = errc::operation_canceled 用于上层主动断开时唤醒接收线程（不直接操作套接字 无竞态）
     void interrupt();
 
     void close(std::error_code &ec);
@@ -149,6 +155,6 @@ private:
 
     void sendMessage(const std::vector<char> &data, std::error_code &ec);
     std::vector<char> receiveMessage(std::error_code &ec);
-    // 轮询式完整读取：可被 interrupt() 打断；空闲超时（SO_RCVTIMEO 到期）继续等待而非报错
+    // 轮询式完整读取：可被 interrupt() 打断 空闲超时（SO_RCVTIMEO 到期）继续等待而非报错
     bool readInterruptible(void *data, size_t size, size_t &bytes_read, std::error_code &ec);
 };

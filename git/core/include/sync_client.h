@@ -19,11 +19,16 @@
 // 1. 上层调用 scanServers() 同步扫描局域网 阻塞返回去重后的服务器列表
 // 2. 调用 startDownload(server_index, cb) 发起一次下载会话（异步立即返回）
 //    连接服务器后客户端不再需要上层操作 会话内被动接收 结束/失败/断开时回调
-//    - 每个文件：接收文件头 -> 与本地“成功下载记录”比对：
-//        * 无记录：发送 1 字节 '1' 通知服务器发送文件 接收文件数据 成功后写入记录
-//        * 已有成功记录 发送 1 字节 '0' 通知服务器跳过该文件
-//    - 特殊情况 服务器发送队列为空时由服务器主动断开连接
-//      回调以 success=true、ec=errc::no_message_available 提示上层“发送队列为空”（本次无文件可下载）
+//    每个文件：接收文件头 -> 与本地“成功下载记录”比对：
+//        无记录：发送 1 字节 '1' 通知服务器发送文件 接收文件数据 成功后写入记录
+//        已有成功记录 发送 1 字节 '0' 通知服务器跳过该文件
+//    特殊情况 服务器发送队列为空时由服务器主动断开连接
+//    回调以 success=true、ec=errc::no_message_available 提示上层“发送队列为空”（本次无文件可下载）
+
+// 已知限制(仅注释说明, 未改动): 构造函数即创建 BroadcastReceiver 并绑定 UDP_DEFAULT_PORT(11451)
+//   同一台机器同时运行多个本程序实例时 该端口被多实例重复占用(见 sync_basic.h 的说明)
+//   后启动实例的客户端扫描将收不到广播 关闭先启动的实例后才能正常扫描
+//   跨机器测试无此限制 同机自测请错开运行或使用不同机器/虚拟机
 
 // 成功下载记录（身份 = parent_dir + file_name + file_size）
 struct DownloadRecord
@@ -43,7 +48,7 @@ public:
     SyncClient(const SyncClient &) = delete;
     SyncClient &operator=(const SyncClient &) = delete;
 
-    // 同步扫描局域网服务器 阻塞返回去重后的服务器列表。
+    // 同步扫描局域网服务器 阻塞返回去重后的服务器列表
     // num_attempts：扫描轮数（每轮内部有总超时） 结果跨轮合并去重 1 为单轮
     // 注意：下载进行中不要调用本函数（servers_ 会被替换）
     std::vector<ServerInfo> scanServers(size_t num_attempts = 1);
@@ -58,6 +63,7 @@ public:
     void startDownload(std::size_t server_index, std::function<void(bool success, std::error_code ec)> cb);
 
     // 断开当前连接并终止下载会话（工作线程在下一个有界阻塞点退出并回调失败）
+    // 会话级断开：仅中断当前下载会话 工作线程保持存活 之后可再次扫描/下载
     void disconnect();
 
     // 清除下载缓存记录（records.json）：下次下载将重新下载全部文件（不删除已下载的文件本身）
@@ -89,6 +95,7 @@ private:
     std::thread worker_thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> is_busy_{false};
+    std::atomic<bool> disconnect_requested_{false}; // 会话级断开请求(只中断当前会话 不终止工作线程)
 
     std::queue<std::function<void()>> task_queue_;
     mutable std::mutex queue_mutex_;

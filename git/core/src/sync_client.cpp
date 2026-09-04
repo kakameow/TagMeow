@@ -112,9 +112,9 @@ void SyncClient::startDownload(std::size_t server_index, std::function<void(bool
 
 void SyncClient::disconnect()
 {
-    // 上层手动断开：置 running_ 并 interrupt() 打断阻塞中的接收（原子标志 无竞态），
-    // 工作线程在下一个轮询周期（≤500ms）退出并回调失败
-    running_ = false;
+    // 会话级手动断开(与服务端 disconnect_requested_ 模式一致):
+    // 置位请求 + interrupt() 打断阻塞中的接收 由下载会话在下一个有界阻塞点退出并回调失败
+    disconnect_requested_ = true;
     if (conn_)
     {
         conn_->interrupt();
@@ -195,6 +195,7 @@ void SyncClient::doDownload(std::size_t index, std::function<void(bool, std::err
 {
     std::error_code ec;
     bool success = false;
+    disconnect_requested_ = false; // 新下载会话: 消费可能残留的断开请求(断开后再次下载可正常进行)
 
     try
     {
@@ -274,7 +275,7 @@ bool SyncClient::syncReceiveAll(std::error_code &ec)
     ec.clear();
     size_t received_count = 0;
 
-    while (running_)
+    while (running_ && !disconnect_requested_)
     {
         FileHeader header = conn_->receiveHeader(ec);
         if (ec)
