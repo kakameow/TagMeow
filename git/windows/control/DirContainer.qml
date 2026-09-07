@@ -7,7 +7,7 @@ import QtQuick.Controls
 Rectangle {
     id: root
     property string backgroundColor: "transparent"
-    property string borderColor: "red"
+    property string borderColor: "#e2e6ee"
     property string iconSource: ""
     property int iconSize: 16
     property int itemWidth: 192
@@ -154,5 +154,4 @@ Rectangle {
             }
         }
     }
-
 }

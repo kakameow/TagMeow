@@ -9,10 +9,10 @@
 #include "directory_manager.h"
 #include "tag_serve.h"
 
-// TransferData：QML 控件与后端(core)之间的数据桥
+// TransferData：QML 控件与(core)之间的数据桥
 // main 创建 DirectoryConfigManager / TagServe 后经构造或 setBackend 注入（本类不持有指针 生命周期由 main 负责）
 // 后端交互方法把结果落在 *_ 成员上：path_list_(目录) type_tags_/type_color_(标签库) path_tags_(文件->标签)
-// updata* 方法触发 on_data_changed_ 回调，由 main 通知对应 QML 控件刷新渲染
+// updata* 方法触发 on_data_changed_ 回调 由 main 通知对应 QML 控件刷新渲染
 
 class TransferData
 {
@@ -22,7 +22,7 @@ public:
 
     void setBackend(DirectoryConfigManager *dm, TagServe *ts);
 
-    // 数据变化通知回调（main 注入：刷新 QML 控件）
+    // 数据变化通知回调
     void setOnDataChanged(std::function<void()> cb);
 
     // 设置搜索条件：include(包含) exclude(排除) only(只有) 三个容器内的标签集合

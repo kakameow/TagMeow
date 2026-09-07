@@ -16,7 +16,7 @@ Rectangle {
     border.width: 1
     radius: Math.min(width, height) / 6
 
-    // 初始位置
+    // 初始位置（按下时记录）
     property point initialPosition: Qt.point(0, 0)
     // 当标签完全移出父容器时发射
     signal exitedParent()
@@ -25,15 +25,32 @@ Rectangle {
     // 拖拽时临时改挂的原父级/原层级（用于置顶且不被父容器裁剪）
     property Item _originalParent: null
     property int _originalZ: 0
-    // 所属 TagContainer（按下时确定 拖拽中 parent 已临时改变 不能靠遍历父链查找）
+    // 所属 TagContainer（按下时确定，拖拽中 parent 已临时改变，不能靠遍历父链查找）
     property Item _dragContainer: null
+
+    ParallelAnimation {
+        id: returnAnimation
+        NumberAnimation {
+            id: animX
+            target: root
+            property: "x"
+            duration: 200
+            easing.type: Easing.OutQuad
+        }
+        NumberAnimation {
+            id: animY
+            target: root
+            property: "y"
+            duration: 200
+            easing.type: Easing.OutQuad
+        }
+    }
 
     Drag.active: dragArea.dragging
     Drag.keys: ["tag"]
     Drag.hotSpot.x: dragArea.pressOffset.x
     Drag.hotSpot.y: dragArea.pressOffset.y
-    Drag.mimeData:
-    {
+    Drag.mimeData: {
         "text/plain": root.tagText,
         "text/color": root.tagColor
     }
@@ -42,24 +59,21 @@ Rectangle {
     MouseArea {
         id: dragArea
         anchors.fill: parent
-        // 防止 GridView/Flickable 抢走鼠标导致页面滚动
         preventStealing: true
-        // 拖拽时捕获鼠标 防止被内部控件拦截
         propagateComposedEvents: false
 
-        // 记录按下时的鼠标偏移
         property point pressOffset: Qt.point(0, 0)
-        // 是否正在拖拽
         property bool dragging: false
 
         onPressed: function(mouse)
         {
+            returnAnimation.stop()
+
             root.initialPosition = Qt.point(root.x, root.y)
             root._dragContainer = findContainer()
             pressOffset = Qt.point(mouse.x, mouse.y)
             dragging = true
 
-            // 置顶：临时改挂到窗口顶层 Item（无裁剪） 避免被其它元素覆盖/被父容器裁剪
             var top = findTopItem()
             if (top)
             {
@@ -77,22 +91,16 @@ Rectangle {
         {
             if (dragging)
             {
-                // 移动标签（跟随鼠标 相对于父容器）
                 root.x = root.x + (mouse.x - pressOffset.x)
                 root.y = root.y + (mouse.y - pressOffset.y)
-
                 checkIfFullyOutside()
             }
         }
 
-        onReleased: function(mouse)
-        {
-            // 先交付 drop 事件：若拖到了其它容器的 DropArea 上 由对方复制标签内容
+        onReleased: function(mouse) {
             root.Drag.drop()
-            // 结束拖拽
             dragging = false
 
-            // 恢复原父级与层级
             if (root._originalParent)
             {
                 root.parent = root._originalParent
@@ -100,28 +108,26 @@ Rectangle {
                 root._originalParent = null
             }
 
-            // 在松开时发射 松开时若已完全移出父容器 则发送信号 由 父元素处理
-            if (root._wasOutside)
-            {
+            if (root._wasOutside) {
                 root.exitedParent()
-            }
-            root._wasOutside = false
-            root._dragContainer = null
-
-            root.x = root.initialPosition.x
-            root.y = root.initialPosition.y
-        }
-
-        // 检查是否完全位于所属 TagContainer 之外
-        function checkIfFullyOutside()
-        {
-            var container = root._dragContainer || findContainer()
-            if (!container)
-            {
+                root._wasOutside = false
+                root._dragContainer = null
                 return
             }
 
-            // 将标签矩形换算到容器坐标系（mapToItem 已包含滚动/布局偏移）
+            animX.to = root.initialPosition.x
+            animY.to = root.initialPosition.y
+            returnAnimation.start()
+
+            root._wasOutside = false
+            root._dragContainer = null
+        }
+
+        // 检查是否完全位于所属 TagContainer 之外
+        function checkIfFullyOutside() {
+            var container = root._dragContainer || findContainer()
+            if (!container) return
+
             var topLeft = root.mapToItem(container, 0, 0)
             var tagRect = Qt.rect(topLeft.x, topLeft.y, root.width, root.height)
             var containerRect = Qt.rect(0, 0, container.width, container.height)
@@ -129,39 +135,27 @@ Rectangle {
             root._wasOutside = !rectsIntersect(tagRect, containerRect)
         }
 
-        function rectsIntersect(r1, r2)
-        {
-            return r1.x < r2.x + r2.width && r2.x < r1.x + r1.width && r1.y < r2.y + r2.height && r2.y < r1.y + r1.height
+        function rectsIntersect(r1, r2) {
+            return r1.x < r2.x + r2.width && r2.x < r1.x + r1.width &&
+                   r1.y < r2.y + r2.height && r2.y < r1.y + r1.height
         }
 
         // 向上查找所属的 TagContainer（具备 containerName 属性的父级）
-        function findContainer()
-        {
+        function findContainer() {
             var obj = root.parent
-            while (obj)
-            {
-                if (obj.hasOwnProperty("containerName"))
-                {
-                    return obj
-                }
+            while (obj) {
+                if (obj.hasOwnProperty("containerName")) return obj
                 obj = obj.parent
             }
             return null
         }
 
-        // 向上查找窗口顶层 Item（即窗口 contentItem） 作为拖拽时的临时父级
-        // 注意：不能用 contentItem 属性判定——GridView/Flickable 也有该属性
-        // 用 z 属性区分 Item 与 Window（Window 没有 z）
-        function findTopItem()
-        {
+        // 向上查找窗口顶层 Item（即窗口 contentItem）作为拖拽时的临时父级
+        function findTopItem() {
             var obj = root.parent
             var top = null
-            while (obj)
-            {
-                if (typeof obj.z !== "undefined")
-                {
-                    top = obj
-                }
+            while (obj) {
+                if (typeof obj.z !== "undefined") top = obj
                 obj = obj.parent
             }
             return top

@@ -4,13 +4,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// 标签库面板
-//   数据（typeList）由后端维护 QML 侧只提供更改接口：
-//   addType(typeName, color) / updateTypeColor / removeType
-//   addTag(typeName, tagText) / removeTag(typeName, tagText) / updateTag(typeName, tagText, newText)
-//   同一类型下的所有标签颜色一致（由类型 color 决定） 标签数据只存文字
-//   库内标签使用框架的 TagRectangle（Drag 附加属性）：可拖出复制到 TagContainer；
-
 Rectangle {
     id: root
 
@@ -27,7 +20,7 @@ Rectangle {
         return count
     }
     property string backgroundColor: "transparent"
-    property string borderColor: "red"
+    property string borderColor: "#e2e6ee"
     property string gridBorderColor: "#cccccc"
     property int maxRow: 2
     property int maxLine: 3

@@ -1,7 +1,6 @@
 #include "bridge.h"
 
 #include <set>
-
 #include <QDebug>
 #include <QQmlProperty>
 #include <QMetaObject>
@@ -13,7 +12,6 @@
 #include <QProcess>
 #include <QUrl>
 
-// 成员初始化顺序与声明顺序一致 镜像 cli/test.cpp main() 的装配方式
 Bridge::Bridge(QObject *parent) : QObject(parent), config_(), dm_("./config/path.json"), language_("./language"),
                                   ts_(dm_.getValidDirList(), config_.tag_mode_, "./config/tag.json", "./config/index.db"),
                                   s_server_(config_.broadcast_port_, config_.broadcast_magic_word_, config_.server_waiting_time_),
@@ -91,8 +89,7 @@ void Bridge::pushTagList()
     {
         return;
     }
-    // 以 type_color_ 的键为基准遍历（类型以颜色确认存在），并集 type_tags_ 取标签：
-    // 保证 0 标签的空类型也能显示在 LibraryTag
+    // 以 type_color_ 的键为基准遍历（类型以颜色确认存在） 并集 type_tags_ 取标签 保证 0 标签的空类型也能显示在 LibraryTag
     QVariantList list;
     std::set<std::string> names;
     for (const auto &kv : td_.type_color_)
@@ -309,7 +306,7 @@ void Bridge::onResetTypeColorClicked()
     {
         qInfo() << "[resetTypeColor] ok" << type << color;
         pushTagList();
-        pushFileList(); // 已显示的文件行按新颜色重新渲染
+        pushFileList();
     }
     else
     {

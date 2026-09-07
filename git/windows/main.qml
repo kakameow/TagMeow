@@ -4,8 +4,6 @@ import QtQuick.Controls.Basic
 import QtQuick.Dialogs
 import "control"
 
-
-
 ApplicationWindow {
     id: window
     width: 800
@@ -14,15 +12,14 @@ ApplicationWindow {
     minimumHeight: 600
     visible: true
     title: qsTr("TagMeow")
+    color: "#f0f2f5"
 
     // 语言字典: id -> 当前语言文本 由 Bridge(pushUiText) 从 LanguageManager 填充
-    // QML 文案统一从这里取值: window.uiText["id"] (内置中文兜底 语言文件缺失时为中文)
     property var uiText: ({})
-    // 可用语言列表: 由 Bridge.pushLanguageList 在初始化时按语言文件目录填充(同 test.cpp)
+    // 可用语言列表: 由 Bridge.pushLanguageList 在初始化时按语言文件目录填充(同 test.cpp)                                                                                                
     property var languageNames: []
 
-    // 这个 Item 作为拖拽元素的临时父级
-    // 所有放到这里的元素都会显示在最顶层
+    // 这个 Item 作为拖拽元素的临时父级 所有放到这里的元素都会显示在最顶层
     Item {
         id: dragOverlay
         anchors.fill: parent
@@ -41,6 +38,7 @@ ApplicationWindow {
         title: ""
         modality: Qt.ApplicationModal
         visible: false
+        color: "#ffffff"
 
         GridLayout {
             anchors.fill: parent
@@ -107,7 +105,7 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
                 horizontalAlignment: Text.AlignHCenter
                 text: window.uiText["settings.restartTip"]
-                color: "gray"
+                color: "#a0aec0"
                 font.pointSize: 9
             }
 
@@ -144,6 +142,7 @@ ApplicationWindow {
         title: ""
         modality: Qt.ApplicationModal
         visible: false
+        color: "#ffffff"
 
         Dialog {
             id: optionsDialog
@@ -181,7 +180,7 @@ ApplicationWindow {
         title: ""
         modality: Qt.NonModal
         visible: false
-        color: "transparent"
+        color: "#ffffff"
 
         // 由 Bridge(C++) 填充/绑定的数据与操作
         property var serverList: []   // rect3 局域网设备列表 [{name, ip, port}]
@@ -190,7 +189,7 @@ ApplicationWindow {
         Rectangle {
             id: mainRect
             anchors.fill: parent
-            color: "transparent"
+            color: "#FFFFFF"
             visible: true
 
             RowLayout {
@@ -236,7 +235,7 @@ ApplicationWindow {
         Rectangle {
             id: rect2
             anchors.fill: parent
-            color: "transparent"
+            color: "#FFFFFF"
             visible: false
 
             ColumnLayout {
@@ -314,7 +313,7 @@ ApplicationWindow {
                     objectName: "serverStatusLabel"
                     Layout.fillWidth: true
                     Layout.preferredHeight: 16
-                    color: "gray"
+                    color: "#a0aec0"
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideMiddle
                     text: ""
@@ -363,7 +362,7 @@ ApplicationWindow {
         Rectangle {
             id: rect3
             anchors.fill: parent
-            color: "transparent"
+            color: "#FFFFFF"
             visible: false
 
             ColumnLayout {
@@ -384,7 +383,7 @@ ApplicationWindow {
                         width: ListView.view ? ListView.view.width : 0
                         height: 26
                         radius: 4
-                        color: serverListView.currentIndex === index ? "#4064B5F6" : (index % 2 ? "#14000000" : "transparent")
+                        color: serverListView.currentIndex === index ? "#ebf8ff" : (index % 2 ? "#f7fafc" : "transparent")
 
                         MouseArea {
                             anchors.fill: parent
@@ -409,7 +408,7 @@ ApplicationWindow {
                     objectName: "clientStatusLabel"
                     Layout.fillWidth: true
                     Layout.preferredHeight: 16
-                    color: "gray"
+                    color: "#a0aec0"
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideMiddle
                     text: ""
@@ -497,7 +496,7 @@ ApplicationWindow {
             id:titleBar
             Layout.fillWidth: true
             Layout.preferredHeight: 32
-            color: window.palette.window
+            color: "#f8f9fc"
 
             PictureButton {
                 id: settingButton
@@ -525,7 +524,7 @@ ApplicationWindow {
                 anchors.top: parent.top
                 iconSource: "/img/circle-question-mark.svg"
                 onClicked: {
-                    Qt.openUrlExternally("https://github.com/kakameow/-")
+                    Qt.openUrlExternally("https://github.com/kakameow/TagMeow")
                 }
             }
 
@@ -555,7 +554,7 @@ ApplicationWindow {
             id: searchBar
             Layout.fillWidth: true
             Layout.preferredHeight: 72
-            color: window.palette.window
+            color: "#f0f2f5"
 
             RowLayout {
                 anchors.fill: parent
@@ -565,7 +564,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.preferredWidth: 8
-                    color: window.palette.window
+                    color: "#f0f2f5"
 
                     RowLayout {
                         anchors.fill: parent
@@ -578,6 +577,8 @@ ApplicationWindow {
                             Layout.preferredWidth: 192
                             containerName: window.uiText["cnt.include"]
                             containerTip: window.uiText["cnt.tip"]
+                            borderColor: "#48bb78"
+                            backgroundColor: "#f0fff4"
 
                         }
 
@@ -588,6 +589,8 @@ ApplicationWindow {
                             Layout.preferredWidth: 192
                             containerName: window.uiText["cnt.exclude"]
                             containerTip: window.uiText["cnt.tip"]
+                            borderColor: "#fc8181"
+                            backgroundColor: "#fff5f5"
 
                         }
 
@@ -598,6 +601,8 @@ ApplicationWindow {
                             Layout.preferredWidth: 192
                             containerName: window.uiText["cnt.only"]
                             containerTip: window.uiText["cnt.tip"]
+                            borderColor: "#63b3ed"
+                            backgroundColor: "#ebf8ff"
 
                         }
                     }
@@ -607,7 +612,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.preferredWidth: 2
-                    color: window.palette.window
+                    color: "transparent"
 
                     RowLayout {
                         anchors.fill: parent
@@ -657,7 +662,7 @@ ApplicationWindow {
             id: middleLayout
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: window.palette.window
+            color: "#f0f2f5"
 
             RowLayout {
                 anchors.fill: parent
@@ -668,7 +673,7 @@ ApplicationWindow {
                     id: lefttBar
                     Layout.fillHeight: true
                     Layout.preferredWidth: 192
-                    color: window.palette.window
+                    color: "#f0f2f5"
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -679,7 +684,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.preferredHeight: 2
-                            color: window.palette.window
+                            color: "#FFFFFF"
 
                             DirContainer {
                                 id: dirContainer
@@ -694,7 +699,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.preferredHeight: 3
-                            color: window.palette.window
+                            color: "#FFFFFF"
 
                             LibraryTag {
                                 id: libraryTag
@@ -709,7 +714,7 @@ ApplicationWindow {
                     id: rightBar
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    color: window.palette.window
+                    color: "#FFFFFF"
 
                     FileContainer {
                         id: fileContainer
@@ -725,7 +730,7 @@ ApplicationWindow {
             id: optionsBar
             Layout.fillWidth: true
             Layout.preferredHeight: 64
-            color: window.palette.window
+            color: "#f8f9fc"
 
             RowLayout {
                 anchors.fill: parent
@@ -735,7 +740,7 @@ ApplicationWindow {
                     Layout.preferredWidth: 1
                     Layout.fillHeight: true
                     anchors.left: parent.left
-                    color: window.palette.window
+                    color: "transparent"
 
                     RowLayout {
                         anchors.fill: parent
@@ -827,7 +832,7 @@ ApplicationWindow {
                     Layout.preferredWidth: 1
                     Layout.fillHeight: true
                     anchors.right: parent.right
-                    color: window.palette.window
+                    color: "transparent"
 
                     RowLayout {
                         anchors.fill: parent
@@ -839,7 +844,7 @@ ApplicationWindow {
                             width: 48
                             height: 64
                             anchors.right: button2.left
-                            color: window.palette.window
+                            color: "transparent"
 
                             PictureButton {
                                 objectName: "addDirBtn"
@@ -859,7 +864,7 @@ ApplicationWindow {
                             width: 48
                             height: 64
                             anchors.right: button3.left
-                            color: window.palette.window
+                            color: "transparent"
 
                             PictureButton {
                                 objectName: "addTypeBtn"
@@ -872,16 +877,14 @@ ApplicationWindow {
                                 ToolTip.visible: hovered
                                 ToolTip.text: window.uiText["btn.addType"]
                             }
-
                         }
-
 
                         Rectangle {
                             id: button3
                             width: 48
                             height: 64
                             anchors.right: button4.left
-                            color: window.palette.window
+                            color: "transparent"
 
                             PictureButton {
                                 objectName: "addTagBtn"
@@ -902,7 +905,7 @@ ApplicationWindow {
                             width: 48
                             height: 64
                             anchors.right: button5.left
-                            color: window.palette.window
+                            color: "transparent"
 
                             PictureButton {
                                 objectName: "removeDirBtn"
@@ -915,16 +918,14 @@ ApplicationWindow {
                                 ToolTip.visible: hovered
                                 ToolTip.text: window.uiText["btn.removeDir"]
                             }
-
                         }
-
 
                         Rectangle {
                             id: button5
                             width: 48
                             height: 64
                             anchors.right: button6.left
-                            color: window.palette.window
+                            color: "transparent"
 
                             PictureButton {
                                 objectName: "removeTypeBtn"
@@ -943,8 +944,8 @@ ApplicationWindow {
                             id: button6
                             width: 48
                             height: 64
-                            anchors.right: endButton.left
-                            color: window.palette.window
+                            anchors.right: button7.left
+                            color: "transparent"
 
                             PictureButton {
                                 objectName: "removeTagBtn"
@@ -964,7 +965,7 @@ ApplicationWindow {
                             width: 48
                             height: 64
                             anchors.right: endButton.left
-                            color: window.palette.window
+                            color: "transparent"
 
                             PictureButton {
                                 objectName: "resetTypeColor"
@@ -984,7 +985,7 @@ ApplicationWindow {
                             width: 48
                             height: 64
                             anchors.right: parent.right
-                            color: window.palette.window
+                            color: "transparent"
 
                             PictureButton {
                                 objectName: "snycWindow"

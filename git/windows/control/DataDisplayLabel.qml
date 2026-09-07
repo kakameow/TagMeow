@@ -11,12 +11,10 @@ Rectangle {
     property int itemWidth: 28
     property int itemHeight: 32
 
-
     width: itemWidth * 3
     height: itemHeight
     radius: 12
     color: bcakgroundColor
-
 
     RowLayout {
         anchors.fill: parent

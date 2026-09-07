@@ -4,14 +4,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// 文件列表容器
-// - 数据由后端维护：设置 fileList 即自动填充渲染；项结构: { text: 文件路径/名, tags: [标签...] }
-//   tags 元素可以是字符串，也可以是 { text, color }
-// - 每行分左右两半：左半居中显示文件路径；右半为该文件的标签编辑区（TagContainer，
-//   maxRow=1/headHeight=0 的单行标签条；支持从标签库拖入添加、拖出删除）
-// - 行内 TagContainer 的增/删/改信号在这里拼接"文件路径 + 标签"，
-//   以 fileTagAdded / fileTagRemoved / fileTagChanged 发给后端处理；
-//   后端处理完数据后重新赋值 fileList 刷新界面
 Rectangle {
     id: root
 
@@ -19,8 +11,8 @@ Rectangle {
     // 文件数量（fileList 变化时实时更新）
     property int fileCount: fileList.length
     property string backgroundColor: "transparent"
-    property string borderColor: "red"
-    property string fileColor: "red"
+    property string borderColor: "#e2e6ee"
+    property string fileColor: "#ffffff"
     property string tagColor: "#FFB6C1"
     property int itemWidth: 260
     property int itemHeight: 28
@@ -30,15 +22,11 @@ Rectangle {
     // 鼠标双击某一行时触发 text 为该行文件路径 交给后端处理
     signal fileDoubleClicked(string text)
 
-    // 标签变更信号（路径与标签已拼接好）交给后端处理
+    // 标签变更信号（拼接路径与标签）
     signal fileTagAdded(string filePath, string tag)
     signal fileTagRemoved(string filePath, string tag)
     signal fileTagChanged(string filePath, string oldTag, string newTag)
 
-    // 把传入的 tags 规整为数组，兼容三种形式：
-    //   - 字符串: "标签"
-    //   - 数组: ["标签", {text, color}]
-    //   - 对象(标签->颜色): { "图片1": "#FF0000" } 值不是颜色时仅取键作为标签名
     function normalizeTags(raw)
     {
         var out = []

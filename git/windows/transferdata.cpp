@@ -7,7 +7,7 @@
 
 namespace
 {
-// 空值检测：空字符串或纯空白都视为无效输入
+// 空值检测
 bool isBlank(const std::string &s)
 {
     for (char c : s)
@@ -151,7 +151,7 @@ bool TransferData::addDir(const std::string &path)
     const std::filesystem::path p(path);
     if (!dm_->addDirectory(p))
     {
-        return false; // 有效性校验 + 写入授权配置
+        return false;
     }
     if (ts_)
     {
@@ -186,7 +186,7 @@ bool TransferData::addTagToList(const std::string &type, const std::string &tag)
     {
         return false;
     }
-    ts_->saveTag(); // 立即写盘: 避免强制刷新(reLoadTag)重读磁盘导致新加内容失效
+    ts_->saveTag();
     refreshTagLibrary();
     return true;
 }
@@ -197,12 +197,12 @@ bool TransferData::addTypeToList(const std::string &type, const std::string &col
     {
         return false;
     }
-    std::string c = color; // TagServe::addType 的 color 为非 const 引用（空时回填默认色）
+    std::string c = color;
     if (!ts_->addType(type, c))
     {
         return false;
     }
-    ts_->saveTag(); // 立即写盘
+    ts_->saveTag();
     refreshTagLibrary();
     return true;
 }
@@ -213,7 +213,7 @@ bool TransferData::setTypeColor(const std::string &type, const std::string &colo
     {
         return false;
     }
-    ts_->saveTag(); // 立即写盘
+    ts_->saveTag();
     refreshTagLibrary();
     return true;
 }
@@ -224,7 +224,7 @@ bool TransferData::removeTag(const std::string &tag)
     {
         return false;
     }
-    ts_->saveTag(); // 立即写盘
+    ts_->saveTag();
     refreshTagLibrary();
     return true;
 }
@@ -235,7 +235,7 @@ bool TransferData::removeType(const std::string &type)
     {
         return false;
     }
-    ts_->saveTag(); // 立即写盘
+    ts_->saveTag();
     refreshTagLibrary();
     return true;
 }
@@ -246,7 +246,7 @@ bool TransferData::addTagToFile(const std::string &path, const std::string &tag)
     {
         return false;
     }
-    ts_->updateFile(std::filesystem::path(path)); // 同步更新数据库记录
+    ts_->updateFile(std::filesystem::path(path));
     refreshFileTags(path);
     return true;
 }
@@ -300,7 +300,7 @@ bool TransferData::updataAddType(const std::string &type, const std::string &col
     {
         return false;
     }
-    type_tags_[type]; // 确保存在
+    type_tags_[type];
     type_color_[type] = color;
     notify();
     return true;

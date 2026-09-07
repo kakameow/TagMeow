@@ -10,7 +10,7 @@ Rectangle {
     property string containerName: "标签容器"
     property string containerTip: "拖拽标签到这里"
     property string backgroundColor: "transparent"
-    property string borderColor: "red"
+    property string borderColor: "#e2e6ee"
     property string dropHighlightColor: "#2a82da"
     property int maxRow: 3
     property int maxLine: 3
@@ -19,7 +19,7 @@ Rectangle {
     property int tagHeight: 24
     property var tagList: []
 
-    // 标签变更信号（增/删/改），供外部（如 FileContainer）接收后拼接文件路径发给后端
+    // 标签变更信号（增/删/改
     signal tagAdded(string text)
     signal tagRemoved(string text)
     signal tagChanged(string oldText, string newText)
