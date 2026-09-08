@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 Rectangle {
+    id: root
     property string iconSource: ""
     property string tipText: ""
     property string dataText: ""
@@ -10,6 +11,7 @@ Rectangle {
     property int iconSize: 16
     property int itemWidth: 28
     property int itemHeight: 32
+    property int fontSize: 12
 
     width: itemWidth * 3
     height: itemHeight
@@ -44,7 +46,7 @@ Rectangle {
                 text: parent.parent.parent.tipText
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                font.pixelSize: 12
+                font.pixelSize: root.fontSize
                 elide: Text.ElideRight
             }
         }
@@ -59,7 +61,7 @@ Rectangle {
                 text: parent.parent.parent.dataText
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                font.pixelSize: 12
+                font.pixelSize: root.fontSize
                 elide: Text.ElideRight
             }
         }

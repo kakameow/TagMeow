@@ -3,10 +3,10 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Qt.labs.platform
 
 Rectangle {
     id: root
-
     property var fileList: []
     // 文件数量（fileList 变化时实时更新）
     property int fileCount: fileList.length
@@ -14,14 +14,15 @@ Rectangle {
     property string borderColor: "#e2e6ee"
     property string fileColor: "#ffffff"
     property string tagColor: "#FFB6C1"
+    property string tagBackgroundColor: "#ffffff" // 行内标签背景色 可外部修改
+    property string tagTextColor: "black" // 行内标签文字色(可外部修改 随主题)
     property int itemWidth: 260
     property int itemHeight: 28
     property int tagWidth: 64
     property int tagColumns: 5
+    property int fontSize: 16
 
-    // 鼠标双击某一行时触发 text 为该行文件路径 交给后端处理
     signal fileDoubleClicked(string text)
-
     // 标签变更信号（拼接路径与标签）
     signal fileTagAdded(string filePath, string tag)
     signal fileTagRemoved(string filePath, string tag)
@@ -99,6 +100,27 @@ Rectangle {
         return false
     }
 
+    function getDisplayPath(path)
+    {
+        if (!path || path.length === 0)
+        {
+            return ""
+        }
+
+        var clean = path.replace(/[\/\\]+$/, "")
+        var parts = clean.split(/[\/\\]/)
+        var last = parts[parts.length - 1]
+
+        if (last.includes(".") && last !== "." && last !== "..")
+        {
+            return last
+        }
+        else
+        {
+            return path
+        }
+    }
+
     width: itemWidth
     height: parent.height
     color: backgroundColor
@@ -149,15 +171,15 @@ Rectangle {
                 Label {
                     anchors.fill: parent
                     anchors.margins: 4
-                    text: fileItem.modelData.text
-                    font.pixelSize: 16
+                    text: root.getDisplayPath(modelData.text)
+                    font.pixelSize: root.fontSize
                     horizontalAlignment: Text.AlignLeft
                     verticalAlignment: Text.AlignVCenter
                     elide: Text.ElideRight
                     clip: true
                 }
 
-                // 双击该行 -> 发送文件路径给后端
+                // 双击该行 -> 发送文件路径
                 MouseArea {
                     anchors.fill: parent
                     onDoubleClicked: root.fileDoubleClicked(fileItem.modelData.text)
@@ -180,9 +202,11 @@ Rectangle {
                     containerTip: ""
                     tagWidth: root.tagWidth
                     maxLine: root.tagColumns
+                    tagBackgroundColor: root.tagBackgroundColor
+                    tagTextColor: root.tagTextColor
                     tagList: fileItem.fileTagList
 
-                    // 标签变更 -> FileContainer 拼接"路径 + 标签"发给后端
+                    // 标签变更 -> FileContainer 拼接"路径 + 标签"
                     onTagAdded: function(text) {
                         root.fileTagAdded(fileItem.modelData.text, text)
                     }

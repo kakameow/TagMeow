@@ -3,7 +3,6 @@ import QtQuick.Controls
 
 Item {
     id: root
-
     property alias text: input.text
     property alias placeholderText: input.placeholderText
     property string iconSource: ""
@@ -11,6 +10,7 @@ Item {
     property int padding: 6
     property int itemWidth: 180
     property int itemHeight: 32
+    property int fontSize: 12
 
     implicitWidth: itemWidth
     implicitHeight: itemHeight
@@ -48,7 +48,7 @@ Item {
 
     TextField {
         id: input
-        font.pixelSize: 12
+        font.pixelSize: root.fontSize
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
@@ -72,6 +72,13 @@ Item {
             if (!activeFocus && text.length === 0)
             {
                 root.active = false
+            }
+        }
+        // 外部(如回填路径/类型名)写入文本时自动展开: 触发图标左移动画与输入框淡入
+        onTextChanged: {
+            if (text.length > 0)
+            {
+                root.active = true
             }
         }
         onAccepted: root.accepted()

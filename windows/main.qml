@@ -12,12 +12,18 @@ ApplicationWindow {
     minimumHeight: 600
     visible: true
     title: qsTr("TagMeow")
-    color: "#f0f2f5"
+    color: window.uiColor["page"]
 
-    // 语言字典: id -> 当前语言文本 由 Bridge(pushUiText) 从 LanguageManager 填充
+    property int fontSize: 12
+    property int theme: 0
+    // 语言字典
     property var uiText: ({})
-    // 可用语言列表: 由 Bridge.pushLanguageList 在初始化时按语言文件目录填充(同 test.cpp)                                                                                                
+    // 可用语言列表
     property var languageNames: []
+    // 对应主题填充颜色
+    property var uiColor: ({})
+    // 可用主题颜色列表
+    property var themeNames: []
 
     // 这个 Item 作为拖拽元素的临时父级 所有放到这里的元素都会显示在最顶层
     Item {
@@ -29,16 +35,16 @@ ApplicationWindow {
 
     Window {
         id: setWindow
-        width: 400
-        height: 300
-        minimumWidth: 400
-        maximumWidth: 400
-        minimumHeight: 300
-        maximumHeight: 300
+        width: 500
+        height: 400
+        minimumWidth: 500
+        maximumWidth: 500
+        minimumHeight: 400
+        maximumHeight: 400
         title: ""
         modality: Qt.ApplicationModal
         visible: false
-        color: "#ffffff"
+        color: window.uiColor["card"]
 
         GridLayout {
             anchors.fill: parent
@@ -47,47 +53,74 @@ ApplicationWindow {
             rowSpacing: 8
             columnSpacing: 10
 
-            Label { text: window.uiText["settings.version"] }
+            Label {
+                text: window.uiText["settings.version"]
+                font.pixelSize: window.fontSize
+            }
             Label {
                 objectName: "versionValue"
                 text: "beta"
+                font.pixelSize: window.fontSize
             }
 
-            Label { text: window.uiText["settings.port"] }
+            Label {
+                text: window.uiText["settings.port"]
+                font.pixelSize: window.fontSize
+            }
             Label {
                 objectName: "portValue"
                 text: "11451"
+                font.pixelSize: window.fontSize
             }
 
-            Label { text: window.uiText["settings.magic"] }
+            Label {
+                text: window.uiText["settings.magic"]
+                font.pixelSize: window.fontSize
+            }
             Label {
                 objectName: "magicValue"
                 text: "0x114514"
+                font.pixelSize: window.fontSize
             }
 
-            Label { text: window.uiText["settings.tagMode"] }
+            Label {
+                text: window.uiText["settings.tagMode"]
+                font.pixelSize: window.fontSize
+            }
             Label {
                 objectName: "tagModeValue"
                 text: "Sidecar"
+                font.pixelSize: window.fontSize
             }
 
-            Label { text: window.uiText["settings.wait"] }
+            Label {
+                text: window.uiText["settings.wait"]
+                font.pixelSize: window.fontSize
+            }
             SpinBox {
                 objectName: "waitSpin"
                 from: 0
                 to: 1440
                 value: 5
                 Layout.fillWidth: true
+                font.pixelSize: window.fontSize
             }
 
-            Label { text: window.uiText["settings.download"] }
+            Label {
+                text: window.uiText["settings.download"]
+                font.pixelSize: window.fontSize
+            }
             TextField {
                 objectName: "downloadPath"
                 text: "./download"
                 Layout.fillWidth: true
+                font.pixelSize: window.fontSize
             }
 
-            Label { text: window.uiText["settings.language"] }
+            Label {
+                text: window.uiText["settings.language"]
+                font.pixelSize: window.fontSize
+            }
             ComboBox {
                 id: languageCombo
                 objectName: "languageCombo"
@@ -98,6 +131,38 @@ ApplicationWindow {
                     // 语言在确认时由 Bridge 读取并保存 重启后生效
                     console.log("Language selected:", currentText)
                 }
+                font.pixelSize: window.fontSize
+            }
+
+            Label {
+                text: window.uiText["settings.fontSize"]
+                font.pixelSize: window.fontSize
+            }
+            SpinBox {
+                objectName: "fontSizeSetting"
+                from: 10
+                to: 20
+                value: 12
+                Layout.fillWidth: true
+                font.pixelSize: window.fontSize
+                // 修改即生效 刷新渲染(Bridge.onFontSizeChanged)
+            }
+
+            Label {
+                text: window.uiText["settings.theme"]
+                font.pixelSize: window.fontSize
+            }
+            ComboBox {
+                id: themeCombo
+                objectName: "themeCombo"
+                model: window.themeNames
+                currentIndex: 0
+                Layout.fillWidth: true
+                onCurrentTextChanged: {
+                    // 修改即生效 刷新渲染
+                    console.log("themeNames selected:", currentText)
+                }
+                font.pixelSize: window.fontSize
             }
 
             Label {
@@ -105,8 +170,8 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
                 horizontalAlignment: Text.AlignHCenter
                 text: window.uiText["settings.restartTip"]
-                color: "#a0aec0"
-                font.pointSize: 9
+                color: window.uiColor["textHint"]
+                font.pixelSize: window.fontSize
             }
 
             Row {
@@ -116,6 +181,7 @@ ApplicationWindow {
                 Button {
                     objectName: "saveConfigBtn"
                     text: window.uiText["btn.ok"]
+                    font.pixelSize: window.fontSize
                     onClicked: {
                         // Bridge.onSaveConfigClicked: 读取控件保存 config.json 并退出程序(重启生效)
                         setWindow.close()
@@ -123,6 +189,7 @@ ApplicationWindow {
                 }
                 Button {
                     text: window.uiText["btn.cancel"]
+                    font.pixelSize: window.fontSize
                     onClicked: {
                         setWindow.close()
                     }
@@ -133,21 +200,24 @@ ApplicationWindow {
 
     Window {
         id: optionsWindow
-        width: 280
-        height: 140
-        minimumWidth: 280
-        maximumWidth: 280
-        minimumHeight: 140
-        maximumHeight: 140
+        width: 400
+        height: 160
+        minimumWidth: 400
+        maximumWidth: 400
+        minimumHeight: 160
+        maximumHeight: 160
         title: ""
         modality: Qt.ApplicationModal
         visible: false
-        color: "#ffffff"
+        color: window.uiColor["card"]
 
         Dialog {
             id: optionsDialog
+            width: 400
+            height: 160
             objectName: "optionsDialog"
             title: window.uiText["options.title"]
+            font.pixelSize: window.fontSize
             modal: true
             standardButtons: Dialog.Yes | Dialog.No
             onAccepted: {
@@ -180,7 +250,7 @@ ApplicationWindow {
         title: ""
         modality: Qt.NonModal
         visible: false
-        color: "#ffffff"
+        color: window.uiColor["card"]
 
         // 由 Bridge(C++) 填充/绑定的数据与操作
         property var serverList: []   // rect3 局域网设备列表 [{name, ip, port}]
@@ -189,7 +259,7 @@ ApplicationWindow {
         Rectangle {
             id: mainRect
             anchors.fill: parent
-            color: "#FFFFFF"
+            color: window.uiColor["card"]
             visible: true
 
             RowLayout {
@@ -235,7 +305,7 @@ ApplicationWindow {
         Rectangle {
             id: rect2
             anchors.fill: parent
-            color: "#FFFFFF"
+            color: window.uiColor["card"]
             visible: false
 
             ColumnLayout {
@@ -250,6 +320,7 @@ ApplicationWindow {
                         id: serverNameField
                         objectName: "serverNameField"
                         placeholderText: window.uiText["sync.serverName"]
+                        font.pixelSize: window.fontSize
                         Layout.fillWidth: true
                     }
 
@@ -290,6 +361,7 @@ ApplicationWindow {
                         id: dirField
                         objectName: "serverDirField"
                         placeholderText: window.uiText["sync.dirPath"]
+                        font.pixelSize: window.fontSize
                         Layout.fillWidth: true
                     }
 
@@ -313,10 +385,11 @@ ApplicationWindow {
                     objectName: "serverStatusLabel"
                     Layout.fillWidth: true
                     Layout.preferredHeight: 16
-                    color: "#a0aec0"
+                    color: window.uiColor["textHint"]
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideMiddle
                     text: ""
+                    font.pixelSize: window.fontSize
                 }
 
                 RowLayout {
@@ -362,7 +435,7 @@ ApplicationWindow {
         Rectangle {
             id: rect3
             anchors.fill: parent
-            color: "#FFFFFF"
+            color: window.uiColor["card"]
             visible: false
 
             ColumnLayout {
@@ -383,7 +456,7 @@ ApplicationWindow {
                         width: ListView.view ? ListView.view.width : 0
                         height: 26
                         radius: 4
-                        color: serverListView.currentIndex === index ? "#ebf8ff" : (index % 2 ? "#f7fafc" : "transparent")
+                        color: serverListView.currentIndex === index ? window.uiColor["onlyBg"] : (index % 2 ? window.uiColor["rowHover"] : "transparent")
 
                         MouseArea {
                             anchors.fill: parent
@@ -400,6 +473,7 @@ ApplicationWindow {
                             verticalAlignment: Text.AlignVCenter
                             text: modelData.name + "    " + modelData.ip + ":" + modelData.port
                             elide: Text.ElideMiddle
+                            font.pixelSize: window.fontSize
                         }
                     }
                 }
@@ -408,10 +482,11 @@ ApplicationWindow {
                     objectName: "clientStatusLabel"
                     Layout.fillWidth: true
                     Layout.preferredHeight: 16
-                    color: "#a0aec0"
+                    color: window.uiColor["textHint"]
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideMiddle
                     text: ""
+                    font.pixelSize: window.fontSize
                 }
 
                 Row {
@@ -496,7 +571,7 @@ ApplicationWindow {
             id:titleBar
             Layout.fillWidth: true
             Layout.preferredHeight: 32
-            color: "#f8f9fc"
+            color: window.uiColor["bar"]
 
             PictureButton {
                 id: settingButton
@@ -536,6 +611,7 @@ ApplicationWindow {
                 tipText: window.uiText["tip.file"]
                 // 实时显示下方文件列表的文件数量
                 dataText: fileContainer.fileCount
+                fontSize: window.fontSize
             }
 
             DataDisplayLabel {
@@ -546,6 +622,7 @@ ApplicationWindow {
                 tipText: window.uiText["tip.tag"]
                 // 实时显示下方标签库的标签总数
                 dataText: libraryTag.totalTagCount
+                fontSize: window.fontSize
             }
         }
 
@@ -554,7 +631,7 @@ ApplicationWindow {
             id: searchBar
             Layout.fillWidth: true
             Layout.preferredHeight: 72
-            color: "#f0f2f5"
+            color: window.uiColor["page"]
 
             RowLayout {
                 anchors.fill: parent
@@ -564,7 +641,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.preferredWidth: 8
-                    color: "#f0f2f5"
+                    color: window.uiColor["page"]
 
                     RowLayout {
                         anchors.fill: parent
@@ -577,9 +654,11 @@ ApplicationWindow {
                             Layout.preferredWidth: 192
                             containerName: window.uiText["cnt.include"]
                             containerTip: window.uiText["cnt.tip"]
-                            borderColor: "#48bb78"
-                            backgroundColor: "#f0fff4"
-
+                            borderColor: window.uiColor["includeBorder"]
+                            backgroundColor: window.uiColor["includeBg"]
+                            tagBackgroundColor: window.uiColor["tagBg"]
+                            tagTextColor: window.uiColor["tagText"]
+                            fontSize: window.fontSize
                         }
 
                         TagContainer {
@@ -589,9 +668,11 @@ ApplicationWindow {
                             Layout.preferredWidth: 192
                             containerName: window.uiText["cnt.exclude"]
                             containerTip: window.uiText["cnt.tip"]
-                            borderColor: "#fc8181"
-                            backgroundColor: "#fff5f5"
-
+                            borderColor: window.uiColor["excludeBorder"]
+                            backgroundColor: window.uiColor["excludeBg"]
+                            tagBackgroundColor: window.uiColor["tagBg"]
+                            tagTextColor: window.uiColor["tagText"]
+                            fontSize: window.fontSize
                         }
 
                         TagContainer {
@@ -601,9 +682,11 @@ ApplicationWindow {
                             Layout.preferredWidth: 192
                             containerName: window.uiText["cnt.only"]
                             containerTip: window.uiText["cnt.tip"]
-                            borderColor: "#63b3ed"
-                            backgroundColor: "#ebf8ff"
-
+                            borderColor: window.uiColor["onlyBorder"]
+                            backgroundColor: window.uiColor["onlyBg"]
+                            tagBackgroundColor: window.uiColor["tagBg"]
+                            tagTextColor: window.uiColor["tagText"]
+                            fontSize: window.fontSize
                         }
                     }
                 }
@@ -662,7 +745,7 @@ ApplicationWindow {
             id: middleLayout
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: "#f0f2f5"
+            color: window.uiColor["page"]
 
             RowLayout {
                 anchors.fill: parent
@@ -673,7 +756,7 @@ ApplicationWindow {
                     id: lefttBar
                     Layout.fillHeight: true
                     Layout.preferredWidth: 192
-                    color: "#f0f2f5"
+                    color: window.uiColor["page"]
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -684,13 +767,15 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.preferredHeight: 2
-                            color: "#FFFFFF"
+                            color: window.uiColor["card"]
 
                             DirContainer {
                                 id: dirContainer
                                 objectName: "dirContainer"
                                 anchors.fill: parent
                                 iconSource: "/img/folder.svg"
+                                fontSize: window.fontSize
+                                borderColor: window.uiColor["border"]
                             }
                         }
 
@@ -699,12 +784,16 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.preferredHeight: 3
-                            color: "#FFFFFF"
+                            color: window.uiColor["card"]
 
                             LibraryTag {
                                 id: libraryTag
                                 objectName: "libraryTag"
                                 anchors.fill: parent
+                                fontSize: window.fontSize
+                                borderColor: window.uiColor["border"]
+                                tagBackgroundColor: window.uiColor["tagBg"]
+                                tagTextColor: window.uiColor["tagText"]
                             }
                         }
                     }
@@ -714,13 +803,17 @@ ApplicationWindow {
                     id: rightBar
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    color: "#FFFFFF"
+                    color: window.uiColor["card"]
 
                     FileContainer {
                         id: fileContainer
                         objectName: "fileContainer"
                         itemWidth: parent.width
-
+                        fontSize: window.fontSize
+                        fileColor: window.uiColor["rowHover"]
+                        borderColor: window.uiColor["border"]
+                        tagBackgroundColor: window.uiColor["tagBg"]
+                        tagTextColor: window.uiColor["tagText"]
                     }
                 }
             }
@@ -730,7 +823,7 @@ ApplicationWindow {
             id: optionsBar
             Layout.fillWidth: true
             Layout.preferredHeight: 64
-            color: "#f8f9fc"
+            color: window.uiColor["bar"]
 
             RowLayout {
                 anchors.fill: parent
@@ -750,6 +843,7 @@ ApplicationWindow {
                             width: 144
                             height: 64
                             anchors.left: parent.left
+                            color: "transparent"
 
                             PictureTextFieldButton {
                                 id: dirInput
@@ -764,6 +858,7 @@ ApplicationWindow {
                             width: 84
                             height: 64
                             anchors.left: dirInput.right
+                            color: "transparent"
 
                             PictureTextFieldButton {
                                 id: typeInput
@@ -778,6 +873,7 @@ ApplicationWindow {
                             width: 84
                             height: 64
                             anchors.left: typeInput.right
+                            color: "transparent"
 
                             PictureTextFieldButton {
                                 id: tagInput
@@ -793,6 +889,7 @@ ApplicationWindow {
                             width: 84
                             height: 64
                             anchors.left: tagInput.right
+                            color: "transparent"
 
                             Rectangle {
                                 id: colorRect

@@ -9,20 +9,21 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
+#include <QGuiApplication>
+#include <QPalette>
 #include <QProcess>
 #include <QUrl>
 
 Bridge::Bridge(QObject *parent) : QObject(parent), config_(), dm_("./config/path.json"), language_("./language"),
                                   ts_(dm_.getValidDirList(), config_.tag_mode_, "./config/tag.json", "./config/index.db"),
-                                  s_server_(config_.broadcast_port_, config_.broadcast_magic_word_, config_.server_waiting_time_),
-                                  s_client_(config_.broadcast_port_, config_.broadcast_magic_word_, config_.download_path_), td_(&dm_, &ts_)
+                                  td_(&dm_, &ts_)
 {
     if (!language_.loadLanguage(config_.default_language_))
     {
         qWarning() << "[language] loadLanguage failed:" << QString::fromStdString(language_.getLastError());
     }
 
-    // SyncServer/SyncClient 工作线程回调 -> 主线程状态栏(跨线程自动排队)
+    // SyncServer/SyncClient 工作线程回调 -> 主线程状态栏
     QObject::connect(this, &Bridge::syncServerTip, this, &Bridge::onServerTipArrived);
     QObject::connect(this, &Bridge::syncClientTip, this, &Bridge::onClientTipArrived);
 }
@@ -56,7 +57,6 @@ void Bridge::pushFileList()
         {
             QVariantMap tag;
             tag.insert("text", QString::fromStdString(t));
-            // 从标签库解析该标签所属类型的颜色 库里没有则留空(控件用默认色)
             tag.insert("color", QString::fromStdString(ts_.getColorByTag(t)));
             tags << tag;
         }
@@ -89,7 +89,6 @@ void Bridge::pushTagList()
     {
         return;
     }
-    // 以 type_color_ 的键为基准遍历（类型以颜色确认存在） 并集 type_tags_ 取标签 保证 0 标签的空类型也能显示在 LibraryTag
     QVariantList list;
     std::set<std::string> names;
     for (const auto &kv : td_.type_color_)
@@ -254,7 +253,6 @@ void Bridge::onAddTypeClicked()
     }
 }
 
-// clearButton: 清空 包含/排除/只有 三容器标签列表
 void Bridge::onClearClicked()
 {
     const char *names[] = { "includeContainer", "excludeContainer", "onlyContainer" };
@@ -316,6 +314,11 @@ void Bridge::onResetTypeColorClicked()
 
 void Bridge::onDirDoubleClicked(const QString &path)
 {
+    // 双击目录: 顺带把路径回填到 dirInput 输入框
+    if (QObject *input = findObject("dirInput"))
+    {
+        QQmlProperty(input, "text").write(path);
+    }
     if (td_.getDirFile(path.toStdString()))
     {
         qInfo() << "[getDirFile] ok" << path << "files:" << td_.path_tags_.size();
@@ -327,7 +330,16 @@ void Bridge::onDirDoubleClicked(const QString &path)
     }
 }
 
-// FileContainer 双击某行: 目录 -> 打开该目录; 文件 -> 打开所在目录并高亮选中(Windows: explorer /select)
+// LibraryTag 类型名行(点击展开/收起): 顺带把类型名回填到 typeInput 输入框
+void Bridge::onLibraryTypeClicked(const QString &type)
+{
+    if (QObject *input = findObject("typeInput"))
+    {
+        QQmlProperty(input, "text").write(type);
+    }
+    qInfo() << "[library] 类型行点击:" << type;
+}
+
 void Bridge::onFileDoubleClicked(const QString &path)
 {
     const QFileInfo info(path);
@@ -339,7 +351,6 @@ void Bridge::onFileDoubleClicked(const QString &path)
 
     if (info.isDir())
     {
-        // 目录: 直接打开
         if (QDesktopServices::openUrl(QUrl::fromLocalFile(info.absoluteFilePath())))
         {
             qInfo() << "[open] 目录 ok" << info.absoluteFilePath();
@@ -351,7 +362,6 @@ void Bridge::onFileDoubleClicked(const QString &path)
         return;
     }
 
-    // 文件: 打开所在目录并高亮选中
 #ifdef Q_OS_WIN
     QStringList args;
     args << "/select," << QDir::toNativeSeparators(info.absoluteFilePath());
@@ -405,9 +415,13 @@ void Bridge::onRefreshClicked()
     qInfo() << "[refresh] 完成";
 }
 
-// config_ -> setWindow 控件: 只读项填真实值 可编辑项(等待时间/下载路径/语言)同步控件初值
 void Bridge::pushConfig()
 {
+    if (root_)
+    {
+        QQmlProperty(root_, "fontSize").write(config_.font_size_);
+        QQmlProperty(root_, "theme").write(config_.theme_);
+    }
     const auto setText = [this](const char *name, const QString &text)
     {
         if (QObject *o = findObject(name))
@@ -429,7 +443,52 @@ void Bridge::pushConfig()
     {
         QQmlProperty(path, "text").write(QString::fromStdString(config_.download_path_.string()));
     }
+    if (QObject *spin = findObject("fontSizeSetting"))
+    {
+        QQmlProperty(spin, "value").write(config_.font_size_);
+    }
+    if (QObject *combo = findObject("themeCombo"))
+    {
+        QQmlProperty(combo, "currentIndex").write(config_.theme_);
+    }
     // 语言列表与当前语言: 由 pushLanguageList 按语言文件目录填充(同 test.cpp loadLanguageList)
+}
+
+// 字号: 修改即生效 -> 写 config_ 保存 -> 刷新 window.fontSize(Controls 字体即时级联)
+// Qt6 SpinBox 的 valueChanged 为无参信号, 槽内从控件读取当前值
+void Bridge::onFontSizeChanged()
+{
+    QObject *spin = findObject("fontSizeSetting");
+    const int size = spin ? QQmlProperty(spin, "value").read().toInt() : 0;
+    if (size == config_.font_size_)
+    {
+        return;
+    }
+    if (size < 6 || size > 48)
+    {
+        qWarning() << "[fontSize] 越界:" << size;
+        return;
+    }
+    config_.font_size_ = size;
+    config_.saveConfig();
+    if (root_)
+    {
+        QQmlProperty(root_, "fontSize").write(size); // 各控件 font.pixelSize: window.fontSize 绑定即时级联
+    }
+    qInfo() << "[fontSize] 已应用:" << size;
+}
+
+// 主题: 修改即生效 -> 写 config_ 保存 -> pushTheme 刷新 uiColor 与全局调色板
+void Bridge::onThemeChanged(int index)
+{
+    if (index < 0)
+    {
+        index = 0;
+    }
+    config_.theme_ = index;
+    config_.saveConfig();
+    pushTheme();
+    qInfo() << "[theme] 已应用:" << index;
 }
 
 // setWindow 确认: 读取控件 -> 保存 config.json -> 退出程序(语言/模式等重启后生效)
@@ -540,6 +599,10 @@ const TextItem kUiTextTable[] = {
     { "settings.wait", "等待时间(分钟):" },
     { "settings.download", "默认下载路径:" },
     { "settings.language", "语言:" },
+    { "settings.fontSize", "字号:" },
+    { "settings.theme", "主题:" },
+    { "theme.light", "浅色" },
+    { "theme.dark", "深色" },
     { "settings.restartTip", "某些配置可能需要重启后生效点击确认保存并关闭程序" }, // 原为带换行的版本，这里合并为一行（但 JSON 中是单行，去掉了换行）
     { "btn.ok", "确认" },
     { "btn.cancel", "取消" },
@@ -608,15 +671,111 @@ void Bridge::pushUiText()
     QQmlProperty(root_, "uiText").write(map);
 }
 
-// LanguageManager::loadLanguageList 的结果 -> setWindow 语言下拉(同 test.cpp language list)
-// 并选中 config_.default_language_ 对应的项(找不到时停在 0)
+// 双主题配色表: 每个颜色项 key -> {浅色, 深色}
+namespace
+{
+struct ColorItem
+{
+    const char *key;
+    const char *light;
+    const char *dark;
+};
+const ColorItem kColorTable[] = {
+    // 背景/边框
+    { "page", "#f0f2f5", "#1e2127" },
+    { "card", "#ffffff", "#262a31" },
+    { "bar", "#f8f9fc", "#23272e" },
+    { "border", "#e2e6ee", "#3a4150" },
+    // 文字
+    { "textMain", "#1a202c", "#e8eaee" },
+    { "textSub", "#4a5568", "#aeb4bf" },
+    { "textHint", "#a0aec0", "#7c8490" },
+    // 标签
+    { "tagBg", "#ffffff", "#2e333b" },
+    { "tagText", "#2d3748", "#dfe3e9" },
+    { "tagBorder", "#e2e6ee", "#3a4150" },
+    { "tagHover", "#e2e8f0", "#383e47" },
+    // 包含/排除/只有 区
+    { "includeBorder", "#48bb78", "#48bb78" },
+    { "includeBg", "#f0fff4", "#1d2f24" },
+    { "excludeBorder", "#fc8181", "#fc8181" },
+    { "excludeBg", "#fff5f5", "#382327" },
+    { "onlyBorder", "#63b3ed", "#63b3ed" },
+    { "onlyBg", "#ebf8ff", "#1e2c38" },
+    // 按钮
+    { "btnBg", "#edf2f7", "#2e333b" },
+    { "btnText", "#2d3748", "#dfe3e9" },
+    { "btnHover", "#e2e8f0", "#383e47" },
+    { "primary", "#4a6fa5", "#4a6fa5" },
+    { "primaryText", "#ffffff", "#ffffff" },
+    { "primaryHover", "#3b5d8a", "#3b5d8a" },
+    // 输入框
+    { "inputBg", "#ffffff", "#262a31" },
+    { "inputBorder", "#e2e6ee", "#3a4150" },
+    { "inputFocus", "#4a6fa5", "#4a6fa5" },
+    // 行/状态
+    { "dirHover", "#edf2f7", "#2e333b" },
+    { "rowHover", "#ffffff", "#2b3038" },
+    { "statusBar", "#f8f9fc", "#23272e" },
+    { "statusText", "#718096", "#98a0ab" },
+    // 功能色
+    { "danger", "#fc8181", "#fc8181" },
+    { "dangerHover", "#f56565", "#f56565" },
+    { "icon", "#718096", "#98a0ab" },
+    { "iconAccent", "#4a6fa5", "#7fa3d4" },
+};
+} // namespace
+
+// config_.theme_ -> window.uiColor(当前主题配色表)/themeNames(主题名)/theme 并同步全局调色板
+void Bridge::pushTheme()
+{
+    if (!root_)
+    {
+        return;
+    }
+    const int idx = config_.theme_ > 0 ? 1 : 0;
+
+    QVariantMap map;
+    for (const auto &c : kColorTable)
+    {
+        map.insert(QString::fromUtf8(c.key), QString::fromLatin1(idx ? c.dark : c.light));
+    }
+    QQmlProperty(root_, "uiColor").write(map);
+    QQmlProperty(root_, "theme").write(idx);
+
+    // 主题名(本地化) 供 themeCombo 使用
+    QVariantList themeNames;
+    themeNames << uiText("theme.light", "浅色") << uiText("theme.dark", "深色");
+    QQmlProperty(root_, "themeNames").write(themeNames);
+
+    // 全局调色板: Controls 文字/底色跟随主题(浅色文字≈黑; 深色文字变浅)
+    const auto pick = [&map](const char *key, const char *dflt) -> QString
+    {
+        const QString k = QString::fromUtf8(key);
+        return map.contains(k) ? map.value(k).toString() : QString::fromLatin1(dflt);
+    };
+    QPalette pal = QGuiApplication::palette();
+    pal.setColor(QPalette::Window, QColor(pick("card", "#ffffff")));
+    pal.setColor(QPalette::WindowText, QColor(pick("textMain", "#1a202c")));
+    pal.setColor(QPalette::Base, QColor(pick("inputBg", "#ffffff")));
+    pal.setColor(QPalette::Text, QColor(pick("textMain", "#1a202c")));
+    pal.setColor(QPalette::Button, QColor(pick("btnBg", "#edf2f7")));
+    pal.setColor(QPalette::ButtonText, QColor(pick("btnText", "#2d3748")));
+    pal.setColor(QPalette::PlaceholderText, QColor(pick("textHint", "#a0aec0")));
+    pal.setColor(QPalette::ToolTipBase, QColor(pick("card", "#ffffff")));
+    pal.setColor(QPalette::ToolTipText, QColor(pick("textMain", "#1a202c")));
+    QGuiApplication::setPalette(pal);
+
+    qInfo() << "[theme] pushTheme 索引:" << idx;
+}
+
 void Bridge::pushLanguageList()
 {
     if (!root_)
     {
         return;
     }
-    const auto &langs = language_.getLanguagesList(); // 目录下 *.json 的 stem 列表
+    const auto &langs = language_.getLanguagesList();
     QVariantList names;
     for (const auto &n : langs)
     {
@@ -648,7 +807,7 @@ void Bridge::pushServerQueue()
         return;
     }
     QVariantList list;
-    const auto queue = s_server_.getTaskQueue(); // 线程安全 返回拷贝
+    const auto queue = s_server_->getTaskQueue();
     for (const auto &p : queue)
     {
         list << QString::fromStdString(p.generic_u8string());
@@ -664,7 +823,7 @@ void Bridge::onServerStartClicked()
         name = "tagmeow";
     }
     std::error_code ec;
-    const bool ok = s_server_.start(name, 0, ec, [this](bool success, std::error_code e)
+    const bool ok = s_server_->start(name, 0, ec, [this](bool success, std::error_code e)
     {
         QString msg;
         if (success)
@@ -692,7 +851,7 @@ void Bridge::onServerStartClicked()
 void Bridge::onServerStopClicked()
 {
     std::error_code ec;
-    s_server_.stop(ec);
+    s_server_->stop(ec);
     if (!ec)
     {
         qInfo() << "[server] stop ok";
@@ -714,7 +873,6 @@ void Bridge::onServerAddDirClicked()
         return;
     }
 
-    // 无效值检测: 必须存在且为目录 通过后归一化为绝对路径再入队
     std::error_code ec;
     std::filesystem::path p(dir.toStdString());
     const auto abs = std::filesystem::absolute(p, ec);
@@ -726,7 +884,7 @@ void Bridge::onServerAddDirClicked()
     }
 
     const auto norm = abs.lexically_normal();
-    s_server_.enqueueDirectory(norm);
+    s_server_->enqueueDirectory(norm);
     qInfo() << "[server] add" << QString::fromStdString(norm.generic_u8string());
     setStatusLabel("serverStatusLabel", uiText("status.server.enqueued", "已入队: %1").arg(QString::fromStdString(norm.generic_u8string())));
     pushServerQueue();
@@ -735,7 +893,7 @@ void Bridge::onServerAddDirClicked()
 void Bridge::onServerDisconnectClicked()
 {
     std::error_code ec;
-    s_server_.disconnect(ec);
+    s_server_->disconnect(ec);
     if (!ec)
     {
         qInfo() << "[server] disconnect ok";
@@ -762,7 +920,7 @@ void Bridge::pushServerList()
         return;
     }
     QVariantList list;
-    for (const auto &s : s_client_.getServers()) // 线程安全
+    for (const auto &s : s_client_->getServers()) // 线程安全
     {
         QVariantMap m;
         m.insert("name", QString::fromStdString(s.name_));
@@ -776,7 +934,7 @@ void Bridge::pushServerList()
 void Bridge::onClientScanClicked()
 {
     setStatusLabel("clientStatusLabel", uiText("status.client.scanning", "正在扫描局域网..."));
-    const auto servers = s_client_.scanServers();
+    const auto servers = s_client_->scanServers();
     pushServerList();
     qInfo() << "[client] scan done servers:" << servers.size();
     setStatusLabel("clientStatusLabel", uiText("status.client.scanDone", "扫描完成 %1 台设备").arg(static_cast<int>(servers.size())));
@@ -786,7 +944,7 @@ void Bridge::onClientDownloadClicked()
 {
     QObject *lv = findObject("serverListView");
     const int index = lv ? QQmlProperty(lv, "currentIndex").read().toInt() : -1;
-    const auto servers = s_client_.getServers();
+    const auto servers = s_client_->getServers();
     if (index < 0 || static_cast<size_t>(index) >= servers.size())
     {
         qWarning() << "[client] download failed: 未选中有效设备 index =" << index;
@@ -796,7 +954,7 @@ void Bridge::onClientDownloadClicked()
     const size_t idx = static_cast<size_t>(index);
     qInfo() << "[client] download start index =" << index << "server =" << servers[idx].name_.c_str();
     setStatusLabel("clientStatusLabel", uiText("status.client.downloading", "正在下载 %1 ...").arg(QString::fromStdString(servers[idx].name_)));
-    s_client_.startDownload(idx, [this](bool success, std::error_code e)
+    s_client_->startDownload(idx, [this](bool success, std::error_code e)
     {
         QString msg;
         if (success)
@@ -815,14 +973,14 @@ void Bridge::onClientDownloadClicked()
 
 void Bridge::onClientClearClicked()
 {
-    s_client_.clearDownloadRecords();
+    s_client_->clearDownloadRecords();
     qInfo() << "[client] clear records";
     setStatusLabel("clientStatusLabel", uiText("status.client.cleared", "已清除下载记录"));
 }
 
 void Bridge::onClientDisconnectClicked()
 {
-    s_client_.disconnect();
+    s_client_->disconnect();
     qInfo() << "[client] disconnect";
     setStatusLabel("clientStatusLabel", uiText("status.client.disconnected", "已断开连接"));
 }
@@ -831,6 +989,22 @@ void Bridge::onClientTipArrived(const QString &msg)
 {
     qInfo() << msg;
     setStatusLabel("clientStatusLabel", msg);
+}
+
+// 首次点击 snycWindow(打开同步窗口)时惰性创建 SyncServer/SyncClient
+// 参数与 cli/test.cpp 一致(config_ 的值); 只创建一次, 重复点击不再重建
+void Bridge::onSyncWindowOpened()
+{
+    if (!s_server_)
+    {
+        s_server_ = std::make_unique<SyncServer>(config_.broadcast_port_, config_.broadcast_magic_word_, config_.server_waiting_time_);
+        qInfo() << "[sync] SyncServer 已创建(首次打开同步窗口)";
+    }
+    if (!s_client_)
+    {
+        s_client_ = std::make_unique<SyncClient>(config_.broadcast_port_, config_.broadcast_magic_word_, config_.download_path_);
+        qInfo() << "[sync] SyncClient 已创建(首次打开同步窗口)";
+    }
 }
 
 void Bridge::bindTo(QObject *root)
@@ -889,6 +1063,11 @@ void Bridge::bindTo(QObject *root)
     if (dirContainer_)
     {
         QObject::connect(dirContainer_, SIGNAL(dirDoubleClicked(QString)), this, SLOT(onDirDoubleClicked(QString)));
+    }
+    // LibraryTag: 点击类型名行(展开/收起) -> 回填 typeInput
+    if (libraryTag_)
+    {
+        QObject::connect(libraryTag_, SIGNAL(typeHeaderClicked(QString)), this, SLOT(onLibraryTypeClicked(QString)));
     }
 
     // optionsBar 操作按钮
@@ -968,13 +1147,29 @@ void Bridge::bindTo(QObject *root)
     {
         QObject::connect(b, SIGNAL(clicked()), this, SLOT(onClientDisconnectClicked()));
     }
+    // snycWindow 按钮: 首次点击时创建 SyncServer/SyncClient(窗口显示由 QML onClicked 负责)
+    if (QObject *b = findObject("snycWindow"))
+    {
+        QObject::connect(b, SIGNAL(clicked()), this, SLOT(onSyncWindowOpened()));
+    }
+    // 设置窗口: 字号/主题 修改即生效
+    if (QObject *spin = findObject("fontSizeSetting"))
+    {
+        // Qt6 SpinBox: valueChanged 为无参信号
+        QObject::connect(spin, SIGNAL(valueChanged()), this, SLOT(onFontSizeChanged()));
+    }
+    if (QObject *combo = findObject("themeCombo"))
+    {
+        QObject::connect(combo, SIGNAL(activated(int)), this, SLOT(onThemeChanged(int)));
+    }
 
-    // 初始填充（后端磁盘数据 -> 控件 + 语言字典/语言列表 -> window）
+    // 初始填充（后端磁盘数据 -> 控件 + 语言字典/主题 -> window）
     td_.updataDirList();
     td_.updataTagList();
-    pushConfig();
     pushLanguageList();
     pushUiText();
+    pushTheme(); // uiColor/themeNames/全局调色板(themeNames 供 pushConfig 设主题选中项)
+    pushConfig();
     pushDirList();
     pushTagList();
 }

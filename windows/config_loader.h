@@ -25,6 +25,8 @@ struct ConfigLoader
     std::filesystem::path download_path_ = "./download";
     std::uint16_t broadcast_port_ = 11451;          // UDP_DEFAULT_PORT
     std::string broadcast_magic_word_ = "0x114514"; // UDP_DEFAULT_MAGIC
+    int font_size_ = 12;
+    int theme_ = 0;
 
     mutable std::string error_string_;
 };

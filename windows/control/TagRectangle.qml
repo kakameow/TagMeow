@@ -5,13 +5,17 @@ import QtQuick.Layouts
 Rectangle {
     id: root
     property string tagColor: "#FFB6C1"
+    property string backgroundColor: "#ffffff"
+    property string textColor: "black"
     property string borderColor: tagColor
     property string tagText: ""
     property int rectWidth: 64
     property int rectHeight: 24
+    property int fontSize: 12
 
     width: rectWidth
     height: rectHeight
+    color: backgroundColor
     border.color: borderColor
     border.width: 1
     radius: Math.min(width, height) / 6
@@ -193,8 +197,8 @@ Rectangle {
                 text: root.tagText
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                font.pixelSize: 10
-                color: "black"
+                font.pixelSize: root.fontSize - 2
+                color: root.textColor
                 elide: Text.ElideRight
             }
         }

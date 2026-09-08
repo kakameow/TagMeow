@@ -11,12 +11,15 @@ Rectangle {
     property string containerTip: "拖拽标签到这里"
     property string backgroundColor: "transparent"
     property string borderColor: "#e2e6ee"
+    property string tagBackgroundColor: "#ffffff" // 内部标签(TagRectangle)背景色 可外部修改
+    property string tagTextColor: "black" // 内部标签文字色(可外部修改 随主题)
     property string dropHighlightColor: "#2a82da"
     property int maxRow: 3
     property int maxLine: 3
     property int headHeight: 14
     property int tagWidth: 64
     property int tagHeight: 24
+    property int fontSize: 12
     property var tagList: []
 
     // 标签变更信号（增/删/改
@@ -175,7 +178,7 @@ Rectangle {
                 anchors.leftMargin: 10
                 anchors.topMargin: 1
                 text: container.containerName
-                font.pixelSize: 12
+                font.pixelSize: container.fontSize
             }
             Label {
                 anchors.right: parent.right
@@ -183,7 +186,7 @@ Rectangle {
                 anchors.rightMargin: 10
                 anchors.topMargin: 1
                 text: container.tagList.length
-                font.pixelSize: 12
+                font.pixelSize: container.fontSize
             }
         }
 
@@ -196,7 +199,7 @@ Rectangle {
             Label {
                 anchors.centerIn: parent
                 text: container.containerTip
-                font.pixelSize: 8
+                font.pixelSize: container.fontSize - 2
                 visible: container.tagList.length === 0
             }
 
@@ -216,6 +219,8 @@ Rectangle {
                         width: container.tagWidth
                         height: container.tagHeight
                         tagColor: tagItem.model.color
+                        backgroundColor: container.tagBackgroundColor
+                        textColor: container.tagTextColor
                         tagText: tagItem.model.text
                         onExitedParent: container.removeTag(tagItem.model.text)
                     }

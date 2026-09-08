@@ -6,7 +6,6 @@ import QtQuick.Layouts
 
 Rectangle {
     id: root
-
     // 类型列表数据 { typeName: string, color: string, tags: [text, ...] }
     property var typeList: []
     // 所有类型下的标签总数（typeList 变化时实时更新）
@@ -21,11 +20,17 @@ Rectangle {
     }
     property string backgroundColor: "transparent"
     property string borderColor: "#e2e6ee"
+    property string tagBackgroundColor: "#ffffff" // 标签(TagRectangle)背景色 可外部修改
+    property string tagTextColor: "black" // 标签文字色(可外部修改 随主题)
     property string gridBorderColor: "#cccccc"
     property int maxRow: 2
     property int maxLine: 3
     property int tagWidth: 64
     property int tagHeight: 24
+
+    // 类型名行(点击展开/收起)被点击时触发 typeName 供外部(如回填 typeInput)使用
+    signal typeHeaderClicked(string typeName)
+    property int fontSize: 12
 
     width: tagWidth * maxLine
     height: parent.height
@@ -203,7 +208,7 @@ Rectangle {
             property string typeName: modelData.typeName
             property string typeColor: modelData.color ? modelData.color : "#FFB6C1"
             property var tags: modelData.tags ? modelData.tags : []
-            property int headerHeight: 16
+            property int headerHeight: 24
 
             ColumnLayout {
                 anchors.fill: parent
@@ -213,12 +218,15 @@ Rectangle {
                 Rectangle {
                     id: header
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 16
+                    Layout.preferredHeight: 24
                     color: "transparent"
 
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: typeItem.expanded = !typeItem.expanded
+                        onClicked: {
+                            typeItem.expanded = !typeItem.expanded
+                            root.typeHeaderClicked(typeItem.typeName)
+                        }
                     }
 
                     Label {
@@ -227,7 +235,7 @@ Rectangle {
                         anchors.leftMargin: 10
                         anchors.topMargin: 1
                         text: (typeItem.expanded ? "▼ " : "▶ ") + typeItem.typeName
-                        font.pixelSize: 14
+                        font.pixelSize: root.fontSize + 2
                     }
                     Label {
                         anchors.right: parent.right
@@ -235,7 +243,7 @@ Rectangle {
                         anchors.rightMargin: 10
                         anchors.topMargin: 1
                         text: typeItem.tags.length
-                        font.pixelSize: 14
+                        font.pixelSize: root.fontSize + 2
                     }
                 }
 
@@ -265,6 +273,8 @@ Rectangle {
                                 width: root.tagWidth
                                 height: root.tagHeight
                                 tagColor: typeItem.typeColor
+                                backgroundColor: root.tagBackgroundColor
+                                textColor: root.tagTextColor
                                 tagText: tagItem.modelData
                             }
                         }
@@ -273,11 +283,11 @@ Rectangle {
                         flow: GridView.FlowLeftToRight
                         clip: true
 
-                        // 标签列表为 0 的类型：条目仍然显示，网格区内给出占位提示
+                        // 标签列表为 0 的类型：条目仍然显示 网格区内给出占位提示
                         Label {
                             anchors.centerIn: parent
-                            text: "（空）"
-                            font.pixelSize: 10
+                            text: "X"
+                            font.pixelSize: root.fontSize
                             color: "#999999"
                             visible: typeItem.tags.length === 0
                         }

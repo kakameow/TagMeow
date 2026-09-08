@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QVariantList>
+#include <memory>
 
 #include "directory_manager.h"
 #include "language_manager.h"
@@ -41,6 +42,8 @@ public slots:
     void onResetTypeColorClicked();
     // DirContainer: 双击某目录 -> getDirFile 取该目录文件 -> 成功刷新 FileContainer
     void onDirDoubleClicked(const QString &path);
+    // LibraryTag: 点击类型名行(展开/收起) -> 回填 typeInput
+    void onLibraryTypeClicked(const QString &type);
     // FileContainer 双击某行: 目录 -> 打开该目录; 文件 -> 打开所在目录并高亮选中(explorer /select)
     void onFileDoubleClicked(const QString &path);
     // refreshButton: 强制刷新(重新校验目录 / 重载标签 / 重载数据库根) 后更新渲染
@@ -61,6 +64,11 @@ public slots:
     void onClientDownloadClicked();
     void onClientClearClicked();
     void onClientDisconnectClicked();
+    // 首次点击 snycWindow(打开同步窗口)时惰性创建 SyncServer/SyncClient 实例(仅创建一次)
+    void onSyncWindowOpened();
+    // 设置窗口: 字号/主题 修改即生效(更新 config_ 并保存 立即刷新渲染)
+    void onFontSizeChanged(); // SpinBox.valueChanged 无参信号 -> 槽内读取控件值
+    void onThemeChanged(int index); // ComboBox.activated(int) 带参信号
 
 signals:
     // SyncServer/SyncClient 工作线程回调 -> 主线程刷新状态栏(跨线程自动排队)
@@ -76,12 +84,13 @@ private:
     void pushDirList();  // path_list_  -> DirContainer.dirList
     void pushTagList();  // type_tags_/type_color_ -> LibraryTag.typeList
     void pushConfig();   // config_ -> setWindow 控件(Version/Port/Magic/TagMode 只读 + 可编辑项)
-    void pushServerQueue(); // s_server_.getTaskQueue() -> syncWindow.serverQueue
-    void pushServerList();  // s_client_.getServers()  -> syncWindow.serverList
+    void pushServerQueue(); // s_server_->getTaskQueue() -> syncWindow.serverQueue
+    void pushServerList();  // s_client_->getServers()  -> syncWindow.serverList
     void setStatusLabel(const char *name, const QString &text); // 写入 gray 状态标签
     void pushUiText();      // language_ -> Main.qml window.uiText 字典(供 QML 文案绑定)
+    void pushTheme();       // config_.theme_ -> window.uiColor/themeNames + 应用调色板
     void pushLanguageList(); // loadLanguageList 结果 -> window.languageNames + 选中当前语言
-    // 取当前语言文本: id 查 language_ 字典, 缺失/语言文件未加载时回退 zh 文案
+    // 取当前语言文本: id 查 language_ 字典 缺失/语言文件未加载时回退 zh 文案
     QString uiText(const char *id, const char *zh) const;
     void doSearch();     // 读取三容器标签 -> 搜索 -> 刷新 FileContainer
     QObject *findObject(const char *name) const;
@@ -92,8 +101,9 @@ private:
     DirectoryConfigManager dm_;
     LanguageManager language_;
     TagServe ts_;
-    SyncServer s_server_;
-    SyncClient s_client_;
+    // SyncServer/SyncClient 惰性实例: 不在构造函数初始化 首次点击 snycWindow 时创建(见 onSyncWindowOpened)
+    std::unique_ptr<SyncServer> s_server_;
+    std::unique_ptr<SyncClient> s_client_;
     TransferData td_;
 
     QObject *root_ = nullptr;
