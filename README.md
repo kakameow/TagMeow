@@ -19,6 +19,7 @@
 git/
 ├── core/      # 核心库（标签/数据库/目录/局域网同步）
 ├── test.cpp   # 命令行测试入口 (test.cpp)
+├── language   # 命令行测试程序的提示语言
 └── windows/   # Qt Quick GUI (CMake)
 ```
 
