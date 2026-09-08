@@ -1,0 +1,274 @@
+{
+    "name": "zh_CN",
+    "version": "1.0",
+    "text": [
+        {
+            "id": "help.all",
+            "str": "\n可用命令: \n  help --显示帮助\n  exit --退出程序\n  language --语言管理\n  root --根目录管理\n  tag --标签管理\n  file --文件管理\n  search --搜索文件\n  server --同步服务器\n  client --同步客户端\n"
+        },
+        {
+            "id": "help.tip",
+            "str": "\n未知命令，输入 help 查看帮助\n"
+        },
+        {
+            "id": "help.language.all",
+            "str": "\n语言管理命令:\n  language list --列出所有可用语言\n  language reload --重新加载语言文件\n  language change <语言名> --切换语言\n"
+        },
+        {
+            "id": "help.language.change",
+            "str": "\n用法: language change <语言名> --切换语言\n"
+        },
+        {
+            "id": "help.language.reload",
+            "str": "\n用法: language reload --重新加载语言文件\n"
+        },
+        {
+            "id": "tip.language.reload",
+            "str": "\n语言文件重新加载成功\n"
+        },
+        {
+            "id": "tip.language.change",
+            "str": "\n语言切换成功\n"
+        },
+        {
+            "id": "help.root.all",
+            "str": "\n根目录管理命令:\n  root reload [路径] --重新加载根目录\n  root add <路径> --添加根目录\n  root remove <路径> --移除根目录\n  root list --列出所有根目录\n"
+        },
+        {
+            "id": "help.root.reload",
+            "str": "\n用法: root reload [路径] --重新加载根目录\n"
+        },
+        {
+            "id": "help.root.add",
+            "str": "\n用法: root add <路径> --添加根目录\n"
+        },
+        {
+            "id": "help.root.remove",
+            "str": "\n用法: root remove <路径> --移除根目录\n"
+        },
+        {
+            "id": "tip.root.reload",
+            "str": "\n根目录重新加载成功\n"
+        },
+        {
+            "id": "tip.root.add",
+            "str": "\n根目录添加成功: "
+        },
+        {
+            "id": "tip.root.remove",
+            "str": "\n根目录移除成功\n"
+        },
+        {
+            "id": "help.tag.all",
+            "str": "\n标签管理命令:\n  tag reload --重新加载标签配置\n  tag save --保存标签配置\n  tag list --列出所有标签\n  tag addtag <类型> <标签1> <标签2> ... --添加标签\n  tag addtype <类型> <颜色> --添加标签类型\n  tag removetag <标签1> <标签2> ... --移除标签\n  tag removetype <类型1> <类型2> ... --移除标签类型\n  tag renametag <旧标签名> <新标签名> --重命名标签\n  tag renametype <旧类型名> <新类型名> --重命名标签类型\n  tag resetcolor <类型> <颜色> --设置类型颜色\n  tag resettype <标签> <新类型> --更改标签的类型\n"
+        },
+        {
+            "id": "help.tag.reload",
+            "str": "\n用法: tag reload --重新加载标签配置\n"
+        },
+        {
+            "id": "help.tag.save",
+            "str": "\n用法: tag save --保存标签配置\n"
+        },
+        {
+            "id": "help.tag.addtag",
+            "str": "\n用法: tag addtag <类型> <标签1> <标签2> ... --添加标签\n"
+        },
+        {
+            "id": "help.tag.addtype",
+            "str": "\n用法: tag addtype <类型> <标签> --添加标签类型\n"
+        },
+        {
+            "id": "help.tag.removetag",
+            "str": "\n用法: tag removetag <标签1> <标签2> ... --移除标签\n"
+        },
+        {
+            "id": "help.tag.removetype",
+            "str": "\n用法: tag removetype <类型1> <类型2> ... --移除标签类型\n"
+        },
+        {
+            "id": "help.tag.renametag",
+            "str": "\n用法: tag renametag <旧标签名> <新标签名> --重命名标签\n"
+        },
+        {
+            "id": "help.tag.renametype",
+            "str": "\n用法: tag renametype <旧类型名> <新类型名> --重命名标签类型\n"
+        },
+        {
+            "id": "help.tag.resetcolor",
+            "str": "\n用法: tag resetcolor <类型> <颜色> --设置类型颜色\n"
+        },
+        {
+            "id": "help.tag.resettype",
+            "str": "\n用法: tag resettype <标签> <新类型> --更改标签的类型\n"
+        },
+        {
+            "id": "tip.tag.addtag",
+            "str": "\n标签添加成功\n"
+        },
+        {
+            "id": "tip.tag.addtype",
+            "str": "\n标签类型添加成功\n"
+        },
+        {
+            "id": "tip.tag.removetag",
+            "str": "\n标签移除成功\n"
+        },
+        {
+            "id": "tip.tag.removetype",
+            "str": "\n标签类型移除成功\n"
+        },
+        {
+            "id": "tip.tag.renametag",
+            "str": "\n标签重命名成功\n"
+        },
+        {
+            "id": "tip.tag.renametype",
+            "str": "\n标签类型重命名成功\n"
+        },
+        {
+            "id": "tip.tag.resetcolor",
+            "str": "\n类型颜色设置成功\n"
+        },
+        {
+            "id": "tip.tag.resettype",
+            "str": "\n标签类型更改成功\n"
+        },
+        {
+            "id": "tip.tag.reload",
+            "str": "\n标签重新加载成功\n"
+        },
+        {
+            "id": "tip.tag.save",
+            "str": "\n标签保存成功\n"
+        },
+        {
+            "id": "help.file.all",
+            "str": "\n文件管理命令:\n  file add <文件路径> <标签...> --为文件添加标签\n  file remove <文件路径> <标签...> --移除文件的标签\n  file convertmode --切换存储模式 (Sidecar/Filename)\n  file info <路径> --显示文件详细信息\n"
+        },
+        {
+            "id": "help.file.add",
+            "str": "\n用法: file add <文件路径> <标签...> --为文件添加标签\n"
+        },
+        {
+            "id": "help.file.remove",
+            "str": "\n用法: file remove <文件路径> <标签...> --移除文件的标签\n"
+        },
+        {
+            "id": "help.file.convertmode",
+            "str": "\n用法: file convertmode --切换存储模式 (Sidecar/Filename)\n"
+        },
+            {
+            "id": "help.file.info",
+            "str": "\n数据库中未找到该文件\n"
+        },
+        {
+            "id": "tip.file.info",
+            "str": "\n文件详细信息:\n"
+        },
+        {
+            "id": "tip.file.convertmode",
+            "str": "\n存储模式转换成功\n"
+        },
+        {
+            "id": "tip.file.add",
+            "str": "\n文件标签添加成功\n"
+        },
+        {
+            "id": "tip.file.remove",
+            "str": "\n文件标签移除成功\n"
+        },
+        {
+            "id": "tip.file.db",
+            "str": "\n数据库更新成功\n"
+        },
+        {
+            "id": "help.search.all",
+            "str": "\n搜索命令:\n  search [--include <标签>] [--exclude <标签>] [--only <标签>] --按标签搜索文件\n"
+        },
+        {
+            "id": "tip.search",
+            "str": "\n搜索结果:\n"
+        },
+        {
+            "id": "tip.language.list",
+            "str": "\n可用语言列表:\n"
+        },
+        {
+            "id": "tip.root.list",
+            "str": "\n受管理根目录列表:\n"
+        },
+        {
+            "id": "tip.tag.list",
+            "str": "\n可用标签列表:\n"
+        },
+        {
+            "id": "help.server.all",
+            "str": "\n服务器命令:\n  server start [名字] --启动服务器\n  server stop --停止服务器\n  server add <目录> --加入目录到发送队列\n  server list --查看待发送目录\n  server disconnect --断开当前客户端\n"
+        },
+        {
+            "id": "help.server.start",
+            "str": "\n用法: server start [名字] --启动服务器\n"
+        },
+        {
+            "id": "tip.server.start",
+            "str": "\n服务器启动成功\n"
+        },
+        {
+            "id": "tip.server.stop",
+            "str": "\n服务器已停止\n"
+        },
+        {
+            "id": "tip.server.add",
+            "str": "\n目录已加入发送队列: "
+        },
+        {
+            "id": "tip.server.list",
+            "str": "\n待发送目录列表:\n"
+        },
+        {
+            "id": "tip.server.disconnect",
+            "str": "\n客户端已断开\n"
+        },
+        {
+            "id": "tip.server.queue_empty",
+            "str": "\n发送队列为空，可继续 server add 加入目录\n"
+        },
+        {
+            "id": "tip.server.session_end",
+            "str": "\n会话结束，重新开始广播\n"
+        },
+        {
+            "id": "help.client.all",
+            "str": "\n客户端命令:\n  client scan --扫描局域网服务器\n  client download <索引> --从指定服务器下载\n  client disconnect --断开当前下载\n  client clear --清除下载记录\n  client list --查看已扫描的服务器\n"
+        },
+        {
+            "id": "tip.client.scan",
+            "str": "\n扫描到的服务器:\n"
+        },
+        {
+            "id": "tip.client.download",
+            "str": "\n下载开始\n"
+        },
+        {
+            "id": "tip.client.disconnect",
+            "str": "\n下载已断开\n"
+        },
+        {
+            "id": "tip.client.clear",
+            "str": "\n下载记录已清除\n"
+        },
+        {
+            "id": "tip.client.list",
+            "str": "\n服务器列表:\n"
+        },
+        {
+            "id": "tip.client.empty",
+            "str": "\n服务器发送队列为空，本次无文件可下载\n"
+        },
+        {
+            "id": "tip.client.done",
+            "str": "\n下载完成\n"
+        }
+    ]
+}
