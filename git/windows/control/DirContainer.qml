@@ -13,9 +13,9 @@ Rectangle {
     property int itemWidth: 192
     property int itemHeight: 32
     property int maxRow: 6
+    property int fontSize: 12
     property var dirList: []
 
-    // 鼠标双击某一条目录项时触发 text 为该条目的 model.text 交给后端处理
     signal dirDoubleClicked(string text)
 
     onDirListChanged: updateDirModel()
@@ -91,10 +91,8 @@ Rectangle {
             width: root.itemWidth
             height: root.itemHeight
 
-            // 悬停状态：鼠标移入/移出该条时切换（驱动文字下划线动画）
             property bool hovered: false
 
-            // 悬停 + 双击：双击发送 text 给后端
             MouseArea {
                 anchors.fill: parent
                 hoverEnabled: true
@@ -132,7 +130,7 @@ Rectangle {
                         text: dirItem.model.text
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
-                        font.pixelSize: 12
+                        font.pixelSize: root.fontSize
                         elide: Text.ElideRight
                         clip: true
                     }

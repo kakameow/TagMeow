@@ -8,7 +8,6 @@ ConfigLoader::ConfigLoader()
 {
     if (!loadConfig())
     {
-        // 配置文件缺失/损坏: 建目录并写出默认配置 供用户在设置窗口修改
         saveConfig();
     }
 }
@@ -160,6 +159,50 @@ bool ConfigLoader::loadConfig(std::filesystem::path path_utf8)
             }
         }
 
+        if (config_json.contains("FontSize"))
+        {
+            if (config_json["FontSize"].is_number_integer())
+            {
+                int fs = config_json["FontSize"].get<int>();
+                if (fs >= 6 && fs <= 48)
+                {
+                    font_size_ = fs;
+                }
+                else
+                {
+                    field_errors += "- FontSize: out of range 6-48 (" + std::to_string(fs) + ")\n";
+                    has_error = true;
+                }
+            }
+            else
+            {
+                field_errors += "- FontSize: type error using default value\n";
+                has_error = true;
+            }
+        }
+
+        if (config_json.contains("Theme"))
+        {
+            if (config_json["Theme"].is_number_integer())
+            {
+                int th = config_json["Theme"].get<int>();
+                if (th >= 0)
+                {
+                    theme_ = th;
+                }
+                else
+                {
+                    field_errors += "- Theme: cannot be negative (" + std::to_string(th) + ")\n";
+                    has_error = true;
+                }
+            }
+            else
+            {
+                field_errors += "- Theme: type error using default value\n";
+                has_error = true;
+            }
+        }
+
         if (has_error)
         {
             error_string_ = "[warning]:\n" + field_errors;
@@ -216,6 +259,8 @@ bool ConfigLoader::saveConfig(std::filesystem::path path_utf8)
         default_config["DownloadPath"] = download_path_.string();
         default_config["BroadcastPort"] = broadcast_port_;
         default_config["BroadcastMagicWord"] = broadcast_magic_word_;
+        default_config["FontSize"] = font_size_;
+        default_config["Theme"] = theme_;
 
         std::ofstream file(path_utf8);
         if (file.is_open())
