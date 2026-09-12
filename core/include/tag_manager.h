@@ -94,13 +94,18 @@ public:
     bool convertMode(const std::filesystem::path &file_path_utf8, StoreMode from_mode, StoreMode to_mode, bool keep_old = false);
     // 删除文件在指定模式下存储的标签（Filename 重命名 / Sidecar 删文件）
     bool removeModeTags(const std::filesystem::path &file_path_utf8, StoreMode mode);
+    // 按指定模式读取标签(严格按该模式 不兜底)
     std::vector<std::string> extractTags(const std::filesystem::path &file_path_utf8, StoreMode mode) const;
+    // 按默认模式读取标签 当前模式为空时回退另一模式兜底(目录固定 Sidecar 形式)
     std::vector<std::string> extractTags(const std::filesystem::path &file_path_utf8) const;
 
     // 根据根目录构建侧车文件的完整路径
     static std::filesystem::path buildSidecarPath(const std::filesystem::path &file_path_utf8);
     // 构建"无标签"侧车文件路径 先去除文件名中的标签块再定位侧车
     static std::filesystem::path buildCleanSidecarPath(const std::filesystem::path &file_path_utf8);
+    // 计算 Filename 模式下写入这些标签后的文件路径(不实际改名)
+    // 供上层在加/删标签前预知重命名结果(用于同步数据库/前端路径)
+    static std::filesystem::path buildTaggedPath(const std::filesystem::path &file_path_utf8, const std::vector<std::string> &tags);
 
 private:
     StoreMode default_mode_;

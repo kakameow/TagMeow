@@ -731,9 +731,33 @@ std::vector<std::string> TagFileManager::extractTags(const std::filesystem::path
     }
 }
 
+// 默认模式读取: 当前模式读不到标签时回退另一模式(兜底)
+// 场景: Filename 模式读取时文件尚未写入标签块但存在 sidecar; 或 Sidecar 模式读取时
+//       文件是历史 Filename 命名(名字里带标签)。显式传 mode 的重载保持严格不兜底。
 std::vector<std::string> TagFileManager::extractTags(const std::filesystem::path &file_path_utf8) const
 {
-    return extractTags(file_path_utf8, default_mode_);
+    std::vector<std::string> tags = extractTags(file_path_utf8, default_mode_);
+    if (!tags.empty())
+    {
+        return tags;
+    }
+
+    const StoreMode other_mode = (default_mode_ == StoreMode::Sidecar) ? StoreMode::Filename : StoreMode::Sidecar;
+    if (other_mode == StoreMode::Filename)
+    {
+        std::error_code ec;
+        if (std::filesystem::is_directory(file_path_utf8, ec))
+        {
+            return tags; // 目录没有 Filename 形式 不必回退
+        }
+    }
+
+    std::vector<std::string> backup = extractTags(file_path_utf8, other_mode);
+    if (!backup.empty())
+    {
+        return backup;
+    }
+    return tags; // 两种模式都没有 -> 返回空
 }
 
 std::filesystem::path TagFileManager::buildSidecarPath(const std::filesystem::path &file_path_utf8)
@@ -746,6 +770,17 @@ std::filesystem::path TagFileManager::buildSidecarPath(const std::filesystem::pa
 std::filesystem::path TagFileManager::buildCleanSidecarPath(const std::filesystem::path &file_path_utf8)
 {
     return buildSidecarPath(removeFilenameTagsPath(file_path_utf8));
+}
+
+// 与 writeTagsToFile 的 Filename 分支保持同一规则: 去掉旧标签块后按 tags 重新拼接
+std::filesystem::path TagFileManager::buildTaggedPath(const std::filesystem::path &file_path_utf8, const std::vector<std::string> &tags)
+{
+    std::filesystem::path parent = file_path_utf8.parent_path();
+    std::string stem = file_path_utf8.stem().u8string();
+    std::string ext = file_path_utf8.extension().u8string();
+    std::string clean_stem = removeTagsFromFilename(stem);
+    std::string new_stem = formatFilenameWithTags(clean_stem, tags);
+    return parent / (new_stem + ext);
 }
 
 std::vector<std::string> TagFileManager::parseFromFilename(const std::filesystem::path &file_name)
