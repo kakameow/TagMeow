@@ -288,19 +288,45 @@ bool TagServe::addFileTag(const std::filesystem::path &file_path_utf8, const std
         }
     }
 
-    if (tag_list_.hasTag(tag))
+    if (!tag_list_.hasTag(tag))
     {
-        return tag_file_.addTag(file_path_utf8, tag);
+        error_string_ = "[warning] tag or path does not exist";
+        return false;
     }
 
-    error_string_ = "[warning] tag or path does not exist";
-    return false;
+    // Filename 模式下标签写在文件名里 -> 先算出改名后的路径
+    std::filesystem::path new_path = file_path_utf8;
+    if (tag_file_.getDefaultMode() == TagFileManager::StoreMode::Filename && !std::filesystem::is_directory(file_path_utf8))
+    {
+        // 预判必须与写入同源: 严格按当前默认模式读取(不兜底) 否则算出的名字与实际写入不符
+        auto tags = tag_file_.extractTags(file_path_utf8, tag_file_.getDefaultMode());
+        if (std::find(tags.begin(), tags.end(), tag) == tags.end())
+        {
+            tags.push_back(tag);
+        }
+        new_path = TagFileManager::buildTaggedPath(file_path_utf8, tags);
+    }
+
+    if (!tag_file_.addTag(file_path_utf8, tag))
+    {
+        error_string_ = "[warning] addition failed";
+        return false;
+    }
+
+    // 数据库按路径索引: 以磁盘实际状态判断是否改名后同步(同一把锁内 保证一致)
+    syncAfterTagWriteNoLock(file_path_utf8, new_path);
+
+    error_string_.clear();
+    return true;
 }
 
 bool TagServe::addFileTag(const std::filesystem::path &file_path_utf8, const std::vector<std::string> &tags)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     size_t err = 0;
+
+    const bool rename_mode = (tag_file_.getDefaultMode() == TagFileManager::StoreMode::Filename) && !std::filesystem::is_directory(file_path_utf8);
+    std::filesystem::path cur_path = file_path_utf8;
 
     for (auto tag : tags)
     {
@@ -323,12 +349,24 @@ bool TagServe::addFileTag(const std::filesystem::path &file_path_utf8, const std
 
         if (tag_list_.hasTag(tag))
         {
-            if (!tag_file_.addTag(file_path_utf8, tag))
+            std::filesystem::path next_path = cur_path;
+            if (rename_mode)
+            {
+                auto cur_tags = tag_file_.extractTags(cur_path, tag_file_.getDefaultMode());
+                if (std::find(cur_tags.begin(), cur_tags.end(), tag) == cur_tags.end())
+                {
+                    cur_tags.push_back(tag);
+                }
+                next_path = TagFileManager::buildTaggedPath(cur_path, cur_tags);
+            }
+
+            if (!tag_file_.addTag(cur_path, tag))
             {
                 err++;
                 error_string_ = "[warning] add failed";
                 continue;
             }
+            cur_path = next_path;
         }
     }
 
@@ -338,6 +376,8 @@ bool TagServe::addFileTag(const std::filesystem::path &file_path_utf8, const std
         return false;
     }
 
+    syncAfterTagWriteNoLock(file_path_utf8, cur_path);
+
     error_string_.clear();
     return true;
 }
@@ -345,13 +385,72 @@ bool TagServe::addFileTag(const std::filesystem::path &file_path_utf8, const std
 bool TagServe::removeFileTag(const std::filesystem::path &file_path_utf8, const std::string &tag)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    return tag_file_.removeTag(file_path_utf8, tag);
+
+    std::filesystem::path new_path = file_path_utf8;
+    if (tag_file_.getDefaultMode() == TagFileManager::StoreMode::Filename && !std::filesystem::is_directory(file_path_utf8))
+    {
+        auto tags = tag_file_.extractTags(file_path_utf8, tag_file_.getDefaultMode());
+        auto it = std::find(tags.begin(), tags.end(), tag);
+        if (it != tags.end())
+        {
+            tags.erase(it);
+        }
+        new_path = TagFileManager::buildTaggedPath(file_path_utf8, tags);
+    }
+
+    if (!tag_file_.removeTag(file_path_utf8, tag))
+    {
+        error_string_ = "[warning] removal failed";
+        return false;
+    }
+
+    syncAfterTagWriteNoLock(file_path_utf8, new_path);
+
+    error_string_.clear();
+    return true;
 }
 
 bool TagServe::removeFileTag(const std::filesystem::path &file_path_utf8, const std::vector<std::string> &tags)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    return tag_file_.removeTag(file_path_utf8, tags);
+    size_t err = 0;
+
+    const bool rename_mode = (tag_file_.getDefaultMode() == TagFileManager::StoreMode::Filename) && !std::filesystem::is_directory(file_path_utf8);
+    std::filesystem::path cur_path = file_path_utf8;
+
+    for (const auto &tag : tags)
+    {
+        std::filesystem::path next_path = cur_path;
+        if (rename_mode)
+        {
+            auto cur_tags = tag_file_.extractTags(cur_path, tag_file_.getDefaultMode());
+            auto it = std::find(cur_tags.begin(), cur_tags.end(), tag);
+            if (it != cur_tags.end())
+            {
+                cur_tags.erase(it);
+            }
+            next_path = TagFileManager::buildTaggedPath(cur_path, cur_tags);
+        }
+
+        if (!tag_file_.removeTag(cur_path, tag))
+        {
+            err++;
+            error_string_ = "[warning] removal failed";
+            continue;
+        }
+        cur_path = next_path;
+    }
+
+    if (err > 0)
+    {
+        error_string_ = "[warning] " + std::to_string(err) + " tag(s) remove failed";
+        return false;
+    }
+
+    syncAfterTagWriteNoLock(file_path_utf8, cur_path);
+
+    error_string_.clear();
+    return true;
 }
 
 bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::StoreMode to_mode, bool keep_old)
@@ -420,6 +519,7 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
             error_string_.clear();
         }
         tag_file_.setDefaultMode(to_mode);
+        rebuildRootsNoLock(); // 转换会改写文件名 -> 数据库整根重建索引
         return true;
     }
 
@@ -474,6 +574,7 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
     }
 
     tag_file_.setDefaultMode(to_mode);
+    rebuildRootsNoLock(); // 转换会改写文件名 -> 数据库整根重建索引
     error_string_.clear();
     return true;
 }
@@ -533,9 +634,13 @@ bool TagServe::updateRoots()
 bool TagServe::updateFile(const std::filesystem::path &file_path_utf8)
 {
     std::lock_guard<std::mutex> lock(mutex_);
+    return syncFileToDBNoLock(file_path_utf8);
+}
 
-    if (!std::filesystem::exists(file_path_utf8)
-        || (!std::filesystem::is_regular_file(file_path_utf8) && !std::filesystem::is_directory(file_path_utf8)))
+// 内部无锁版本(调用方已持有 mutex_): 读取文件元数据与标签后写入数据库
+bool TagServe::syncFileToDBNoLock(const std::filesystem::path &file_path_utf8)
+{
+    if (!std::filesystem::exists(file_path_utf8) || (!std::filesystem::is_regular_file(file_path_utf8) && !std::filesystem::is_directory(file_path_utf8)))
     {
         error_string_ = "[warning] Path does not exist or is not a regular file/directory: " + file_path_utf8.u8string();
         return false;
@@ -571,7 +676,6 @@ bool TagServe::updateFile(const std::filesystem::path &file_path_utf8)
                 rel_path = rel.generic_u8string();
             }
         }
-
     }
 
     int64_t sidecar_mtime = 0;
@@ -608,6 +712,71 @@ bool TagServe::updateFile(const std::filesystem::path &file_path_utf8)
 
     error_string_.clear();
     return true;
+}
+
+// 内部无锁版本: 用当前 root_list_ 重建数据库索引(updateDirectory 会先删同前缀旧行再重扫)
+bool TagServe::rebuildRootsNoLock()
+{
+    auto extractor = [this](const std::filesystem::path &p)
+    {
+        return tag_file_.extractTags(p);
+    };
+
+    size_t err = 0;
+    for (const auto &dir : root_list_)
+    {
+        if (!db_.updateDirectory(dir, extractor))
+        {
+            err++;
+        }
+    }
+
+    db_.clearRepeat();
+    db_.cleanupInvalid();
+
+    if (err > 0)
+    {
+        error_string_ = "[warning] " + std::to_string(err) + " root(s) failed to update";
+        return false;
+    }
+
+    error_string_.clear();
+    return true;
+}
+
+const std::filesystem::path &TagServe::getLastFilePath() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return last_file_path_;
+}
+
+// 标签写入成功后同步数据库(调用方已持锁)
+// 以磁盘实际状态为准: 预测的改名路径存在 -> 删旧行(外键级联标签) + 写新行
+// 否则说明没有发生改名(空操作: 标签已存在/不存在, 或文件名与规则不一致) -> 原地同步旧路径
+// 注意: 不能只看预测路径不同就删旧行, 否则空操作时会误删数据库行
+void TagServe::syncAfterTagWriteNoLock(const std::filesystem::path &old_path, const std::filesystem::path &predicted_path)
+{
+    std::error_code ec;
+    const bool renamed = (predicted_path != old_path) && std::filesystem::exists(predicted_path, ec) && !ec;
+
+    if (renamed)
+    {
+        db_.removeFile(old_path);
+        syncFileToDBNoLock(predicted_path);
+        last_file_path_ = predicted_path;
+        return;
+    }
+
+    if (std::filesystem::exists(old_path, ec) && !ec)
+    {
+        syncFileToDBNoLock(old_path);
+        last_file_path_ = old_path;
+        return;
+    }
+
+    // 两个路径都不存在: 保留旧行不删(避免丢数据) 仅记录异常
+    last_file_path_ = old_path;
+    error_string_ = "[warning] tag written but the file path state is unexpected: " + old_path.u8string();
 }
 
 bool TagServe::removeFile(const std::filesystem::path &path_utf8)

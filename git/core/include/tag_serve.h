@@ -79,6 +79,10 @@ public:
     std::vector<table::FileInfo> searchByTags(const FileDatabase::SearchOptions &opts) const;
     std::optional<table::FileInfo> getFileInfo(const std::filesystem::path &path) const;
 
+    // 最近一次文件标签操作后的真实路径
+    // Filename 模式下加/删标签会重命名文件 该值与传入路径可能不同(数据库已按此路径同步)
+    const std::filesystem::path &getLastFilePath() const;
+
     // TagServe 错误信息
     std::string getLastError() const;
     // FileDatabase 错误信息
@@ -89,10 +93,18 @@ public:
     std::string getFileError() const;
 
 private:
+    // 内部无锁版本: 把单个文件当前状态写入数据库(updateFile 加锁后调用 避免重入死锁)
+    bool syncFileToDBNoLock(const std::filesystem::path &file_path_utf8);
+    // 内部无锁版本: 用当前 root_list_ 重建数据库索引(模式转换改名后调用)
+    bool rebuildRootsNoLock();
+    // 内部无锁版本: 标签写入成功后同步数据库(以磁盘实际状态判断是否发生改名)
+    void syncAfterTagWriteNoLock(const std::filesystem::path &old_path, const std::filesystem::path &predicted_path);
+
     FileDatabase db_;
     TagLibrary tag_list_;
     TagFileManager tag_file_;
     std::vector<std::filesystem::path> root_list_;
+    std::filesystem::path last_file_path_; // 最近一次文件标签操作后的真实路径
     mutable std::string error_string_;
     mutable std::mutex mutex_;
 };
