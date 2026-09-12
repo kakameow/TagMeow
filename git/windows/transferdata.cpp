@@ -1,5 +1,6 @@
 #include "transferdata.h"
 
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 
@@ -80,17 +81,56 @@ void TransferData::refreshTagLibrary()
     type_color_ = ts_->getTypeColor();
 }
 
+// 从数据库按路径刷新 path_tags_
+// filename 模式加/删标签会重命名文件(传入的可能是旧路径):
+//   1) 先按传入路径查库 2) 查不到则用 TagServe::getLastFilePath() 的真实路径再查
+//   3) 命中时把新路径"原位顶替"旧路径 -> UI 行顺序保持不变(不追加到末尾/不重排)
 void TransferData::refreshFileTags(const std::string &path)
 {
     if (!ts_)
     {
         return;
     }
+
     auto info = ts_->getFileInfo(std::filesystem::path(path));
-    if (info)
+    if (!info)
     {
-        path_tags_[info->path_] = info->tags_;
+        const auto &last = ts_->getLastFilePath();
+        const std::string last_str = last.generic_u8string();
+        if (!last_str.empty() && last_str != path)
+        {
+            info = ts_->getFileInfo(last);
+        }
     }
+
+    if (!info)
+    {
+        // 库中已无该路径: 清掉映射与顺序表里的残留
+        path_tags_.erase(path);
+        file_order_.erase(std::remove(file_order_.begin(), file_order_.end(), path), file_order_.end());
+        return;
+    }
+
+    const std::string real = info->path_;
+    if (real != path)
+    {
+        auto it = std::find(file_order_.begin(), file_order_.end(), path);
+        if (it != file_order_.end())
+        {
+            *it = real; // 原位置顶替: 顺序不变
+        }
+        else
+        {
+            file_order_.push_back(real);
+        }
+        path_tags_.erase(path);
+    }
+    else if (std::find(file_order_.begin(), file_order_.end(), real) == file_order_.end())
+    {
+        file_order_.push_back(real);
+    }
+
+    path_tags_[real] = info->tags_;
 }
 
 bool TransferData::getSearch()
@@ -107,9 +147,11 @@ bool TransferData::getSearch()
 
     const auto files = ts_->searchByTags(opts);
     path_tags_.clear();
+    file_order_.clear();
     for (const auto &f : files)
     {
         path_tags_[f.path_] = f.tags_;
+        file_order_.push_back(f.path_); // 保留数据库返回顺序作为显示顺序
     }
     return true;
 }
@@ -130,6 +172,7 @@ bool TransferData::getDirFile(const std::string &path)
     // 从数据库取该目录前缀下的全部文件（统一按规范化绝对路径比较）
     const auto files = ts_->searchByTags({});
     path_tags_.clear();
+    file_order_.clear();
     const std::string prefix = std::filesystem::absolute(p).lexically_normal().generic_string() + "/";
     for (const auto &f : files)
     {
@@ -137,6 +180,7 @@ bool TransferData::getDirFile(const std::string &path)
         if (fp.rfind(prefix, 0) == 0)
         {
             path_tags_[f.path_] = f.tags_;
+            file_order_.push_back(f.path_);
         }
     }
     return true;
@@ -246,7 +290,8 @@ bool TransferData::addTagToFile(const std::string &path, const std::string &tag)
     {
         return false;
     }
-    ts_->updateFile(std::filesystem::path(path));
+    // 数据库同步(filename 模式会改名 -> 删旧行/写新行)由 TagServe 内部完成
+    // 这里传原路径: refreshFileTags 会按真实路径解析并清掉旧键
     refreshFileTags(path);
     return true;
 }
@@ -257,7 +302,7 @@ bool TransferData::removeTagToFile(const std::string &path, const std::string &t
     {
         return false;
     }
-    ts_->updateFile(std::filesystem::path(path));
+    // 数据库同步由 TagServe 内部完成; 传原路径由 refreshFileTags 解析真实路径并清旧键
     refreshFileTags(path);
     return true;
 }

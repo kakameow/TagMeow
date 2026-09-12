@@ -62,6 +62,8 @@ public:
     std::unordered_map<std::string, std::vector<std::string>> type_tags_;
     std::unordered_map<std::string, std::string> type_color_;
     std::unordered_map<std::string, std::vector<std::string>> path_tags_;
+    // path_tags_ 的显示顺序(filename 模式改名时原位顶替 保证 UI 行顺序稳定)
+    std::vector<std::string> file_order_;
 
 private:
     void refreshDirList();     // 从 DirectoryConfigManager 刷新 path_list_
