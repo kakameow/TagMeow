@@ -47,13 +47,16 @@ void Bridge::pushFileList()
     {
         return;
     }
+
     QVariantList list;
-    for (const auto &kv : td_.path_tags_)
+    std::set<std::string> pushed;
+
+    const auto appendRow = [this, &list, &pushed](const std::string &path, const std::vector<std::string> &tagList)
     {
         QVariantMap item;
-        item.insert("text", QString::fromStdString(kv.first));
+        item.insert("text", QString::fromStdString(path));
         QVariantList tags;
-        for (const auto &t : kv.second)
+        for (const auto &t : tagList)
         {
             QVariantMap tag;
             tag.insert("text", QString::fromStdString(t));
@@ -62,7 +65,27 @@ void Bridge::pushFileList()
         }
         item.insert("tags", tags);
         list << item;
+        pushed.insert(path);
+    };
+
+    // 按 TransferData 维护的显示顺序渲染(filename 模式改名不会打乱行顺序)
+    for (const auto &path : td_.file_order_)
+    {
+        auto it = td_.path_tags_.find(path);
+        if (it != td_.path_tags_.end())
+        {
+            appendRow(it->first, it->second);
+        }
     }
+    // 兜底: 顺序表里没有的键(理论上不会出现)
+    for (const auto &kv : td_.path_tags_)
+    {
+        if (pushed.find(kv.first) == pushed.end())
+        {
+            appendRow(kv.first, kv.second);
+        }
+    }
+
     QQmlProperty(fileContainer_, "fileList").write(list);
     qInfo() << "[refresh] FileContainer fileList:" << list.size();
 }
@@ -161,7 +184,9 @@ void Bridge::onFileTagAdded(const QString &path, const QString &tag)
     if (td_.addTagToFile(path.toStdString(), tag.toStdString()))
     {
         qInfo() << "[fileTagAdded] ok" << path << tag;
-        //pushFileList();
+        // 数据库同步(含 filename 模式改名)由 TagServe 完成; 这里原地重绘
+        // (refreshFileTags 已把新路径顶替旧路径 -> 行顺序保持不变)
+        pushFileList();
     }
     else
     {
@@ -174,7 +199,7 @@ void Bridge::onFileTagRemoved(const QString &path, const QString &tag)
     if (td_.removeTagToFile(path.toStdString(), tag.toStdString()))
     {
         qInfo() << "[fileTagRemoved] ok" << path << tag;
-        //pushFileList();
+        pushFileList();
     }
     else
     {
@@ -184,15 +209,18 @@ void Bridge::onFileTagRemoved(const QString &path, const QString &tag)
 
 void Bridge::onFileTagChanged(const QString &path, const QString &oldTag, const QString &newTag)
 {
-    if (td_.removeTagToFile(path.toStdString(), oldTag.toStdString()) && td_.addTagToFile(path.toStdString(), newTag.toStdString()))
+    // filename 模式下删除会改名 -> 用 TagServe 回报的真实路径继续加新标签
+    if (td_.removeTagToFile(path.toStdString(), oldTag.toStdString()))
     {
-        qInfo() << "[fileTagChanged] ok" << path;
-        pushFileList();
+        const QString cur = QString::fromStdString(ts_.getLastFilePath().generic_u8string());
+        if (td_.addTagToFile(cur.toStdString(), newTag.toStdString()))
+        {
+            qInfo() << "[fileTagChanged] ok" << path << "->" << cur;
+            pushFileList();
+            return;
+        }
     }
-    else
-    {
-        qWarning() << "[fileTagChanged] failed" << path;
-    }
+    qWarning() << "[fileTagChanged] failed" << path;
 }
 
 void Bridge::onAddDirClicked()
@@ -544,7 +572,11 @@ void Bridge::onConvertModeConfirmed()
         config_.tag_mode_ = to;
         config_.saveConfig();
         qInfo() << "[convertmode] ok ->" << (to == TagFileManager::StoreMode::Filename ? "Filename" : "Sidecar");
+        // 数据库重建索引已由 TagServe::convertMode 内部完成(转换会改写文件名)
         pushConfig(); // setWindow 的 TagMode 只读项同步新模式
+        doSearch();   // 路径可能已变化 -> 按当前搜索条件刷新文件列表
+        pushDirList();
+        pushTagList();
     }
     else
     {
