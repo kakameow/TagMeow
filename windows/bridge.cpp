@@ -584,6 +584,48 @@ void Bridge::onConvertModeConfirmed()
     }
 }
 
+// 导出标签库: FileDialog 选好的目标位置(file:// URL) -> 复制 tag.json
+void Bridge::onExportFileChosen(const QString &url)
+{
+    const QString path = QUrl(url).toLocalFile();
+    if (path.isEmpty())
+    {
+        qWarning() << "[export] 无效路径:" << url;
+        return;
+    }
+
+    if (td_.exportTagList(path.toStdString()))
+    {
+        qInfo() << "[export] ok ->" << path;
+    }
+    else
+    {
+        qWarning() << "[export] failed ->" << path;
+    }
+}
+
+// 导入标签库: FileDialog 选好的文件(file:// URL) -> TagServe::mergeTags 合并并落盘
+void Bridge::onImportFileChosen(const QString &url)
+{
+    const QString path = QUrl(url).toLocalFile();
+    if (path.isEmpty())
+    {
+        qWarning() << "[import] 无效路径:" << url;
+        return;
+    }
+
+    if (td_.importTagList(path.toStdString()))
+    {
+        qInfo() << "[import] ok ->" << path;
+        pushTagList();  // 标签库变化
+        pushFileList(); // 标签颜色可能变化 -> 文件行重绘
+    }
+    else
+    {
+        qWarning() << "[import] failed ->" << path << ts_.getTagError().c_str();
+    }
+}
+
 void Bridge::setStatusLabel(const char *name, const QString &text)
 {
     if (QObject *o = findObject(name))
@@ -624,6 +666,8 @@ const TextItem kUiTextTable[] = {
     { "btn.removeTag", "删除标签" },
     { "btn.resetColor", "更新类型颜色" },
     { "btn.syncWindow", "打开局域网文件同步界面" },
+    { "btn.export", "导出标签库"},
+    { "btn.import", "导入标签库"},
     { "settings.version", "版本:" },
     { "settings.port", "广播端口:" },
     { "settings.magic", "魔术字:" },
@@ -633,6 +677,7 @@ const TextItem kUiTextTable[] = {
     { "settings.language", "语言:" },
     { "settings.fontSize", "字号:" },
     { "settings.theme", "主题:" },
+    { "settings.tags", "(类型标签全局唯一 合并可能改变分类):"},
     { "theme.light", "浅色" },
     { "theme.dark", "深色" },
     { "settings.restartTip", "某些配置可能需要重启后生效点击确认保存并关闭程序" }, // 原为带换行的版本，这里合并为一行（但 JSON 中是单行，去掉了换行）
@@ -1193,6 +1238,12 @@ void Bridge::bindTo(QObject *root)
     if (QObject *combo = findObject("themeCombo"))
     {
         QObject::connect(combo, SIGNAL(activated(int)), this, SLOT(onThemeChanged(int)));
+    }
+    // 设置窗口 标签库 导出/导入: QML FileDialog 选中后经 window 信号回传路径
+    if (root_)
+    {
+        QObject::connect(root_, SIGNAL(exportFileChosen(QString)), this, SLOT(onExportFileChosen(QString)));
+        QObject::connect(root_, SIGNAL(importFileChosen(QString)), this, SLOT(onImportFileChosen(QString)));
     }
 
     // 初始填充（后端磁盘数据 -> 控件 + 语言字典/主题 -> window）
