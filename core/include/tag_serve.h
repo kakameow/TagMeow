@@ -71,6 +71,11 @@ public:
     void setDefaultMode(const TagFileManager::StoreMode mode);
     const TagFileManager::StoreMode getDefaultMode() const;
 
+    // 标签库 导入: 合并另一个 tag.json(类型/标签全局唯一 只补充本库没有的) 成功后立即写盘
+    bool mergeTags(const std::filesystem::path &tag_json_path_utf8);
+    // 标签库文件路径(导出时复制该文件到用户选择的位置)
+    std::filesystem::path getTagPath() const;
+
     // 数据库
     // 从默认目录列表获取数据更新数据库 root_list_
     bool updateRoots();

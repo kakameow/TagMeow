@@ -35,6 +35,11 @@ public:
 
     bool loadTagsFromFile(const std::filesystem::path &file_path_utf8);
     bool saveTagsToFile() const;
+    // 合并标签 如果本类的 tag_json 不存在或者为空 直接用 tag_json_path_utf8 内容替换数据
+    // 一 比较 type 由于全局唯一 只添加本类没有的
+    // 二 比较 tag 将本类没有的 tag 添加到 tag 对应的 type 下面
+    // 三 将多余的数据抛弃 理论上说不会出现
+    bool mergeTags(const std::filesystem::path &tag_json_path_utf8);
 
     static bool isValidHexColor(const std::string &str);
 
