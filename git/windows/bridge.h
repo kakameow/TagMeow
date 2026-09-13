@@ -54,6 +54,9 @@ public slots:
     void onSaveConfigClicked();
     // optionsDialog 确认(Yes): 镜像 CLI convertmode —— 翻转默认存储模式并转换, 成功后更新 config_ 并保存
     void onConvertModeConfirmed();
+    // 设置窗口 导出/导入标签库: QML FileDialog 选好的位置(file:// URL)
+    void onExportFileChosen(const QString &url);
+    void onImportFileChosen(const QString &url);
     // syncWindow 服务器(分享): start/stop/add目录/disconnect
     void onServerStartClicked();
     void onServerStopClicked();

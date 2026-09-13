@@ -25,6 +25,10 @@ ApplicationWindow {
     // 可用主题颜色列表
     property var themeNames: []
 
+    // 标签库 导出/导入: FileDialog 选中后由 Bridge 处理(导出复制 tag.json / 导入 mergeTags 合并)
+    signal exportFileChosen(string url)
+    signal importFileChosen(string url)
+
     // 这个 Item 作为拖拽元素的临时父级 所有放到这里的元素都会显示在最顶层
     Item {
         id: dragOverlay
@@ -35,12 +39,12 @@ ApplicationWindow {
 
     Window {
         id: setWindow
-        width: 500
-        height: 400
-        minimumWidth: 500
-        maximumWidth: 500
-        minimumHeight: 400
-        maximumHeight: 400
+        width: 600
+        height: 500
+        minimumWidth: 600
+        maximumWidth: 600
+        minimumHeight: 500
+        maximumHeight: 500
         title: ""
         modality: Qt.ApplicationModal
         visible: false
@@ -165,6 +169,33 @@ ApplicationWindow {
                 font.pixelSize: window.fontSize
             }
 
+
+
+            Label {
+                text: window.uiText["settings.tags"]
+                font.pixelSize: window.fontSize
+            }
+            Row {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: 20
+
+                Button {
+                    text: window.uiText["btn.export"]
+                    font.pixelSize: window.fontSize
+                    onClicked: {
+                        exportTagsDialog.open()
+                    }
+                }
+
+                Button {
+                    text: window.uiText["btn.import"]
+                    font.pixelSize: window.fontSize
+                    onClicked: {
+                        importTagsDialog.open()
+                    }
+                }
+            }
+
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
@@ -173,7 +204,6 @@ ApplicationWindow {
                 color: window.uiColor["textHint"]
                 font.pixelSize: window.fontSize
             }
-
             Row {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 20
@@ -195,6 +225,25 @@ ApplicationWindow {
                     }
                 }
             }
+        }
+
+        // 标签库 导出: 选择保存位置后回传路径给 Bridge(复制 tag.json)
+        FileDialog {
+            id: exportTagsDialog
+            title: window.uiText["btn.export"]
+            fileMode: FileDialog.SaveFile
+            nameFilters: ["JSON (*.json)"]
+            defaultSuffix: "json"
+            onAccepted: window.exportFileChosen(selectedFile)
+        }
+
+        // 标签库 导入: 选择 json 文件后回传路径给 Bridge(TagServe::mergeTags 合并)
+        FileDialog {
+            id: importTagsDialog
+            title: window.uiText["btn.import"]
+            fileMode: FileDialog.OpenFile
+            nameFilters: ["JSON (*.json)"]
+            onAccepted: window.importFileChosen(selectedFile)
         }
     }
 

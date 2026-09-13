@@ -284,6 +284,53 @@ bool TransferData::removeType(const std::string &type)
     return true;
 }
 
+// 导出标签库: 把当前 tag.json 复制一份到用户选择的位置(目录自动创建 同名直接覆盖)
+bool TransferData::exportTagList(const std::string &dest_path_utf8)
+{
+    if (isBlank(dest_path_utf8) || !ts_)
+    {
+        return false;
+    }
+
+    const std::filesystem::path src = ts_->getTagPath();
+    std::error_code ec;
+    if (src.empty() || !std::filesystem::exists(src, ec) || ec)
+    {
+        return false;
+    }
+
+    std::filesystem::path dest(dest_path_utf8);
+    if (dest.extension().empty())
+    {
+        dest += ".json"; // 未写扩展名时补 .json
+    }
+
+    if (!dest.parent_path().empty())
+    {
+        std::filesystem::create_directories(dest.parent_path(), ec);
+    }
+
+    std::filesystem::copy_file(src, dest, std::filesystem::copy_options::overwrite_existing, ec);
+    return !ec;
+}
+
+// 导入标签库: 合并另一个 tag.json(类型/标签全局唯一 只补充本库没有的) 成功后刷新库数据
+bool TransferData::importTagList(const std::string &src_path_utf8)
+{
+    if (isBlank(src_path_utf8) || !ts_)
+    {
+        return false;
+    }
+
+    if (!ts_->mergeTags(std::filesystem::path(src_path_utf8)))
+    {
+        return false;
+    }
+
+    refreshTagLibrary();
+    return true;
+}
+
 bool TransferData::addTagToFile(const std::string &path, const std::string &tag)
 {
     if (isBlank(path) || isBlank(tag) || !ts_ || !ts_->addFileTag(std::filesystem::path(path), tag))

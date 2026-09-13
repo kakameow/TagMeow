@@ -44,6 +44,10 @@ public:
     bool removeTag(const std::string &tag);
     bool removeType(const std::string &type);
 
+    // 标签库 导出/导入
+    bool exportTagList(const std::string &dest_path_utf8); // 复制 tag.json 到用户选择位置
+    bool importTagList(const std::string &src_path_utf8);  // TagServe::mergeTags 合并并落盘
+
     // 文件标签（path_tags_）
     bool addTagToFile(const std::string &path, const std::string &tag);
     bool removeTagToFile(const std::string &path, const std::string &tag);
