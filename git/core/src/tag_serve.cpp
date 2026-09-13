@@ -591,6 +591,34 @@ const TagFileManager::StoreMode TagServe::getDefaultMode() const
     return tag_file_.getDefaultMode();
 }
 
+// 标签库导入: 合并另一个 tag.json(类型/标签全局唯一 只补充本库没有的) 成功后立即写盘
+bool TagServe::mergeTags(const std::filesystem::path &tag_json_path_utf8)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!tag_list_.mergeTags(tag_json_path_utf8))
+    {
+        error_string_ = tag_list_.getLastError();
+        return false;
+    }
+
+    if (!tag_list_.saveTagsToFile())
+    {
+        error_string_ = tag_list_.getLastError();
+        return false;
+    }
+
+    error_string_.clear();
+    return true;
+}
+
+// 标签库文件路径(导出时复制该文件到用户选择的位置)
+std::filesystem::path TagServe::getTagPath() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return tag_list_.getLoadPath();
+}
+
 bool TagServe::updateRoots()
 {
     std::lock_guard<std::mutex> lock(mutex_);

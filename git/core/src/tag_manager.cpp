@@ -163,6 +163,135 @@ bool TagLibrary::saveTagsToFile() const
     return true;
 }
 
+// 合并另一个 tag.json 的内容到本库
+// 一 本库为空(type_tags_/type_color_ 均为空): 直接用文件内容替换
+// 二 类型(type 全局唯一): 只添加本库没有的 颜色非法则回落默认色 空类型同样登记
+// 三 标签(tag 全局唯一): 把本库没有的 tag 添加到其所属 type 下
+// 四 多余数据(重复标签/跨类型重名/空项/无效颜色)直接丢弃
+bool TagLibrary::mergeTags(const std::filesystem::path &tag_json_path_utf8)
+{
+    error_string_.clear();
+
+    if (!std::filesystem::exists(tag_json_path_utf8))
+    {
+        error_string_ = "[warning] file does not exist: " + tag_json_path_utf8.u8string();
+        return false;
+    }
+
+    std::ifstream file(tag_json_path_utf8, std::ios::binary);
+    if (!file.is_open())
+    {
+        error_string_ = "[warning] Cannot open config file: " + tag_json_path_utf8.u8string();
+        return false;
+    }
+
+    nlohmann::json config;
+    try
+    {
+        file >> config;
+    }
+    catch (const nlohmann::json::parse_error &e)
+    {
+        error_string_ = "[warning] File format error: " + std::string(e.what());
+        return false;
+    }
+
+    if (!config.contains("groups") || !config["groups"].is_array())
+    {
+        error_string_ = "[tip] JSON is empty";
+        return true; // 无 groups: 没有可合并的内容
+    }
+
+    // 先解析待合并数据(无效项在此丢弃)
+    std::unordered_map<std::string, std::vector<std::string>> in_tags;
+    std::unordered_map<std::string, std::string> in_color;
+
+    for (const auto &group_obj : config["groups"])
+    {
+        if (!group_obj.is_object())
+        {
+            continue;
+        }
+
+        std::string type = group_obj.value("type", "");
+        if (type.empty())
+        {
+            continue;
+        }
+
+        std::string color = group_obj.value("color", "#FFC0CB");
+        if (!isValidHexColor(color))
+        {
+            color = "#FFC0CB";
+        }
+        if (in_color.find(type) == in_color.end())
+        {
+            in_color[type] = color;
+        }
+
+        auto &tag_vec = in_tags[type]; // 登记空类型
+        if (group_obj.contains("tags") && group_obj["tags"].is_array())
+        {
+            for (const auto &tag_obj : group_obj["tags"])
+            {
+                if (tag_obj.is_string())
+                {
+                    std::string tag = tag_obj.get<std::string>();
+                    if (!tag.empty())
+                    {
+                        tag_vec.push_back(tag);
+                    }
+                }
+            }
+        }
+    }
+
+    // 一 本库为空 -> 直接替换(统一去重保证全局唯一)
+    if (type_tags_.empty() && type_color_.empty())
+    {
+        type_tags_ = std::move(in_tags);
+        type_color_ = std::move(in_color);
+        clearInvalidTag();
+        error_string_.clear();
+        return true;
+    }
+
+    // 二 类型: 只添加本库没有的
+    for (const auto &pair : in_color)
+    {
+        const std::string &type = pair.first;
+        if (!hasType(type))
+        {
+            type_color_[type] = isValidHexColor(pair.second) ? pair.second : "#FFC0CB";
+            type_tags_[type]; // 空类型也要登记(保持 type_tags_ 与 type_color_ 键一致)
+        }
+    }
+
+    // 三 标签: 只添加本库没有的(重复/跨类型重名 -> 丢弃)
+    for (const auto &pair : in_tags)
+    {
+        auto it_type = type_tags_.find(pair.first);
+        if (it_type == type_tags_.end())
+        {
+            continue; // 理论上不会出现(类型已在上面补齐)
+        }
+
+        for (const auto &tag : pair.second)
+        {
+            if (!hasTag(tag))
+            {
+                it_type->second.push_back(tag);
+            }
+        }
+    }
+
+    // 四 clearInvalidTag 兜底: 清理空项与(替换分支遗留的)重名
+    clearInvalidTag();
+
+    error_string_.clear();
+    return true;
+}
+
 bool TagLibrary::isValidHexColor(const std::string &str)
 {
     if (str.empty())
