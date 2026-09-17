@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 paint-roller.svg 转换而来：24dp / 线宽 2 / 圆头圆角，颜色留给代码 tint -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M4 2 L16 2 C17.1046 2 18 2.8954 18 4 L18 6 C18 7.1046 17.1046 8 16 8 L4 8 C2.8954 8 2 7.1046 2 6 L2 4 C2 2.8954 2.8954 2 4 2 Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M10 16 L10 14 C10 12.8954 10.8954 12 12 12 L20 12 C21.1046 12 22 11.1046 22 10 L22 7 C22 5.8954 21.1046 5 20 5 L18 5"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M9 16 L11 16 C11.5523 16 12 16.4477 12 17 L12 21 C12 21.5523 11.5523 22 11 22 L9 22 C8.4477 22 8 21.5523 8 21 L8 17 C8 16.4477 8.4477 16 9 16 Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>

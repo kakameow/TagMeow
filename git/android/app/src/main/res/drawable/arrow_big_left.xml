@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 arrow-big-left.svg 转换而来：24dp / 线宽 2 / 圆头圆角，颜色留给代码 tint -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M10.793 19.793 C10.9952 19.9953 11.2993 20.0558 11.5636 19.9463 C11.8278 19.8369 12.0001 19.579 12 19.293 L12 16 C12 15.4477 12.4477 15 13 15 L19 15 C19.5523 15 20 14.5523 20 14 L20 10 C20 9.4477 19.5523 9 19 9 L13 9 C12.4477 9 12 8.5523 12 8 L12 4.707 C12.0001 4.421 11.8278 4.1631 11.5636 4.0537 C11.2993 3.9442 10.9952 4.0047 10.793 4.207 L3.853 11.147 C3.6266 11.3734 3.4995 11.6804 3.4995 12.0005 C3.4995 12.3206 3.6266 12.6276 3.853 12.854 Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>

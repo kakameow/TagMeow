@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 可暴露的路径
+  - files-path / cache-path：app 私有目录（本地存储模式用）
+  - external-path：外部存储，需要「所有文件访问权限」才能覆盖整棵外部存储
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path
+        name="app_files"
+        path="." />
+    <cache-path
+        name="app_cache"
+        path="." />
+    <external-path
+        name="external"
+        path="." />
+</paths>

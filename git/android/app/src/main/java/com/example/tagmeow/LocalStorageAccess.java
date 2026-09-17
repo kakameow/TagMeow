@@ -1,0 +1,298 @@
+package com.example.tagmeow;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+// StorageAccess 的本地文件实现
+
+// 用途：
+// 1. 「所有文件访问」存储模式：拿到 MANAGE_EXTERNAL_STORAGE 之后
+//    UI 用绝对路径直接管理目录 完全不走系统选择器
+//    （有些 ROM 的选择器会拒绝授权任何目录）
+// 2. JVM 单元测试与 instrumented 测试：SAF 依赖 ContentResolver
+//    在 JVM 里跑不起来 用它替代
+
+// root_id 与绝对路径一一对应 所以不依赖任何 Android 平台类
+
+public final class LocalStorageAccess implements StorageAccess {
+
+    // root_id -> 根目录
+    private final Map<String, File> roots = new HashMap<>();
+
+    public LocalStorageAccess() {
+    }
+
+    // 使用已经存在的目录初始化一个 root
+    public LocalStorageAccess(File rootDirectory) {
+        Objects.requireNonNull(rootDirectory);
+
+        String root_id = normalizePath(rootDirectory.getAbsolutePath());
+        addRoot(root_id, root_id);
+    }
+
+    @Override
+    public synchronized void addRoot(String root_id, String locator) {
+
+        Objects.requireNonNull(root_id);
+        Objects.requireNonNull(locator);
+
+        roots.put(root_id, new File(normalizePath(locator)));
+    }
+
+    @Override
+    public synchronized void removeRoot(String root_id) {
+        roots.remove(root_id);
+    }
+
+    // 解析 FileRef 到实际文件
+    // root 未注册时返回 null
+    public synchronized File resolve(FileRef ref) {
+        Objects.requireNonNull(ref);
+
+        File root = roots.get(ref.getRootId());
+        if (root == null) {
+            return null;
+        }
+
+        String relative = ref.getRelativePath();
+        if (relative.isEmpty()) {
+            return root;
+        }
+
+        return new File(root, relative);
+    }
+
+    @Override
+    public synchronized boolean exists(FileRef ref) {
+        File file = resolve(ref);
+        return file != null && file.exists();
+    }
+
+    @Override
+    public synchronized boolean isDirectory(FileRef ref) {
+        File file = resolve(ref);
+        return file != null && file.isDirectory();
+    }
+
+    @Override
+    public synchronized List<FileRef> listChildren(FileRef directory) {
+        List<FileRef> result = new ArrayList<>();
+
+        File dir = resolve(directory);
+        if (dir == null || !dir.isDirectory()) {
+            return result;
+        }
+
+        File[] children = dir.listFiles();
+        if (children == null) {
+            return result;
+        }
+
+        Arrays.sort(children, Comparator.comparing(File::getName));
+
+        for (File child : children) {
+            result.add(directory.child(child.getName()));
+        }
+
+        return result;
+    }
+
+    @Override
+    public synchronized byte[] readAll(FileRef ref) throws IOException {
+        File file = resolve(ref);
+        if (file == null) {
+            throw new IOException("root is not registered: " + ref.getRootId());
+        }
+
+        return Files.readAllBytes(file.toPath());
+    }
+
+    @Override
+    public synchronized void writeAll(FileRef ref, byte[] data, boolean atomic) throws IOException {
+
+        Objects.requireNonNull(ref);
+        Objects.requireNonNull(data);
+
+        File file = resolve(ref);
+        if (file == null) {
+            throw new IOException("root is not registered: " + ref.getRootId());
+        }
+
+        File parent = file.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            throw new IOException("cannot create parent directory: " + parent);
+        }
+
+        if (!atomic) {
+            writeDirect(file, data);
+            return;
+        }
+
+        File temp = new File(parent == null ? file : parent, file.getName() + ".tmp");
+
+        try {
+            writeDirect(temp, data);
+            moveReplacing(temp, file);
+        } catch (IOException error) {
+            // 安全替换失败时退回直接写入 保证内容最终可用
+            deleteQuietly(temp);
+            writeDirect(file, data);
+        }
+    }
+
+    @Override
+    public synchronized boolean createDirectories(FileRef directory) {
+        File dir = resolve(directory);
+        if (dir == null) {
+            return false;
+        }
+
+        if (dir.isDirectory()) {
+            return true;
+        }
+
+        return dir.mkdirs();
+    }
+
+    @Override
+    public synchronized boolean delete(FileRef ref) {
+        File file = resolve(ref);
+        if (file == null || !file.exists()) {
+            return false;
+        }
+
+        return deleteRecursively(file);
+    }
+
+    @Override
+    public synchronized boolean rename(FileRef ref, String new_name) {
+
+        Objects.requireNonNull(new_name);
+
+        File file = resolve(ref);
+        if (file == null || !file.exists()) {
+            return false;
+        }
+
+        if (new_name.isEmpty() || new_name.indexOf('/') >= 0) {
+            return false;
+        }
+
+        if (new_name.equals(file.getName())) {
+            return true;
+        }
+
+        File target = new File(file.getParentFile(), new_name);
+
+        try {
+            moveReplacing(file, target);
+            return true;
+        } catch (IOException error) {
+            return file.renameTo(target);
+        }
+    }
+
+    @Override
+    public synchronized long lastModified(FileRef ref) {
+        File file = resolve(ref);
+        return file == null ? 0L : file.lastModified();
+    }
+
+    @Override
+    public synchronized long size(FileRef ref) {
+        File file = resolve(ref);
+        if (file == null || file.isDirectory()) {
+            return 0L;
+        }
+
+        return file.length();
+    }
+
+    @Override
+    public synchronized String locatorOf(FileRef ref) {
+        File file = resolve(ref);
+        if (file == null || !file.exists()) {
+            return null;
+        }
+
+        return normalizePath(file.getAbsolutePath());
+    }
+
+    @Override
+    public FileRef childOf(FileRef directory, String name) {
+
+        return directory.child(name);
+    }
+
+    // 去掉末尾分隔符的路径
+    public static String normalizePath(String path) {
+        String unified = path.replace('\\', '/');
+
+        while (unified.length() > 1 && unified.endsWith("/")) {
+            unified = unified.substring(0, unified.length() - 1);
+        }
+
+        return unified;
+    }
+
+    private static void writeDirect(File file, byte[] data) throws IOException {
+
+        try (OutputStream output = new FileOutputStream(file)) {
+            output.write(data);
+            output.flush();
+        }
+    }
+
+    private static void moveReplacing(File source, File target) throws IOException {
+
+        try {
+            Files.move(
+                    source.toPath(),
+                    target.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException atomicFailed) {
+            Files.move(
+                    source.toPath(),
+                    target.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private static boolean deleteRecursively(File file) {
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursively(child);
+                }
+            }
+        }
+
+        return file.delete();
+    }
+
+    private static void deleteQuietly(File file) {
+        if (file != null && file.exists()) {
+            deleteRecursively(file);
+        }
+    }
+
+    // 供调试使用
+    @Override
+    public String toString() {
+        return "LocalStorageAccess" + Collections.unmodifiableMap(roots);
+    }
+}

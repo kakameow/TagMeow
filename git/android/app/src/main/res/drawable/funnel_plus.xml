@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 funnel-plus.svg 转换而来：24dp / 线宽 2 / 圆头圆角，颜色留给代码 tint -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M13.354 3 L3 3 C2.6049 3.0001 2.2469 3.2329 2.0865 3.594 C1.9261 3.955 1.9933 4.3767 2.258 4.67 L9.483 12.659 C9.8155 13.0265 9.9998 13.5044 10 14 L10 20 C9.9998 20.379 10.2139 20.7256 10.553 20.895 L12.553 21.895 C12.8631 22.0499 13.2312 22.0333 13.526 21.8509 C13.8208 21.6686 14.0002 21.3466 14 21 L14 14 C14.0002 13.5044 14.1845 13.0265 14.517 12.659 L15.735 11.311"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M16 6 L22 6"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19 3 L19 9"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 Lucide 的 square-play.svg 转换而来：24dp / 线宽 2 / 圆头圆角 -->
+<!-- 颜色留给代码 tint（默认黑色），改配色不用重新导图 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M5 3 L19 3 C20.1046 3 21 3.8954 21 5 L21 19 C21 20.1046 20.1046 21 19 21 L5 21 C3.8954 21 3 20.1046 3 19 L3 5 C3 3.8954 3.8954 3 5 3 Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M9 9.003 C8.9989 8.6417 9.1928 8.3078 9.5073 8.1298 C9.8217 7.9518 10.2077 7.9572 10.517 8.144 L15.514 11.141 C15.8166 11.3214 16.002 11.6477 16.002 12 C16.002 12.3523 15.8166 12.6786 15.514 12.859 L10.517 15.856 C10.2075 16.0429 9.8213 16.0482 9.5068 15.87 C9.1923 15.6917 8.9985 15.3575 9 14.996 Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>
