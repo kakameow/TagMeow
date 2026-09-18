@@ -4,6 +4,7 @@ import android.content.Context;
 import android.net.Uri;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -571,6 +572,22 @@ public final class TagServe {
         }
     }
 
+    // 清掉不在当前配置里的索引行（启动 / 切换存储方式时调用）
+    // 保留「授权丢了」的目录的行：它们还在配置里，重新授权之后还能用
+    public boolean purgeForeignRoots() {
+        synchronized (lock) {
+            List<String> keep = new ArrayList<>();
+
+            for (DirectoryConfigManager.Directory directory : directory_manager.getDirList()) {
+                keep.add(directory.getId());
+            }
+
+            boolean ok = file_database.purgeForeignRoots(keep);
+            error_string = ok ? "" : file_database.getLastError();
+            return ok;
+        }
+    }
+
     // 刷新全部受管理目录
     // DirectoryConfigManager -> FileDatabase.updateDirectory() -> TagFileManager.extractTags()
     // 返回 false 时 error_string 里有警告信息
@@ -692,7 +709,16 @@ public final class TagServe {
 
     private void collectRegularFiles(FileRef directory, List<FileRef> out) {
 
-        for (FileRef child : storage.listChildren(directory)) {
+        List<FileRef> children;
+
+        try {
+            children = storage.listChildren(directory);
+        } catch (IOException error) {
+            // 读不出来的目录直接跳过：这里只是收集文件清单 不该整批失败
+            return;
+        }
+
+        for (FileRef child : children) {
             if (storage.isDirectory(child)) {
                 if (TagFileManager.TAG_DIRECTORY.equals(child.getName())) {
                     continue;

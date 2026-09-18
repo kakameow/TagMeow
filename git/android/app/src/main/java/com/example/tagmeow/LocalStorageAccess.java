@@ -31,6 +31,9 @@ public final class LocalStorageAccess implements StorageAccess {
     // root_id -> 根目录
     private final Map<String, File> roots = new HashMap<>();
 
+    // 最后一次失败的原因（没有权限时 File.listFiles() 只返回 null 什么都不说）
+    private String error_string = "";
+
     public LocalStorageAccess() {
     }
 
@@ -54,6 +57,12 @@ public final class LocalStorageAccess implements StorageAccess {
     @Override
     public synchronized void removeRoot(String root_id) {
         roots.remove(root_id);
+    }
+
+    // 最后一次失败的原因
+    @Override
+    public synchronized String getLastError() {
+        return error_string;
     }
 
     // 解析 FileRef 到实际文件
@@ -87,18 +96,28 @@ public final class LocalStorageAccess implements StorageAccess {
     }
 
     @Override
-    public synchronized List<FileRef> listChildren(FileRef directory) {
+    public synchronized List<FileRef> listChildren(FileRef directory) throws IOException {
         List<FileRef> result = new ArrayList<>();
 
         File dir = resolve(directory);
-        if (dir == null || !dir.isDirectory()) {
+        if (dir == null) {
+            error_string = "root is not registered: " + directory.getRootId();
+            throw new IOException(error_string);
+        }
+
+        if (!dir.isDirectory()) {
             return result;
         }
 
         File[] children = dir.listFiles();
         if (children == null) {
-            return result;
+            // 「所有文件访问」没开的时候这里就是 null
+            // 以前返回空表：应用内浏览看起来只是「空目录」 一点错误提示都没有
+            error_string = "cannot list directory (permission denied?): " + dir.getAbsolutePath();
+            throw new IOException(error_string);
         }
+
+        error_string = "";
 
         Arrays.sort(children, Comparator.comparing(File::getName));
 

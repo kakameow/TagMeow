@@ -7,6 +7,7 @@ import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -285,7 +286,16 @@ public final class FileDatabase {
         }
 
         List<FileRef> found = new ArrayList<>();
-        collect(root, found);
+        int skipped_dirs;
+
+        try {
+            skipped_dirs = collect(root, found, true);
+        } catch (IOException error) {
+            // root 本身读不了（授权被回收 / 目录被删）必须失败
+            // 以前这里照样提交空事务并返回 true，于是「添加成功 + 索引一条都没有」
+            error_string = "[warning] " + error.getMessage();
+            return false;
+        }
 
         database.beginTransaction();
         try {
@@ -306,9 +316,10 @@ public final class FileDatabase {
 
             database.setTransactionSuccessful();
 
-            if (skipped > 0) {
+            if (skipped > 0 || skipped_dirs > 0) {
                 error_string = "[tip] Updated directory, but " + skipped
-                        + " file(s) were skipped due to read errors";
+                        + " file(s) and " + skipped_dirs
+                        + " subdirector(y/ies) could not be read";
             } else {
                 error_string = "";
             }
@@ -435,6 +446,55 @@ public final class FileDatabase {
                                 root.getRelativePath() + "/",
                         });
             }
+        } catch (RuntimeException error) {
+            error_string = "[warning] " + error.getMessage();
+            return false;
+        }
+
+        error_string = "";
+        return true;
+    }
+
+    // 清掉不属于当前配置的索引行
+    // index.db 是两种存储方式共用的：
+    // - SAF 模式的 root_id 是 tree document id（比如 primary:临时）
+    // - 「所有文件访问」模式的 root_id 是绝对路径（比如 /storage/emulated/0/下载）
+    // 切模式 / 删目录之后，不在当前配置里的 root 的行会一直留在库里：
+    // 首页「文件 N」虚高（实测两种模式 + 已删目录加起来 125），搜索还会串模式
+    // keep_root_ids：当前配置里所有目录的 id（有效的和「授权丢了」的都要留）
+    public boolean purgeForeignRoots(List<String> keep_root_ids) {
+        SQLiteDatabase database = db();
+        if (database == null) {
+            error_string = "[warning] Database not opened";
+            return false;
+        }
+
+        try {
+            if (keep_root_ids == null || keep_root_ids.isEmpty()) {
+                // 配置里一个目录都没有：整张表都是残留
+                // （调用方在清空后会按需重扫，所以不会出现索引凭空为空）
+                database.delete("files", null, null);
+            } else {
+                StringBuilder placeholders = new StringBuilder();
+                String[] args = new String[keep_root_ids.size()];
+
+                for (int i = 0; i < keep_root_ids.size(); i++) {
+                    if (i > 0) {
+                        placeholders.append(",");
+                    }
+
+                    placeholders.append("?");
+                    args[i] = keep_root_ids.get(i);
+                }
+
+                database.delete(
+                        "files",
+                        "root_id IS NULL OR root_id = '' OR root_id NOT IN (" + placeholders + ")",
+                        args);
+            }
+
+            // 顺手清掉没有归属的标签关联（不依赖外键级联有没有打开）
+            database.execSQL("DELETE FROM tags WHERE file_id NOT IN (SELECT file_id FROM files);");
         } catch (RuntimeException error) {
             error_string = "[warning] " + error.getMessage();
             return false;
@@ -725,21 +785,40 @@ public final class FileDatabase {
         return error_string;
     }
 
-    // 递归收集 root 下的所有条目
-    private void collect(FileRef directory, List<FileRef> out) {
+    // 递归收集 root 下的所有条目 返回读不出来的子目录个数
+    // root 层读不出来直接抛给调用方（整次扫描失败）
+    // 子目录读不出来只跳过：有的 provider 下 Android/data 这类目录本来就列不出来，
+    // 不能因为一个子目录让整个 root 加不进来
+    private int collect(FileRef directory, List<FileRef> out, boolean root_level) throws IOException {
 
-        for (FileRef child : storage.listChildren(directory)) {
+        List<FileRef> children;
+
+        try {
+            children = storage.listChildren(directory);
+        } catch (IOException error) {
+            if (root_level) {
+                throw error;
+            }
+
+            return 1;
+        }
+
+        int failed = 0;
+
+        for (FileRef child : children) {
             if (storage.isDirectory(child)) {
                 if (TagFileManager.TAG_DIRECTORY.equals(child.getName())) {
                     continue;
                 }
 
                 out.add(child);
-                collect(child, out);
+                failed += collect(child, out, false);
             } else {
                 out.add(child);
             }
         }
+
+        return failed;
     }
 
     // 由存储层读取元信息并生成 FileInfo 读取失败返回 null

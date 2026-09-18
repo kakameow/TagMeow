@@ -91,6 +91,10 @@ public final class SafStorageAccess implements StorageAccess {
     // 目录 documentUri -> (子项名称 -> 子项信息)
     private final Map<String, Map<String, DocInfo>> listings = new HashMap<>();
 
+    // 最后一次失败的原因（provider 抛出来的异常信息）
+    // 以前这些异常全被吞掉 于是「授权丢了」和「空目录」在上层看起来一模一样
+    private String error_string = "";
+
     public SafStorageAccess(Context context) {
         this.resolver = Objects.requireNonNull(context).getContentResolver();
     }
@@ -107,6 +111,7 @@ public final class SafStorageAccess implements StorageAccess {
             roots.put(root_id, new RootEntry(Uri.parse(locator)));
         } catch (IllegalArgumentException error) {
             // 不是合法的 tree Uri 时视为未注册
+            error_string = "invalid tree uri: " + locator;
             roots.remove(root_id);
         }
     }
@@ -129,17 +134,22 @@ public final class SafStorageAccess implements StorageAccess {
     }
 
     @Override
-    public synchronized List<FileRef> listChildren(FileRef directory) {
+    public synchronized List<FileRef> listChildren(FileRef directory) throws IOException {
         List<FileRef> result = new ArrayList<>();
 
         DocInfo info = resolveInfo(directory);
-        if (info == null || !info.directory) {
+        if (info == null) {
+            // 读不到就抛：返回空表的话上层分不清「空目录」和「没有权限」
+            throw new IOException("cannot access directory: " + directory + errorSuffix());
+        }
+
+        if (!info.directory) {
             return result;
         }
 
         Map<String, DocInfo> children = listOf(info);
         if (children == null) {
-            return result;
+            throw new IOException("cannot list directory: " + directory + errorSuffix());
         }
 
         List<String> names = new ArrayList<>(children.keySet());
@@ -379,6 +389,14 @@ public final class SafStorageAccess implements StorageAccess {
 
         String relative = ref.getRelativePath();
         if (relative.isEmpty()) {
+            // root 本身也要真去问一次 provider
+            // 以前这里凭空造一个「目录存在」的结果：授权被系统回收之后
+            // exists(root) 依然返回 true，目录看着是好的，扫描却一条都收不到，
+            // 最后变成「添加成功 + 索引为空」而且一句错误都没有
+            if (!probeRoot(root)) {
+                return null;
+            }
+
             return new DocInfo(
                     root,
                     root.tree_document_uri,
@@ -408,6 +426,23 @@ public final class SafStorageAccess implements StorageAccess {
         }
 
         return current;
+    }
+
+    // 真去列一次 root 的子项 确认现在还读得到（结果会进 listings 缓存）
+    // 以前 resolveInfo() 对 root 是凭空造的：授权被回收之后 exists(root) 依然是 true
+    private boolean probeRoot(RootEntry root) {
+        return queryChildren(root, root.tree_document_uri, root.tree_document_id) != null;
+    }
+
+    // 把最后一次失败的原因拼成一小段给人看的信息
+    private String errorSuffix() {
+        return error_string.isEmpty() ? "" : " (" + error_string + ")";
+    }
+
+    // 最后一次失败的原因 供上层显示
+    @Override
+    public synchronized String getLastError() {
+        return error_string;
     }
 
     // 从目录列表缓存中查找子项
@@ -468,9 +503,13 @@ public final class SafStorageAccess implements StorageAccess {
                                 size));
             }
         } catch (Exception error) {
+            // provider 抛异常（没有授权 / document id 失效 / 目录被删）
+            // 记下来再返回 null：以前这里什么都不说 上层只能看到空目录
+            error_string = "query failed: " + error;
             return null;
         }
 
+        error_string = "";
         listings.put(parent_uri.toString(), children);
         return children;
     }

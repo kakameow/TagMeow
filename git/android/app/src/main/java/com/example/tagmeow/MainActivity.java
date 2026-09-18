@@ -1,8 +1,11 @@
 package com.example.tagmeow;
 
+import android.Manifest;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.UriPermission;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -12,6 +15,7 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
@@ -39,6 +43,7 @@ import androidx.activity.EdgeToEdge;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
@@ -82,6 +87,7 @@ import java.util.concurrent.Executors;
 // 线程约定：
 // - 所有模块调用都在 worker 单线程上执行
 // - 只有主线程才读写 View
+
 public class MainActivity extends AppCompatActivity {
 
     // logcat 里按这个 tag 过滤：adb logcat -s TagMeow
@@ -114,12 +120,15 @@ public class MainActivity extends AppCompatActivity {
     private static final String EXPORT_ROOT_ID = "tagmeow-export";
     private static final String EXPORT_FILE_NAME = "TagMeow-tags.json";
 
-    // 一个目录都没授权时把系统选择器开到这里（内部存储根）
-    // 这里必须用 document 形式（document/primary%3A）：
-    // 用 root 形式（root/primary）时 测试机器的选择器会停在一个
-    // 写着「无任何文件」的空视图里 什么都选不了 也进不去子目录
-    // 根目录本身系统不让授权 用户从这个列表里进一个子文件夹就行
-    private static final String INTERNAL_STORAGE_URI = "content://com.android.externalstorage.documents/document/primary%3A";
+    // 不要给系统选择器种子「内部存储根」
+    // （content://com.android.externalstorage.documents/document/primary%3A）
+    // Android 11+ 不允许把存储卷根目录授权给应用：
+    // 选择器会进到不可用视图 —— 面包屑不可见、列表「无任何文件」、
+    // 按钮写着「无法使用此文件夹 / 为保护您的隐私，请选择其他文件夹」且不可点，
+    // 用户既选不了也进不去子目录（vivo V2425A 实测）
+    // 另外：带一个「本应用没有授权的 Uri」当种子也会进到同样的不可用视图
+    // 所以现在只拿「手里真有授权、且现在读得到」的目录当种子，
+    // 一个都没有时不传初始位置，让系统开它自己的默认视图
 
     // 内容展示的颜色固定：列表、卡片、文字、边框都不跟主题走
     private static final int COLOR_TEXT = 0xFF20242B;
@@ -203,6 +212,9 @@ public class MainActivity extends AppCompatActivity {
     private ActivityResultLauncher<String[]> import_picker;
 
     private ActivityResultLauncher<Uri> tree_picker;
+
+    // API < 30 用运行时读写权限代替「所有文件访问」
+    private ActivityResultLauncher<String[]> all_files_permission_picker;
 
     private View[] tab_views;
 
@@ -435,6 +447,17 @@ public class MainActivity extends AppCompatActivity {
                 new ActivityResultContracts.OpenDocument(),
                 this::onImportPicked);
 
+        // API < 30：用运行时读写权限代替「所有文件访问」
+        all_files_permission_picker = registerForActivityResult(
+                new ActivityResultContracts.RequestMultiplePermissions(),
+                result -> {
+                    if (hasAllFilesAccess()) {
+                        applyStorageMode(MODE_ALL_FILES);
+                    } else {
+                        toast(Lang.get("storage.perm_denied"));
+                    }
+                });
+
         initEngine();
     }
 
@@ -562,6 +585,9 @@ public class MainActivity extends AppCompatActivity {
     private void initEngine() {
         worker.execute(() -> {
             try {
+                // logcat 诊断：本应用当前持有的持久化授权
+                // 授权被系统/厂商回收时这里会少掉对应的目录
+                logPersistedGrants();
                 if (serve != null) {
                     serve.getFileDatabase().close();
                     serve = null;
@@ -595,6 +621,18 @@ public class MainActivity extends AppCompatActivity {
                         new File(configDir, "index.db"),
                         storage,
                         readDefaultMode());
+
+                // index.db 是两种存储方式共用的：先把不属于当前配置的残留行清掉
+                // （另一种模式的行、已经删掉的目录的行）
+                // 否则首页「文件 N」是这些的合计 搜索也会串模式
+                serve.purgeForeignRoots();
+
+                // 清完之后当前模式一条记录都没有（比如刚从另一种模式切回来）就顺手重扫一次
+                // 用的是 refreshAll 不是 reLoadRoot：后者会把读不到的目录直接从配置里丢掉
+                if (serve.getFileDatabase().countFiles() == 0
+                        && !serve.getDirectoryConfigManager().getDirList().isEmpty()) {
+                    serve.refreshAll();
+                }
 
                 reload();
             } catch (Throwable error) {
@@ -753,9 +791,7 @@ public class MainActivity extends AppCompatActivity {
             name.setText(info.file_ref.isRoot() ? "(root)" : info.file_ref.getName());
 
             String parent = info.file_ref.getParentPath();
-            path.setText(info.file_ref.getRootId()
-                    + (parent.isEmpty() ? "" : " / " + parent)
-                    + (info.is_directory ? Lang.get("browse.dir_suffix") : "  ·  " + formatSize(info.file_size)));
+            path.setText(info.file_ref.getRootId() + (parent.isEmpty() ? "" : " / " + parent) + (info.is_directory ? Lang.get("browse.dir_suffix") : "  ·  " + formatSize(info.file_size)));
 
             List<String> infoTags = info.tags == null ? new ArrayList<>() : info.tags;
 
@@ -778,7 +814,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 先按类型画矢量图；图片 / 视频再由调用方决定要不要去取缩略图
+    // 先按类型画矢量图 图片 / 视频再由调用方决定要不要去取缩略图
     private void bindFileIcon(ImageView icon, FileDatabase.FileInfo info, int padding) {
         icon.setImageResource(iconResOf(info));
         icon.setImageTintList(ColorStateList.valueOf(0xFF59616E));
@@ -828,24 +864,45 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // SAF：让系统出缩略图；绝对路径（所有文件访问模式）：自己缩放着解码
+    // SAF：让系统出缩略图
+    // ContentResolver.loadThumbnail 是 API 29 才有的（androidx 没有 compat）
+    // 所以这里按版本分叉：低的走自己的缩放解码
     private Bitmap loadThumbnailBitmap(String locator) {
         if (locator.startsWith("content:")) {
-            try {
-                return getContentResolver().loadThumbnail(
-                        Uri.parse(locator), new Size(THUMB_SIZE, THUMB_SIZE), null);
-            } catch (IOException | RuntimeException error) {
-                return null;
+            Uri uri = Uri.parse(locator);
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                Bitmap system_thumb = loadSystemThumbnail(uri);
+
+                if (system_thumb != null) {
+                    return system_thumb;
+                }
             }
         }
 
         return decodeScaledThumbnail(locator);
     }
 
-    private static Bitmap decodeScaledThumbnail(String path) {
+    // 系统缩略图（API 29+）
+    // 拆成单独方法 + @RequiresApi：lint 认这个契约，不会再报 NewApi
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private Bitmap loadSystemThumbnail(Uri uri) {
+        try {
+            return getContentResolver().loadThumbnail(uri, new Size(THUMB_SIZE, THUMB_SIZE), null);
+        } catch (IOException | RuntimeException error) {
+            return null;
+        }
+    }
+
+    // 自己缩放解码：content Uri 走输入流（开两次：先量尺寸、再按 inSampleSize 解）
+    //                 绝对路径走文件
+    // 注意：BitmapFactory 解不了视频，API < 29 上视频缩略图会退回类型图标
+    private Bitmap decodeScaledThumbnail(String locator) {
+        boolean from_provider = locator.startsWith("content:");
+
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
-        BitmapFactory.decodeFile(path, bounds);
+        decodeScaledInto(bounds, locator, from_provider);
 
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
             return null;
@@ -854,9 +911,19 @@ public class MainActivity extends AppCompatActivity {
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight, THUMB_SIZE);
 
+        return decodeScaledInto(options, locator, from_provider);
+    }
+
+    private Bitmap decodeScaledInto(BitmapFactory.Options options, String locator, boolean from_provider) {
         try {
-            return BitmapFactory.decodeFile(path, options);
-        } catch (RuntimeException error) {
+            if (from_provider) {
+                try (InputStream input = getContentResolver().openInputStream(Uri.parse(locator))) {
+                    return input == null ? null : BitmapFactory.decodeStream(input, null, options);
+                }
+            }
+
+            return BitmapFactory.decodeFile(locator, options);
+        } catch (IOException | RuntimeException error) {
             return null;
         }
     }
@@ -1306,7 +1373,7 @@ public class MainActivity extends AppCompatActivity {
         return include_tags.contains(tag) || exclude_tags.contains(tag) || only_tags.contains(tag);
     }
 
-    // 标签库点一下：加入当前容器；再点一下从容器里移除
+    // 标签库点一下：加入当前容器 再点一下从容器里移除
     // 同一个标签只会待在其中一个容器里
     private void addTagToActiveFilter(String tag) {
         Set<String> target = activeFilterSet();
@@ -1353,10 +1420,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         // 用矢量图标代替
-        setCompoundIcon(title,
-                group == 0 ? R.drawable.funnel_plus : (group == 1 ? R.drawable.funnel_x : R.drawable.funnel),
-                group == active_filter_group ? COLOR_TEXT : 0xFF59616E,
-                12);
+        setCompoundIcon(title, group == 0 ? R.drawable.funnel_plus : (group == 1 ? R.drawable.funnel_x : R.drawable.funnel), group == active_filter_group ? COLOR_TEXT : 0xFF59616E, 12);
 
         container.removeAllViews();
 
@@ -1686,9 +1750,31 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // 「所有文件访问」权限（只能去系统设置里开）
+    // 「所有文件访问」权限
+    // API 30+ 是 special access 只能去系统设置里开（manifest 里必须先声明 MANAGE_EXTERNAL_STORAGE）
+    // API < 30 没有这个开关 用运行时读写权限代替
     private boolean hasAllFilesAccess() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                    == PackageManager.PERMISSION_GRANTED
+                    && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+
         return Environment.isExternalStorageManager();
+    }
+
+    // logcat 诊断用：把本应用持有的持久化授权全打出来（adb logcat -s TagMeow）
+    private void logPersistedGrants() {
+        try {
+            for (UriPermission permission : getContentResolver().getPersistedUriPermissions()) {
+                Log.i(TAG, "persisted grant: " + permission.getUri()
+                        + " read=" + permission.isReadPermission()
+                        + " write=" + permission.isWritePermission());
+            }
+        } catch (RuntimeException error) {
+            Log.w(TAG, "cannot read persisted uri permissions", error);
+        }
     }
 
     private void showAllFilesPermissionDialog() {
@@ -1701,6 +1787,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void openAllFilesSettings() {
+        // API < 30 没有「所有文件访问」设置页 直接要运行时权限
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            all_files_permission_picker.launch(new String[]{
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE});
+            return;
+        }
+
         pending_all_files_request = true;
 
         try {
@@ -1788,7 +1882,14 @@ public class MainActivity extends AppCompatActivity {
             current.addRoot(directory.getId(), storageLocatorOf(directory.getUri()));
         }
 
-        return current.exists(root) && current.isDirectory(root);
+        boolean ok = current.exists(root) && current.isDirectory(root);
+
+        if (!ok) {
+            // adb logcat -s TagMeow：根目录读不了的真正原因（权限被回收 / 目录被删）
+            Log.w(TAG, "root not accessible: " + directory.getId() + " uri=" + directory.getUri() + " reason=" + current.getLastError());
+        }
+
+        return ok;
     }
 
     // Uri -> 存储层定位串（file Uri 用纯路径 跟 TagServe 保持一致）
@@ -1807,14 +1908,26 @@ public class MainActivity extends AppCompatActivity {
     private void launchTreePicker() {
         Uri start = null;
 
-        // 已经授权过目录时 直接从那个目录开始 避免用户又点到被禁的位置
-        if (!current_roots.isEmpty()) {
-            start = current_roots.get(0).getUri();
-        } else {
-            // 没有已授权目录时 停在「最近」里什么都选不了 直接开到内部存储根
-            start = Uri.parse(INTERNAL_STORAGE_URI);
+        // 只有「现在真的还能读」的目录才拿来当起始位置
+        // current_roots 来自配置 里面可能有失效条目（目录被改名/删掉、授权被回收）
+        // 把失效的 tree Uri 交给系统选择器 它会停在一个写着「无任何文件」的空视图里
+        // 什么都选不了 —— 而重新授权只有「+ 添加」这一个入口 等于把用户锁死
+        for (DirectoryConfigManager.Directory directory : current_roots) {
+            if (Boolean.TRUE.equals(root_access.get(directory.getId()))) {
+                start = directory.getUri();
+                break;
+            }
         }
 
+        if (start == null) {
+            // 没有能读的目录时不传初始位置
+            // 给存储根 / 一个没授权的 Uri 都会让选择器进到不可用视图
+            Log.i(TAG, "launching tree picker without initial uri");
+            tree_picker.launch(null);
+            return;
+        }
+
+        Log.i(TAG, "launching tree picker, initial uri=" + start);
         tree_picker.launch(start);
     }
 
@@ -1833,7 +1946,12 @@ public class MainActivity extends AppCompatActivity {
                         uri,
                         Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             } catch (SecurityException error) {
+                // 拿不到持久化授权就别记进 prefs
+                // 以前报完错还继续存下来并提示「设置成功」
+                // 结果默认导出目录记的是一个永远写不进去的位置
+                Log.w(TAG, "takePersistableUriPermission failed for export tree: " + uri, error);
                 toast(Lang.get("dir.export_tree_failed"));
+                return;
             }
 
             prefs.edit().putString(KEY_EXPORT_TREE, uri.toString()).apply();
@@ -1848,9 +1966,12 @@ public class MainActivity extends AppCompatActivity {
                     Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
         } catch (SecurityException error) {
             // 授权没持久化就别加目录了：加了也是临时的 重启后就会失效
+            Log.w(TAG, "takePersistableUriPermission failed for tree: " + uri, error);
             toast(Lang.get("dir.grant_failed"));
             return;
         }
+
+        Log.i(TAG, "tree picked: " + uri);
 
         runAction(Lang.get("dir.action_add"), () -> {
             boolean ok = serve.addRoot(uri);
@@ -2011,7 +2132,22 @@ public class MainActivity extends AppCompatActivity {
                                 DirectoryConfigManager.Directory directory = findRoot(id);
 
                                 if (directory != null) {
-                                    ok &= serve.removeRoot(directory.getUri());
+                                    Uri root_uri = directory.getUri();
+                                    boolean removed = serve.removeRoot(root_uri);
+                                    ok &= removed;
+
+                                    if (removed) {
+                                        // 顺手把持久化授权还回去 不释放的话授权会一直堆在系统里
+                                        // （系统对每个应用的持久化授权数量是有上限的）
+                                        try {
+                                            getContentResolver().releasePersistableUriPermission(
+                                                    root_uri,
+                                                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                                            | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                                        } catch (SecurityException error) {
+                                            Log.w(TAG, "releasePersistableUriPermission failed: " + root_uri, error);
+                                        }
+                                    }
                                 }
                             }
 
@@ -2339,7 +2475,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 回填：类型表单里选类型 = 编辑它；标签表单里选类型 = 换所属组
+    // 回填：类型表单里选类型 = 编辑它 标签表单里选类型 = 换所属组
     private void pickEditorType(String type) {
         editor_selected_type = type;
 
@@ -3154,10 +3290,8 @@ public class MainActivity extends AppCompatActivity {
     // 子界面里的静态文案（子界面每次打开都会重新 inflate 所以每次都要刷一遍）
     private void applyOverlayTexts() {
         if (file_tag_overlay != null) {
-            setCompoundIcon((TextView) file_tag_overlay.findViewById(R.id.tvFileTagCurrentTitle),
-                    R.drawable.tag_x, COLOR_TEXT, 14);
-            setCompoundIcon((TextView) file_tag_overlay.findViewById(R.id.tvFileTagLibraryTitle),
-                    R.drawable.tag, COLOR_TEXT, 14);
+            setCompoundIcon((TextView) file_tag_overlay.findViewById(R.id.tvFileTagCurrentTitle), R.drawable.tag_x, COLOR_TEXT, 14);
+            setCompoundIcon((TextView) file_tag_overlay.findViewById(R.id.tvFileTagLibraryTitle), R.drawable.tag, COLOR_TEXT, 14);
 
             setText(file_tag_overlay, R.id.btnFileTagCancel, "common.cancel");
             setText(file_tag_overlay, R.id.tvFileTagTitle, "ftag.title");

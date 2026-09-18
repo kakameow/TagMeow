@@ -269,9 +269,20 @@ class DirectoryConfigManager {
             return false;
         }
 
-        if (indexOf(root_id, tree_uri.toString()) >= 0) {
-            error_string = "[warning] directory already managed";
-            return false;
+        int existing = indexOf(root_id, tree_uri.toString());
+
+        if (existing >= 0) {
+            // 已经在管理列表里：把这次「添加」当成重新授权
+            // 目录读不到时提示语就是让用户点「+ 添加」重新授权一次，
+            // 以前这里直接返回 false：授权明明拿回来了也进不去，索引也不会重扫，
+            // 用户就被锁在「读不到 -> 重新添加 -> 还是读不到」里出不来
+            Directory again = new Directory(root_id, tree_uri, displayNameOf(tree_uri), true);
+
+            directories.set(existing, again);
+            last_valid_directory = again;
+
+            error_string = "";
+            return true;
         }
 
         Directory directory = new Directory(root_id, tree_uri, displayNameOf(tree_uri), true);

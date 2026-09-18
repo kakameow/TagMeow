@@ -39,7 +39,8 @@ public interface StorageAccess {
     // 判断指定引用是否为目录
     boolean isDirectory(FileRef ref);
     // 列出目录子项
-    List<FileRef> listChildren(FileRef directory);
+    // 读不出来必须抛 IOException：返回空表会让上层把「没有权限」当成「空目录」
+    List<FileRef> listChildren(FileRef directory) throws IOException;
     // 读取全部文件内容
     byte[] readAll(FileRef ref) throws IOException;
     // 写入全部文件内容
@@ -61,4 +62,8 @@ public interface StorageAccess {
     String locatorOf(FileRef ref);
     // 根据父目录和名称生成子项引用
     FileRef childOf(FileRef directory, String name);
+    // 最后一次失败的原因 供上层直接显示给用户（没有错误时返回空串）
+    default String getLastError() {
+        return "";
+    }
 }
