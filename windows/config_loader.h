@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <string>
 
+#include <nlohmann/json.hpp>
+
 #include "tag_manager.h"
 
 struct ConfigLoader
@@ -23,10 +25,13 @@ struct ConfigLoader
     TagFileManager::StoreMode tag_mode_ = TagFileManager::StoreMode::Sidecar;
     std::chrono::minutes server_waiting_time_ = std::chrono::minutes(5);
     std::filesystem::path download_path_ = "./download";
-    std::uint16_t broadcast_port_ = 11451;          // UDP_DEFAULT_PORT
-    std::string broadcast_magic_word_ = "0x114514"; // UDP_DEFAULT_MAGIC
+    std::uint16_t broadcast_port_ = 11451;
+    std::string broadcast_magic_word_ = "0x114514";
     int font_size_ = 12;
     int theme_ = 0;
+
+    // 保留完整 JSON
+    nlohmann::json raw_json_ = nlohmann::json::object();
 
     mutable std::string error_string_;
 };
