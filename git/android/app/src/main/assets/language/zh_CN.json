@@ -121,7 +121,7 @@
     { "id": "storage.perm_title", "str": "需要「所有文件访问」权限" },
     { "id": "storage.perm_body", "str": "这个模式不用系统选择器，而是直接用路径读写文件，所以要在系统设置里给一次「所有文件访问」权限。\n\n点「去开启」→ 找到 TagMeow → 打开「允许访问所有文件」→ 返回应用即可。" },
     { "id": "storage.perm_go", "str": "去开启" },
-    { "id": "storage.perm_denied", "str": "没有拿到「所有文件访问」权限，还是用授权目录模式" },
+    { "id": "storage.perm_denied", "str": "没有拿到「所有文件访问」权限，请先在系统设置里授权" },
     { "id": "storage.perm_unavailable", "str": "这个系统里没有对应的设置页" },
     { "id": "storage.browse_title", "str": "选择目录（点条目进入，点「添加此目录」选中当前目录）" },
     { "id": "storage.browse_up", "str": "上级目录" },

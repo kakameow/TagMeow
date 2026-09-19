@@ -15,18 +15,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-// StorageAccess 的本地文件实现
+// 存储层：直接用绝对路径访问文件系统
 
 // 用途：
-// 1. 「所有文件访问」存储模式：拿到 MANAGE_EXTERNAL_STORAGE 之后
-//    UI 用绝对路径直接管理目录 完全不走系统选择器
-//    （有些 ROM 的选择器会拒绝授权任何目录）
-// 2. JVM 单元测试与 instrumented 测试：SAF 依赖 ContentResolver
-//    在 JVM 里跑不起来 用它替代
+// 1. 「所有文件访问」存储模式（应用里唯一的存储方式）：
+//    拿到 MANAGE_EXTERNAL_STORAGE 之后 UI 用绝对路径直接管理目录
+//    完全不走系统选择器（有些 ROM 的选择器会拒绝授权任何目录）
+// 2. JVM 单元测试：不依赖任何 Android 平台类 在 JVM 里直接就能跑
+
+// 以前这里是 StorageAccess 接口 + SAF/本地两个实现
+// SAF 那套跟着系统选择器一起砍了（见 git 03191d2） 接口也就合并进来了
 
 // root_id 与绝对路径一一对应 所以不依赖任何 Android 平台类
 
-public final class LocalStorageAccess implements StorageAccess {
+public final class StorageAccess {
 
     // root_id -> 根目录
     private final Map<String, File> roots = new HashMap<>();
@@ -34,18 +36,17 @@ public final class LocalStorageAccess implements StorageAccess {
     // 最后一次失败的原因（没有权限时 File.listFiles() 只返回 null 什么都不说）
     private String error_string = "";
 
-    public LocalStorageAccess() {
+    public StorageAccess() {
     }
 
     // 使用已经存在的目录初始化一个 root
-    public LocalStorageAccess(File rootDirectory) {
+    public StorageAccess(File rootDirectory) {
         Objects.requireNonNull(rootDirectory);
 
         String root_id = normalizePath(rootDirectory.getAbsolutePath());
         addRoot(root_id, root_id);
     }
 
-    @Override
     public synchronized void addRoot(String root_id, String locator) {
 
         Objects.requireNonNull(root_id);
@@ -54,13 +55,11 @@ public final class LocalStorageAccess implements StorageAccess {
         roots.put(root_id, new File(normalizePath(locator)));
     }
 
-    @Override
     public synchronized void removeRoot(String root_id) {
         roots.remove(root_id);
     }
 
     // 最后一次失败的原因
-    @Override
     public synchronized String getLastError() {
         return error_string;
     }
@@ -83,19 +82,16 @@ public final class LocalStorageAccess implements StorageAccess {
         return new File(root, relative);
     }
 
-    @Override
     public synchronized boolean exists(FileRef ref) {
         File file = resolve(ref);
         return file != null && file.exists();
     }
 
-    @Override
     public synchronized boolean isDirectory(FileRef ref) {
         File file = resolve(ref);
         return file != null && file.isDirectory();
     }
 
-    @Override
     public synchronized List<FileRef> listChildren(FileRef directory) throws IOException {
         List<FileRef> result = new ArrayList<>();
 
@@ -128,7 +124,6 @@ public final class LocalStorageAccess implements StorageAccess {
         return result;
     }
 
-    @Override
     public synchronized byte[] readAll(FileRef ref) throws IOException {
         File file = resolve(ref);
         if (file == null) {
@@ -138,7 +133,6 @@ public final class LocalStorageAccess implements StorageAccess {
         return Files.readAllBytes(file.toPath());
     }
 
-    @Override
     public synchronized void writeAll(FileRef ref, byte[] data, boolean atomic) throws IOException {
 
         Objects.requireNonNull(ref);
@@ -171,7 +165,6 @@ public final class LocalStorageAccess implements StorageAccess {
         }
     }
 
-    @Override
     public synchronized boolean createDirectories(FileRef directory) {
         File dir = resolve(directory);
         if (dir == null) {
@@ -185,7 +178,6 @@ public final class LocalStorageAccess implements StorageAccess {
         return dir.mkdirs();
     }
 
-    @Override
     public synchronized boolean delete(FileRef ref) {
         File file = resolve(ref);
         if (file == null || !file.exists()) {
@@ -195,7 +187,6 @@ public final class LocalStorageAccess implements StorageAccess {
         return deleteRecursively(file);
     }
 
-    @Override
     public synchronized boolean rename(FileRef ref, String new_name) {
 
         Objects.requireNonNull(new_name);
@@ -223,13 +214,11 @@ public final class LocalStorageAccess implements StorageAccess {
         }
     }
 
-    @Override
     public synchronized long lastModified(FileRef ref) {
         File file = resolve(ref);
         return file == null ? 0L : file.lastModified();
     }
 
-    @Override
     public synchronized long size(FileRef ref) {
         File file = resolve(ref);
         if (file == null || file.isDirectory()) {
@@ -239,7 +228,6 @@ public final class LocalStorageAccess implements StorageAccess {
         return file.length();
     }
 
-    @Override
     public synchronized String locatorOf(FileRef ref) {
         File file = resolve(ref);
         if (file == null || !file.exists()) {
@@ -249,7 +237,6 @@ public final class LocalStorageAccess implements StorageAccess {
         return normalizePath(file.getAbsolutePath());
     }
 
-    @Override
     public FileRef childOf(FileRef directory, String name) {
 
         return directory.child(name);
@@ -310,8 +297,7 @@ public final class LocalStorageAccess implements StorageAccess {
     }
 
     // 供调试使用
-    @Override
     public String toString() {
-        return "LocalStorageAccess" + Collections.unmodifiableMap(roots);
+        return "StorageAccess" + Collections.unmodifiableMap(roots);
     }
 }

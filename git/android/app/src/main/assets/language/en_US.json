@@ -121,7 +121,7 @@
     { "id": "storage.perm_title", "str": "All files access is needed" },
     { "id": "storage.perm_body", "str": "This mode does not use the system picker; it reads paths directly, so Android needs the all-files-access permission.\n\nTap Open settings → find TagMeow → enable Allow access to manage all files → come back here." },
     { "id": "storage.perm_go", "str": "Open settings" },
-    { "id": "storage.perm_denied", "str": "All files access was not granted — staying on granted folders" },
+    { "id": "storage.perm_denied", "str": "All files access was not granted — please grant it in system settings" },
     { "id": "storage.perm_unavailable", "str": "This system has no such settings page" },
     { "id": "storage.browse_title", "str": "Pick a folder (tap to enter, tap Add this folder for the current one)" },
     { "id": "storage.browse_up", "str": "Parent folder" },

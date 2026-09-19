@@ -18,7 +18,7 @@ import java.util.Arrays;
 import java.util.List;
 
 // TagFileManager 的 JVM 单元测试
-// 使用 LocalStorageAccess 所以不需要 Android 运行时
+// 使用 StorageAccess 所以不需要 Android 运行时
 public class TagFileManagerTest {
 
     @Rule
@@ -28,13 +28,13 @@ public class TagFileManagerTest {
 
     private String root_id;
 
-    private LocalStorageAccess storage;
+    private StorageAccess storage;
 
     @Before
     public void setUp() throws Exception {
         root = folder.newFolder("managed");
-        root_id = LocalStorageAccess.normalizePath(root.getAbsolutePath());
-        storage = new LocalStorageAccess(root);
+        root_id = StorageAccess.normalizePath(root.getAbsolutePath());
+        storage = new StorageAccess(root);
     }
 
     private FileRef ref(String relative) {

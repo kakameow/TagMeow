@@ -23,7 +23,6 @@ import android.text.InputType;
 import android.text.TextUtils;
 import android.util.Log;
 import android.util.LruCache;
-import android.util.Size;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -43,7 +42,6 @@ import androidx.activity.EdgeToEdge;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
@@ -102,12 +100,8 @@ public class MainActivity extends AppCompatActivity {
 
     // 第一次运行时的默认语言（界面上不再有「跟随系统」这一项）
     private static final String DEFAULT_LANGUAGE_CODE = "zh_CN";
-    private static final String KEY_EXPORT_TREE = "export_tree";
-    private static final String KEY_STORAGE_MODE = "storage_mode";
-
-    // 两种存储方式
-    private static final String MODE_SAF = "saf";
-    private static final String MODE_ALL_FILES = "all_files";
+    // 存储方式只剩一种：所有文件访问（绝对路径）+ 应用内选目录
+    // 系统选择器那条路整个砍掉了（测试机上被 ROM 卡死 见 git 03191d2）
 
     // 标签颜色的默认值（新类型默认用这个）
     private static final String DEFAULT_TAG_COLOR = "#FFB6C1";
@@ -116,8 +110,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int EDITOR_MODE_TYPE = 0;
     private static final int EDITOR_MODE_TAG = 1;
 
-    // 导出用的临时 root_id（复用 SAF 存储层往授权目录里写文件）
-    private static final String EXPORT_ROOT_ID = "tagmeow-export";
+    // 导出用的默认文件名（每次走系统「保存到…」对话框）
     private static final String EXPORT_FILE_NAME = "TagMeow-tags.json";
 
     // 不要给系统选择器种子「内部存储根」
@@ -178,11 +171,8 @@ public class MainActivity extends AppCompatActivity {
 
     private SharedPreferences prefs;
 
-    // 存储实现：SAF 授权目录 / 所有文件访问（绝对路径）
+    // 存储实现：固定「所有文件访问」（绝对路径）
     private StorageAccess storage;
-
-    // 当前存储方式（MODE_SAF / MODE_ALL_FILES）
-    private String storage_mode = MODE_SAF;
 
     // 从系统设置页回来时要检查「所有文件访问」权限
     private boolean pending_all_files_request = false;
@@ -204,14 +194,9 @@ public class MainActivity extends AppCompatActivity {
     // 每个受管理目录能不能真的读（在 worker 上算好 UI 线程不去查 provider）
     private final Map<String, Boolean> root_access = new LinkedHashMap<>();
 
-    // 0 = 选受管理目录  1 = 选默认导出目录
-    private int picker_purpose = 0;
-
     private ActivityResultLauncher<String> export_picker;
 
     private ActivityResultLauncher<String[]> import_picker;
-
-    private ActivityResultLauncher<Uri> tree_picker;
 
     // API < 30 用运行时读写权限代替「所有文件访问」
     private ActivityResultLauncher<String[]> all_files_permission_picker;
@@ -401,9 +386,6 @@ public class MainActivity extends AppCompatActivity {
 
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
-        // 存储方式：默认 SAF 授权目录 也可以切到「所有文件访问」
-        storage_mode = prefs.getString(KEY_STORAGE_MODE, MODE_SAF);
-
         // 载入语言字典：老版本可能存过 "system"（跟随系统） Lang 会把它解析成具体语言
         Lang.init(getApplicationContext(), prefs.getString(KEY_LANGUAGE, DEFAULT_LANGUAGE_CODE));
 
@@ -432,11 +414,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // SAF 目录授权选择器
-        tree_picker = registerForActivityResult(
-                new ActivityResultContracts.OpenDocumentTree(),
-                this::onTreePicked);
-
         // 导出：挑一个保存位置
         export_picker = registerForActivityResult(
                 new ActivityResultContracts.CreateDocument("application/json"),
@@ -452,7 +429,7 @@ public class MainActivity extends AppCompatActivity {
                 new ActivityResultContracts.RequestMultiplePermissions(),
                 result -> {
                     if (hasAllFilesAccess()) {
-                        applyStorageMode(MODE_ALL_FILES);
+                        restartEngine();
                     } else {
                         toast(Lang.get("storage.perm_denied"));
                     }
@@ -599,20 +576,11 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                // 两种存储方式各存一份配置：SAF 存 tree Uri
-                // 所有文件访问存绝对路径 互不干扰
-                boolean allFiles = MODE_ALL_FILES.equals(storage_mode);
-                File dirConfigFile = new File(configDir, allFiles ? "path-files.json" : "path.json");
-                File legacyDirConfig = new File(configDir, "path-saf.json");
+                // 只有一种存储方式：所有文件访问（绝对路径）
+                // 目录配置沿用「所有文件访问」那份 path-files.json
+                File dirConfigFile = new File(configDir, "path-files.json");
 
-                if (!dirConfigFile.exists() && legacyDirConfig.isFile()) {
-                    // 兼容上一版按存储模式分文件的写法
-                    legacyDirConfig.renameTo(dirConfigFile);
-                }
-
-                storage = allFiles
-                        ? new LocalStorageAccess()
-                        : new SafStorageAccess(getApplicationContext());
+                storage = new StorageAccess();
 
                 serve = new TagServe(
                         getApplicationContext(),
@@ -864,45 +832,18 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // SAF：让系统出缩略图
-    // ContentResolver.loadThumbnail 是 API 29 才有的（androidx 没有 compat）
-    // 所以这里按版本分叉：低的走自己的缩放解码
+    // 缩略图只有一个来源了：绝对路径（所有文件访问模式）
+    // 原来 SAF 的 ContentResolver.loadThumbnail 分支跟着系统选择器一起砍了
     private Bitmap loadThumbnailBitmap(String locator) {
-        if (locator.startsWith("content:")) {
-            Uri uri = Uri.parse(locator);
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                Bitmap system_thumb = loadSystemThumbnail(uri);
-
-                if (system_thumb != null) {
-                    return system_thumb;
-                }
-            }
-        }
-
         return decodeScaledThumbnail(locator);
     }
 
-    // 系统缩略图（API 29+）
-    // 拆成单独方法 + @RequiresApi：lint 认这个契约，不会再报 NewApi
-    @RequiresApi(Build.VERSION_CODES.Q)
-    private Bitmap loadSystemThumbnail(Uri uri) {
-        try {
-            return getContentResolver().loadThumbnail(uri, new Size(THUMB_SIZE, THUMB_SIZE), null);
-        } catch (IOException | RuntimeException error) {
-            return null;
-        }
-    }
-
-    // 自己缩放解码：content Uri 走输入流（开两次：先量尺寸、再按 inSampleSize 解）
-    //                 绝对路径走文件
-    // 注意：BitmapFactory 解不了视频，API < 29 上视频缩略图会退回类型图标
-    private Bitmap decodeScaledThumbnail(String locator) {
-        boolean from_provider = locator.startsWith("content:");
-
+    // 自己缩放解码（开两次：先量尺寸、再按 inSampleSize 解）
+    // 注意：BitmapFactory 解不了视频 视频缩略图会退回类型图标
+    private static Bitmap decodeScaledThumbnail(String path) {
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
-        decodeScaledInto(bounds, locator, from_provider);
+        BitmapFactory.decodeFile(path, bounds);
 
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
             return null;
@@ -911,19 +852,9 @@ public class MainActivity extends AppCompatActivity {
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight, THUMB_SIZE);
 
-        return decodeScaledInto(options, locator, from_provider);
-    }
-
-    private Bitmap decodeScaledInto(BitmapFactory.Options options, String locator, boolean from_provider) {
         try {
-            if (from_provider) {
-                try (InputStream input = getContentResolver().openInputStream(Uri.parse(locator))) {
-                    return input == null ? null : BitmapFactory.decodeStream(input, null, options);
-                }
-            }
-
-            return BitmapFactory.decodeFile(locator, options);
-        } catch (IOException | RuntimeException error) {
+            return BitmapFactory.decodeFile(path, options);
+        } catch (RuntimeException error) {
             return null;
         }
     }
@@ -1521,17 +1452,15 @@ public class MainActivity extends AppCompatActivity {
     // 目录
 
     private void pickRoot() {
-        // 所有文件访问模式：在应用内自己浏览目录 完全不碰系统选择器
+        // 只有「所有文件访问」这一种方式：在应用内自己浏览目录
+        // 完全不碰系统选择器（测试机上的选择器会被 ROM 卡死）
         // 初始目录固定是内部存储根（/storage/emulated/0）
-        if (MODE_ALL_FILES.equals(storage_mode)) {
-            showDirBrowserOverlay(Environment.getExternalStorageDirectory());
+        if (!hasAllFilesAccess()) {
+            showAllFilesPermissionDialog();
             return;
         }
 
-        // SAF 模式：直接开系统选择器 安卓只允许授权「子目录」
-        // 根目录 / Download / Android data 会被系统拒绝
-        // （提示「为了保护隐私 无法使用此文件夹」）
-        launchTreePicker();
+        showDirBrowserOverlay(Environment.getExternalStorageDirectory());
     }
 
     // 目录浏览子界面（面包屑 + 新建文件夹 + 选择此目录）
@@ -1742,7 +1671,7 @@ public class MainActivity extends AppCompatActivity {
 
     // 把一个绝对路径加进受管理目录
     private void addFilesRoot(final File directory) {
-        final String path = LocalStorageAccess.normalizePath(directory.getAbsolutePath());
+        final String path = StorageAccess.normalizePath(directory.getAbsolutePath());
 
         runAction(Lang.get("dir.action_add"), () -> {
             boolean ok = serve.addRoot(Uri.fromFile(new File(path)));
@@ -1810,45 +1739,20 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 设置页里的存储方式选择
-    private void showStorageModeDialog() {
-        final String[] labels = {
-                Lang.get("settings.storage_saf"),
-                Lang.get("settings.storage_all")};
-
+    // 设置页里的存储方式：只剩一种 不能再切
+    // 点进去只是说明现在为什么只有这一种
+    private void showStorageModeInfo() {
         new AlertDialog.Builder(this)
                 .setTitle(Lang.get("settings.storage_mode"))
-                .setSingleChoiceItems(labels, MODE_ALL_FILES.equals(storage_mode) ? 1 : 0,
-                        (dialog, which) -> {
-                            dialog.dismiss();
-                            switchStorageMode(which == 1 ? MODE_ALL_FILES : MODE_SAF);
-                        })
-                .setNegativeButton(Lang.get("common.cancel"), null)
+                .setMessage(storageModeLabel())
+                .setPositiveButton(Lang.get("common.ok"), null)
                 .show();
     }
 
-    private void switchStorageMode(String mode) {
-        if (mode.equals(storage_mode)) {
-            return;
-        }
-
-        if (MODE_ALL_FILES.equals(mode) && !hasAllFilesAccess()) {
-            showAllFilesPermissionDialog();
-            return;
-        }
-
-        applyStorageMode(mode);
-    }
-
-    private void applyStorageMode(String mode) {
-        storage_mode = mode;
-        prefs.edit().putString(KEY_STORAGE_MODE, mode).apply();
-
-        // 换存储实现：重建引擎（目录配置、索引、扫描全跟着换）再重画
+    // 权限刚拿到之后重建引擎（目录配置、索引、扫描全跟着来）
+    private void restartEngine() {
         initEngine();
         renderSettings();
-
-        toast(Lang.get("storage.switched"));
     }
 
     @Override
@@ -1860,7 +1764,7 @@ public class MainActivity extends AppCompatActivity {
             pending_all_files_request = false;
 
             if (hasAllFilesAccess()) {
-                applyStorageMode(MODE_ALL_FILES);
+                restartEngine();
             } else {
                 toast(Lang.get("storage.perm_denied"));
             }
@@ -1898,85 +1802,11 @@ public class MainActivity extends AppCompatActivity {
             String path = uri.getPath();
 
             if (path != null && !path.isEmpty()) {
-                return LocalStorageAccess.normalizePath(path);
+                return StorageAccess.normalizePath(path);
             }
         }
 
         return uri.toString();
-    }
-
-    private void launchTreePicker() {
-        Uri start = null;
-
-        // 只有「现在真的还能读」的目录才拿来当起始位置
-        // current_roots 来自配置 里面可能有失效条目（目录被改名/删掉、授权被回收）
-        // 把失效的 tree Uri 交给系统选择器 它会停在一个写着「无任何文件」的空视图里
-        // 什么都选不了 —— 而重新授权只有「+ 添加」这一个入口 等于把用户锁死
-        for (DirectoryConfigManager.Directory directory : current_roots) {
-            if (Boolean.TRUE.equals(root_access.get(directory.getId()))) {
-                start = directory.getUri();
-                break;
-            }
-        }
-
-        if (start == null) {
-            // 没有能读的目录时不传初始位置
-            // 给存储根 / 一个没授权的 Uri 都会让选择器进到不可用视图
-            Log.i(TAG, "launching tree picker without initial uri");
-            tree_picker.launch(null);
-            return;
-        }
-
-        Log.i(TAG, "launching tree picker, initial uri=" + start);
-        tree_picker.launch(start);
-    }
-
-    private void onTreePicked(Uri uri) {
-        if (uri == null) {
-            picker_purpose = 0;
-            return;
-        }
-
-        // 选的是默认导出目录
-        if (picker_purpose == 1) {
-            picker_purpose = 0;
-
-            try {
-                getContentResolver().takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            } catch (SecurityException error) {
-                // 拿不到持久化授权就别记进 prefs
-                // 以前报完错还继续存下来并提示「设置成功」
-                // 结果默认导出目录记的是一个永远写不进去的位置
-                Log.w(TAG, "takePersistableUriPermission failed for export tree: " + uri, error);
-                toast(Lang.get("dir.export_tree_failed"));
-                return;
-            }
-
-            prefs.edit().putString(KEY_EXPORT_TREE, uri.toString()).apply();
-            renderSettings();
-            toast(Lang.get("dir.export_tree_set"));
-            return;
-        }
-
-        try {
-            getContentResolver().takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-        } catch (SecurityException error) {
-            // 授权没持久化就别加目录了：加了也是临时的 重启后就会失效
-            Log.w(TAG, "takePersistableUriPermission failed for tree: " + uri, error);
-            toast(Lang.get("dir.grant_failed"));
-            return;
-        }
-
-        Log.i(TAG, "tree picked: " + uri);
-
-        runAction(Lang.get("dir.action_add"), () -> {
-            boolean ok = serve.addRoot(uri);
-            toast(ok ? Lang.get("dir.added") : Lang.get("common.add_failed") + serve.getLastError());
-        });
     }
 
     // 目录管理子界面：列表多选 + 打开 / 刷新 / 删除
@@ -3040,17 +2870,11 @@ public class MainActivity extends AppCompatActivity {
         addRow(data_group, buildRow(R.drawable.file_down, Lang.get("settings.import"), Lang.get("settings.import_desc"),
                 buildValue("›"), this::importTags));
 
-        String exportTree = prefs.getString(KEY_EXPORT_TREE, "");
-
-        addRow(data_group, buildRow(R.drawable.folder, Lang.get("settings.export_dir"),
-                exportTree.isEmpty() ? Lang.get("settings.export_dir_unset") : exportTree,
-                buildValue("›"),
-                this::pickExportDir));
-
+        // 存储方式固定成「所有文件访问 + 应用内选目录」了 保留这一行给用户看
         addRow(data_group, buildRow(R.drawable.database, Lang.get("settings.storage_mode"),
                 storageModeLabel(),
                 buildValue("›"),
-                this::showStorageModeDialog));
+                this::showStorageModeInfo));
 
         // 支持与关于
         addRow(support_group, buildRow(R.drawable.circle_question_mark, Lang.get("settings.help"), Lang.get("settings.help_desc"),
@@ -3063,15 +2887,11 @@ public class MainActivity extends AppCompatActivity {
                 buildBadge(Lang.get("common.reserved")), null));
     }
 
-    // 设置页里显示的存储方式
+    // 设置页里显示的存储方式（只有这一种）
     private String storageModeLabel() {
-        if (MODE_ALL_FILES.equals(storage_mode)) {
-            return hasAllFilesAccess()
-                    ? Lang.get("settings.storage_all")
-                    : Lang.get("settings.storage_all_denied");
-        }
-
-        return Lang.get("settings.storage_saf");
+        return hasAllFilesAccess()
+                ? Lang.get("settings.storage_all")
+                : Lang.get("settings.storage_all_denied");
     }
 
     private void addRow(LinearLayout group, View row) {
@@ -3390,38 +3210,10 @@ public class MainActivity extends AppCompatActivity {
 
     // 导出 / 导入标签库
 
-    private void pickExportDir() {
-        picker_purpose = 1;
-        tree_picker.launch(null);
-    }
-
+    // 导出：每次都走系统「保存到…」对话框
+    // 默认导出目录那套要 SAF tree 授权 跟着系统选择器一起砍了
     private void exportTags() {
-        String tree = prefs.getString(KEY_EXPORT_TREE, "");
-
-        if (tree.isEmpty()) {
-            export_picker.launch(EXPORT_FILE_NAME);
-            return;
-        }
-
-        runAction(Lang.get("settings.export"), () -> {
-            byte[] data = readTagLibraryBytes();
-
-            if (data == null) {
-                toast(Lang.get("export.read_failed"));
-                return;
-            }
-
-            // 复用 SAF 存储层 往已授权的导出目录里写
-            SafStorageAccess exporter = new SafStorageAccess(getApplicationContext());
-            exporter.addRoot(EXPORT_ROOT_ID, tree);
-
-            try {
-                exporter.writeAll(new FileRef(EXPORT_ROOT_ID, EXPORT_FILE_NAME), data, true);
-                toast(Lang.get("export.done_default_prefix") + EXPORT_FILE_NAME);
-            } catch (IOException error) {
-                toast(Lang.get("common.export_failed") + error.getMessage());
-            }
-        });
+        export_picker.launch(EXPORT_FILE_NAME);
     }
 
     private void onExportPicked(Uri uri) {
