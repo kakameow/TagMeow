@@ -11,17 +11,12 @@ endif()
 
 if(MSVC)
     add_compile_options(/utf-8 /W4 /wd4100)
-    
+
     foreach(flag_var
             CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
             CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
         string(REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
     endforeach()
-endif()
-
-if(MINGW)
-    add_link_options(-static -static-libgcc -static-libstdc++)
-    add_link_options(-Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
 endif()
 
 find_package(nlohmann_json REQUIRED)
@@ -39,6 +34,11 @@ add_executable(tagmeow
     core/src/file_database.cpp
     core/src/tag_serve.cpp
 )
+
+# ====== target 创建后才能设置链接选项 ======
+if(MINGW)
+    target_link_options(tagmeow PRIVATE -static)
+endif()
 
 target_include_directories(tagmeow PRIVATE
     ${CMAKE_SOURCE_DIR}

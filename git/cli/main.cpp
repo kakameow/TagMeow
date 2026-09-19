@@ -9,6 +9,34 @@
 
 #ifdef _WIN32
 #include <windows.h>
+
+static std::string ansiToUtf8(const std::string &ansi)
+{
+    if (ansi.empty())
+    {
+        return {};
+    }
+
+    int wlen = MultiByteToWideChar(CP_ACP, 0, ansi.c_str(), (int)ansi.size(), nullptr, 0);
+    if (wlen <= 0)
+    {
+        return ansi;
+    }
+
+    std::wstring wstr(wlen, L'\0');
+    MultiByteToWideChar(CP_ACP, 0, ansi.c_str(), (int)ansi.size(), &wstr[0], wlen);
+
+    int u8len = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), (int)wstr.size(), nullptr, 0, nullptr, nullptr);
+    if (u8len <= 0)
+    {
+        return ansi;
+    }
+
+    std::string u8str(u8len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), (int)wstr.size(), &u8str[0], u8len, nullptr, nullptr);
+    return u8str;
+}
+
 #endif
 
 struct ConfigLoader
@@ -27,6 +55,9 @@ struct ConfigLoader
     std::filesystem::path download_path_ = "./download";
     std::uint16_t broadcast_port_ = UDP_DEFAULT_PORT;
     std::string broadcast_magic_word_ = UDP_DEFAULT_MAGIC;
+
+    // 保留完整 JSON 用于保留 GUI / CLI 各自独有的字段
+    nlohmann::json raw_json_ = nlohmann::json::object();
 
     mutable std::string error_string_;
 };
@@ -80,6 +111,8 @@ bool ConfigLoader::loadConfig(std::filesystem::path path_utf8)
         nlohmann::json config_json;
         file >> config_json;
 
+        raw_json_ = config_json;
+
         bool has_error = false;
         std::string field_errors;
 
@@ -118,7 +151,7 @@ bool ConfigLoader::loadConfig(std::filesystem::path path_utf8)
                 {
                     tag_mode_ = TagFileManager::StoreMode::Sidecar;
                 }
-                else if (mode == "Embedded")
+                else if (mode == "Embedded" || mode == "Filename")
                 {
                     tag_mode_ = TagFileManager::StoreMode::Filename;
                 }
@@ -176,7 +209,7 @@ bool ConfigLoader::loadConfig(std::filesystem::path path_utf8)
                 }
                 else
                 {
-                    field_errors += "  - BroadcastPort: out of range 1-65535 (" + std::to_string(port) + ")" + std::to_string(UDP_DEFAULT_PORT) + "\n";
+                    field_errors += "  - BroadcastPort: out of range 1-65535 (" + std::to_string(port) + ")\n";
                     has_error = true;
                 }
             }
@@ -225,17 +258,35 @@ bool ConfigLoader::loadConfig(std::filesystem::path path_utf8)
 
 bool ConfigLoader::saveConfig(std::filesystem::path path_utf8)
 {
-    if (!std::filesystem::exists(path_utf8))
-    {
-        error_string_ = "[warning] file does not exist: " + path_utf8.string();
-        return false;
-    }
-
     try
     {
-        nlohmann::json default_config;
-        default_config["Version"] = version_;
-        default_config["DefaultLanguage"] = default_language_;
+        // 如果文件已存在 先读进来保留未知字段
+        if (std::filesystem::exists(path_utf8))
+        {
+            std::ifstream in(path_utf8);
+            if (in.is_open())
+            {
+                try
+                {
+                    nlohmann::json existing;
+                    in >> existing;
+                    if (existing.is_object())
+                    {
+                        raw_json_ = existing;
+                    }
+                }
+                catch (...)
+                {
+                    // 文件坏了就当没有 用当前 raw_json_
+                }
+            }
+        }
+
+        // 以 raw_json_ 为基底 只覆盖自己认识的字段
+        nlohmann::json out_json = raw_json_.is_object() ? raw_json_ : nlohmann::json::object();
+
+        out_json["Version"] = version_;
+        out_json["DefaultLanguage"] = default_language_;
 
         std::string tag_mode_str;
         switch (tag_mode_)
@@ -251,18 +302,25 @@ bool ConfigLoader::saveConfig(std::filesystem::path path_utf8)
             break;
         }
 
-        default_config["TagMode"] = tag_mode_str;
-        default_config["ServerWaitingTime"] = server_waiting_time_.count();
-        default_config["DownloadPath"] = download_path_.string();
-        default_config["BroadcastPort"] = broadcast_port_;
-        default_config["BroadcastMagicWord"] = broadcast_magic_word_;
+        out_json["TagMode"] = tag_mode_str;
+        out_json["ServerWaitingTime"] = server_waiting_time_.count();
+        out_json["DownloadPath"] = download_path_.string();
+        out_json["BroadcastPort"] = broadcast_port_;
+        out_json["BroadcastMagicWord"] = broadcast_magic_word_;
+
+        // 确保目录存在
+        if (!path_utf8.parent_path().empty() &&
+            !std::filesystem::exists(path_utf8.parent_path()))
+        {
+            std::filesystem::create_directories(path_utf8.parent_path());
+        }
 
         std::ofstream file(path_utf8);
         if (file.is_open())
         {
-            file << default_config.dump(4) << std::endl;
-            error_string_ = "[tip] the default configuration file has been created: " + path_utf8.string();
-            return false;
+            file << out_json.dump(4) << std::endl;
+            error_string_.clear();
+            return true;
         }
         else
         {
@@ -275,7 +333,6 @@ bool ConfigLoader::saveConfig(std::filesystem::path path_utf8)
         error_string_ = "[warning] an error occurred while creating the profile: " + std::string(e.what());
         return false;
     }
-    return true;
 }
 
 InputParser::InputParser()
@@ -369,6 +426,7 @@ int main(int argc, char const *argv[])
     InputParser command_s;
     DirectoryConfigManager dir_m("./config/path.json");
     TagServe tag_m(dir_m.getValidDirList(), config.tag_mode_, "./config/tag.json", "./config/index.db");
+    std::string color = "#FFB6C1";
 
     command_s.commands_.push_back("help");
     command_s.commands_.push_back("root");
@@ -378,14 +436,18 @@ int main(int argc, char const *argv[])
 
     std::string input;
 
-    for (size_t i = 1; i < argc; i++)
+    for (int i = 1; i < argc; ++i)
     {
         if (i > 1)
         {
             input += " ";
         }
 
+#ifdef _WIN32
+        std::string arg = ansiToUtf8(argv[i]);
+#else
         std::string arg = argv[i];
+#endif
 
         if (arg.find(' ') != std::string::npos || arg.find('\t') != std::string::npos)
         {
@@ -411,7 +473,7 @@ int main(int argc, char const *argv[])
 
     switch (index)
     {
-        
+
     // help
     case 0:
         std::cout << "available commands: help / root / tag / file / search" << std::endl;
@@ -444,26 +506,14 @@ int main(int argc, char const *argv[])
             if (parameter[1] == "list")
             {
                 matched = true;
+                std::cout << "list:" << std::endl;
                 for (auto path : dir_m.getValidDirList())
                 {
                     std::cout << path << std::endl;
                 }
-            }
-            else if (parameter[1] == "reload")
-            {
-                matched = true;
-                dir_m.clearInvalidPath();
-                if (tag_m.reLoadRoot(dir_m.getValidDirList()))
-                {
-                    std::cout << "root reload done" << std::endl;
-                }
-                else
-                {
-                    std::cout << "root reload failed" << std::endl;
-                }
+                std::cout << std::endl;
             }
             break;
-
         case 3:
             if (parameter[1] == "add")
             {
@@ -473,16 +523,16 @@ int main(int argc, char const *argv[])
                     if (tag_m.addRoot(dir_m.getLastValidDir()))
                     {
                         dir_m.saveToFile();
-                        std::cout << "root added: " << parameter[2] << std::endl;
+                        std::cout << "added:" << parameter[2] << std::endl;
                     }
                     else
                     {
-                        std::cout << "add root failed" << std::endl;
+                        std::cout << tag_m.getLastError() << " / " << tag_m.getDBError() << std::endl;
                     }
                 }
                 else
                 {
-                    std::cout << "invalid path: " << parameter[2] << std::endl;
+                    std::cout << dir_m.getLastError() << std::endl;
                 }
             }
             else if (parameter[1] == "remove")
@@ -493,28 +543,32 @@ int main(int argc, char const *argv[])
                     if (tag_m.removeRoot(parameter[2]))
                     {
                         dir_m.saveToFile();
-                        std::cout << "root removed: " << parameter[2] << std::endl;
+                        std::cout << "removed:" << parameter[2] << std::endl;
                     }
                     else
                     {
-                        std::cout << "remove root failed" << std::endl;
+                        std::cout << tag_m.getLastError() << " / " << tag_m.getDBError() << std::endl;
                     }
                 }
                 else
                 {
-                    std::cout << "path not found: " << parameter[2] << std::endl;
+                    std::cout << dir_m.getLastError() << std::endl;
                 }
             }
             break;
-
         default:
             break;
         }
 
         if (!matched)
         {
-            std::cout << "usage: tagmeow root list / reload / add <path> / remove <path>" << std::endl;
+            std::cout << "available commands: list / add / remove" << std::endl;
+            std::cout << "tagmeow help" << std::endl;
+            std::cout << "tagmeow root list" << std::endl;
+            std::cout << "tagmeow root add <path>" << std::endl;
+            std::cout << "tagmeow root remove <path>" << std::endl;
         }
+
         break;
     }
 
@@ -523,164 +577,145 @@ int main(int argc, char const *argv[])
     {
         bool matched = false;
 
-        switch (size)
+        if (size < 2)
         {
-        case 2:
-            if (parameter[1] == "list")
-            {
-                matched = true;
-                for (const auto &pair : tag_m.getTypeTag())
-                {
-                    std::cout << "Type: " << pair.first << std::endl;
-                    std::cout << "Values: ";
-                    for (const auto &value : pair.second)
-                    {
-                        std::cout << value << " ";
-                    }
-                    std::cout << std::endl;
-                }
-            }
-            else if (parameter[1] == "save")
-            {
-                matched = true;
-                if (tag_m.saveTag())
-                {
-                    std::cout << "tag saved" << std::endl;
-                }
-                else
-                {
-                    std::cout << "save tag failed" << std::endl;
-                }
-            }
-            else if (parameter[1] == "reload")
-            {
-                matched = true;
-                if (tag_m.reLoadTag("./config/tag.json"))
-                {
-                    std::cout << "tag reloaded" << std::endl;
-                }
-                else
-                {
-                    std::cout << "reload tag failed" << std::endl;
-                }
-            }
             break;
+        }
 
-        default:
-            if (size > 3)
+        if (parameter[1] == "list" && size == 2)
+        {
+            matched = true;
+            std::cout << "list:" << std::endl;
+            for (const auto &pair : tag_m.getTypeTag())
             {
-                for (size_t i = 2; i < size; i++)
+                std::cout << "Type: " << pair.first << std::endl;
+                std::cout << "Values: ";
+                for (const auto &value : pair.second)
                 {
-                    temp_strs.push_back(parameter[i]);
+                    std::cout << value << " ";
                 }
-
-                if (parameter[1] == "addtag")
-                {
-                    matched = true;
-                    std::swap(temp_strs[2], temp_strs.back());
-                    temp_strs.pop_back();
-
-                    if (tag_m.addTag(parameter[2], temp_strs))
-                    {
-                        std::cout << "tag added" << std::endl;
-                    }
-                    else
-                    {
-                        std::cout << "add tag failed" << std::endl;
-                    }
-                }
-                else if (parameter[1] == "addtype")
-                {
-                    matched = true;
-                    if (tag_m.addType(parameter[2], parameter[3]))
-                    {
-                        std::cout << "type added" << std::endl;
-                    }
-                    else
-                    {
-                        std::cout << "add type failed" << std::endl;
-                    }
-                }
-                else if (parameter[1] == "removetag")
-                {
-                    matched = true;
-                    if (tag_m.removeTag(temp_strs))
-                    {
-                        std::cout << "tag removed" << std::endl;
-                    }
-                    else
-                    {
-                        std::cout << "remove tag failed" << std::endl;
-                    }
-                }
-                else if (parameter[1] == "removetype")
-                {
-                    matched = true;
-                    if (tag_m.removeType(temp_strs))
-                    {
-                        std::cout << "type removed" << std::endl;
-                    }
-                    else
-                    {
-                        std::cout << "remove type failed" << std::endl;
-                    }
-                }
-                else if (parameter[1] == "renametag")
-                {
-                    matched = true;
-                    if (tag_m.renameTag(parameter[2], parameter[3]))
-                    {
-                        std::cout << "tag renamed" << std::endl;
-                    }
-                    else
-                    {
-                        std::cout << "rename tag failed" << std::endl;
-                    }
-                }
-                else if (parameter[1] == "renametype")
-                {
-                    matched = true;
-                    if (tag_m.renameType(parameter[2], parameter[3]))
-                    {
-                        std::cout << "type renamed" << std::endl;
-                    }
-                    else
-                    {
-                        std::cout << "rename type failed" << std::endl;
-                    }
-                }
-                else if (parameter[1] == "resetcolor")
-                {
-                    matched = true;
-                    if (tag_m.setTypeColor(parameter[2], parameter[3]))
-                    {
-                        std::cout << "type color updated" << std::endl;
-                    }
-                    else
-                    {
-                        std::cout << "reset color failed" << std::endl;
-                    }
-                }
-                else if (parameter[1] == "resettype")
-                {
-                    matched = true;
-                    if (tag_m.setTagType(parameter[2], parameter[3]))
-                    {
-                        std::cout << "tag type updated" << std::endl;
-                    }
-                    else
-                    {
-                        std::cout << "reset type failed" << std::endl;
-                    }
-                }
+                std::cout << std::endl;
             }
-            break;
+        }
+        else if (parameter[1] == "addtype" && size >= 3)
+        {
+            matched = true;
+            if (size >= 4)
+            {
+                color = parameter[3];
+            }
+
+            if (tag_m.addType(parameter[2], color))
+            {
+                std::cout << "added" << std::endl;
+            }
+            else
+            {
+                std::cout << tag_m.getTagError() << std::endl;
+            }
+        }
+        else if (parameter[1] == "addtag" && size >= 4)
+        {
+            matched = true;
+
+            for (size_t i = 3; i < size; i++)
+            {
+                temp_strs.push_back(parameter[i]);
+            }
+
+            if (tag_m.addTag(parameter[2], temp_strs))
+            {
+                std::cout << "added" << std::endl;
+            }
+            else
+            {
+                std::cout << tag_m.getTagError() << std::endl;
+            }
+        }
+        else if (parameter[1] == "removetag" && size >= 3)
+        {
+            matched = true;
+            for (size_t i = 2; i < size; i++)
+            {
+                temp_strs.push_back(parameter[i]);
+            }
+
+            if (tag_m.removeTag(temp_strs))
+            {
+                std::cout << "removed" << std::endl;
+            }
+            else
+            {
+                std::cout << tag_m.getTagError() << std::endl;
+            }
+        }
+        else if (parameter[1] == "removetype" && size >= 3)
+        {
+            matched = true;
+            for (size_t i = 2; i < size; i++)
+            {
+                temp_strs.push_back(parameter[i]);
+            }
+
+            if (tag_m.removeType(temp_strs))
+            {
+                std::cout << "removed" << std::endl;
+            }
+            else
+            {
+                std::cout << tag_m.getTagError() << std::endl;
+            }
+        }
+        else if (parameter[1] == "renametag" && size == 4)
+        {
+            matched = true;
+            if (tag_m.renameTag(parameter[2], parameter[3]))
+            {
+                std::cout << "renamed" << std::endl;
+            }
+            else
+            {
+                std::cout << tag_m.getTagError() << std::endl;
+            }
+        }
+        else if (parameter[1] == "renametype" && size == 4)
+        {
+            matched = true;
+            if (tag_m.renameType(parameter[2], parameter[3]))
+            {
+                std::cout << "renamed" << std::endl;
+            }
+            else
+            {
+                std::cout << tag_m.getTagError() << std::endl;
+            }
+        }
+        else if (parameter[1] == "resettype" && size == 4)
+        {
+            matched = true;
+            if (tag_m.setTagType(parameter[2], parameter[3]))
+            {
+                std::cout << "success" << std::endl;
+            }
+            else
+            {
+                std::cout << tag_m.getTagError() << std::endl;
+            }
         }
 
         if (!matched)
         {
-            std::cout << "usage: tagmeow tag list / save / reload / addtype <type> <#RRGGBB> / addtag <type> <tags...> / removetag <tags...> / removetype <types...> / renametag <old> <new> / renametype <old> <new> / resetcolor <type> <#RRGGBB> / resettype <tag> <type>" << std::endl;
+            std::cout << "available commands: list / save / reload / addtag / addtype / removetag / removetype / renametag / renametype / resettype" << std::endl;
+            std::cout << "tagmeow tag list" << std::endl;
+            std::cout << "tagmeow tag addtag <type> <tag1,tag2,...>" << std::endl;
+            std::cout << "tagmeow tag addtype <type> [color]" << std::endl;
+            std::cout << "tagmeow tag removetag <tag1,tag2,...>" << std::endl;
+            std::cout << "tagmeow tag removetype <type1,type2,...>" << std::endl;
+            std::cout << "tagmeow tag renametag <old> <new>" << std::endl;
+            std::cout << "tagmeow tag renametype <old> <new>" << std::endl;
+            std::cout << "tagmeow tag resettype <tag> <type>" << std::endl;
         }
+
         break;
     }
 
@@ -689,114 +724,80 @@ int main(int argc, char const *argv[])
     {
         bool matched = false;
 
-        switch (size)
+        if (size < 2)
         {
-        case 2:
-            if (parameter[1] == "convertmode")
-            {
-                matched = true;
-                TagFileManager::StoreMode from = config.tag_mode_;
-                TagFileManager::StoreMode to = (from == TagFileManager::StoreMode::Sidecar) ? TagFileManager::StoreMode::Filename : TagFileManager::StoreMode::Sidecar;
-                if (tag_m.convertMode(from, to))
-                {
-                    config.tag_mode_ = to;
-                    config.saveConfig();
-                    std::cout << "mode converted" << std::endl;
-                }
-                else
-                {
-                    std::cout << "convert mode failed" << std::endl;
-                }
-            }
             break;
+        }
 
-        case 3:
-            if (parameter[1] == "info")
+        if (parameter[1] == "convertmode" && size == 2)
+        {
+            matched = true;
+            TagFileManager::StoreMode from = config.tag_mode_;
+            TagFileManager::StoreMode to = (from == TagFileManager::StoreMode::Sidecar) ? TagFileManager::StoreMode::Filename : TagFileManager::StoreMode::Sidecar;
+            if (tag_m.convertMode(from, to))
             {
-                matched = true;
-                auto info = tag_m.getFileInfo(parameter[2]);
-                if (info.has_value())
-                {
-                    auto &f = info.value();
-                    std::cout << "file_id_: " << f.file_id_ << std::endl;
-                    std::cout << "path_: " << f.path_ << std::endl;
-                    std::cout << "rel_path_: " << f.rel_path_ << std::endl;
-                    std::cout << "file_mtime_: " << f.file_mtime_ << std::endl;
-                    std::cout << "file_size_: " << f.file_size_ << std::endl;
-                    std::cout << "sidecar_mtime_: " << f.sidecar_mtime_ << std::endl;
-                    std::cout << "tags: ";
-                    for (auto t : f.tags_)
-                    {
-                        std::cout << t << " ";
-                    }
-                    std::cout << std::endl;
-                    std::cout << "file_version_: " << f.file_version_ << std::endl;
-                    std::cout << "last_refresh_time_: " << f.last_refresh_time_ << std::endl;
-                }
-                else
-                {
-                    std::cout << "file not found" << std::endl;
-                }
+                config.tag_mode_ = to;
+                config.saveConfig();
+                std::cout << "success" << std::endl;
             }
-            break;
-
-        default:
-            if (size > 3)
+            else
             {
-                for (size_t i = 3; i < size; i++)
-                {
-                    temp_strs.push_back(parameter[i]);
-                }
-
-                if (parameter[1] == "add")
-                {
-                    matched = true;
-                    if (tag_m.addFileTag(parameter[2], temp_strs))
-                    {
-                        std::cout << "file tag added" << std::endl;
-                        if (tag_m.updateFile(parameter[2]))
-                        {
-                            std::cout << "db updated" << std::endl;
-                        }
-                    }
-                    else
-                    {
-                        std::cout << "add file tag failed" << std::endl;
-                    }
-                }
-                else if (parameter[1] == "remove")
-                {
-                    matched = true;
-                    if (tag_m.removeFileTag(parameter[2], temp_strs))
-                    {
-                        std::cout << "file tag removed" << std::endl;
-                        if (tag_m.updateFile(parameter[2]))
-                        {
-                            std::cout << "db updated" << std::endl;
-                        }
-                    }
-                    else
-                    {
-                        std::cout << "remove file tag failed" << std::endl;
-                    }
-                }
+                std::cout << tag_m.getLastError() << " / " << tag_m.getFileError() << std::endl;
             }
-            break;
+        }
+        else if (parameter[1] == "add" && size >= 4)
+        {
+            matched = true;
+            for (size_t i = 3; i < size; i++)
+            {
+                temp_strs.push_back(parameter[i]);
+            }
+
+            if (tag_m.addFileTag(parameter[2], temp_strs))
+            {
+                std::cout << "added" << std::endl;
+            }
+            else
+            {
+                std::cout << tag_m.getTagError() << std::endl;
+            }
+        }
+        else if (parameter[1] == "remove" && size >= 4)
+        {
+            matched = true;
+            for (size_t i = 3; i < size; i++)
+            {
+                temp_strs.push_back(parameter[i]);
+            }
+
+            if (tag_m.removeFileTag(parameter[2], temp_strs))
+            {
+                std::cout << "removed" << std::endl;
+            }
+            else
+            {
+                std::cout << tag_m.getTagError() << std::endl;
+            }
         }
 
         if (!matched)
         {
-            std::cout << "usage: tagmeow file convertmode / info <path> / add <path> <tags...> / remove <path> <tags...>" << std::endl;
+            std::cout << "available commands: convertmode / info / add / remove" << std::endl;
+            std::cout << "tagmeow file convertmode" << std::endl;
+            std::cout << "tagmeow file info <path>" << std::endl;
+            std::cout << "tagmeow file add <path> <tag1,tag2,...>" << std::endl;
+            std::cout << "tagmeow file remove <path> <tag1,tag2,...>" << std::endl;
         }
+
         break;
     }
 
     // search
     case 4:
-    {
+
         if (size > 2)
         {
-            FileDatabase::SearchOptions opts;
+            FileDatabase::SearchOptions s_tags;
             bool is_include = false;
             bool is_exclude = false;
             bool is_only = false;
@@ -810,6 +811,7 @@ int main(int argc, char const *argv[])
                     is_only = false;
                     continue;
                 }
+
                 if (parameter[i] == "-e")
                 {
                     is_include = false;
@@ -817,6 +819,7 @@ int main(int argc, char const *argv[])
                     is_only = false;
                     continue;
                 }
+
                 if (parameter[i] == "-o")
                 {
                     is_include = false;
@@ -827,35 +830,35 @@ int main(int argc, char const *argv[])
 
                 if (is_include)
                 {
-                    opts.include_.push_back(parameter[i]);
+                    s_tags.include_.push_back(parameter[i]);
                 }
                 if (is_exclude)
                 {
-                    opts.exclude_.push_back(parameter[i]);
+                    s_tags.exclude_.push_back(parameter[i]);
                 }
                 if (is_only)
                 {
-                    opts.only_.push_back(parameter[i]);
+                    s_tags.only_.push_back(parameter[i]);
                 }
-                    
             }
-
-            for (auto file : tag_m.searchByTags(opts))
+            std::cout << "file list:" << std::endl;
+            for (auto file : tag_m.searchByTags(s_tags))
             {
                 std::cout << file.path_ << "\ntags: ";
-                for (auto t : file.tags_)
+                for (auto tag : file.tags_)
                 {
-                    std::cout << t << ",";
+                    std::cout << tag << ",";
                 }
                 std::cout << "\n";
             }
         }
         else
         {
-            std::cout << "usage: tagmeow search [-i <tags...>] [-e <tags...>] [-o <tags...>]" << std::endl;
+            std::cout << "available commands: help / root / tag / file / search" << std::endl;
+            std::cout << "tagmeow search [-i <tag1,tag2,...>] [-e <tag1,tag2,...>] [-o <tag1,tag2,...>]" << std::endl;
         }
+
         break;
-    }
 
     default:
         std::cout << "unknown command, try: tagmeow help" << std::endl;

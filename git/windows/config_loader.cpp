@@ -39,6 +39,9 @@ bool ConfigLoader::loadConfig(std::filesystem::path path_utf8)
         nlohmann::json config_json;
         file >> config_json;
 
+        // 保留完整 JSON
+        raw_json_ = config_json;
+
         bool has_error = false;
         std::string field_errors;
 
@@ -230,15 +233,17 @@ bool ConfigLoader::saveConfig(std::filesystem::path path_utf8)
 {
     try
     {
-        // 目录不存在时自动创建(修复 CLI 版必须先存在文件才能保存的问题)
+        // 目录不存在时自动创建
         if (!path_utf8.parent_path().empty())
         {
             std::filesystem::create_directories(path_utf8.parent_path());
         }
 
-        nlohmann::json default_config;
-        default_config["Version"] = version_;
-        default_config["DefaultLanguage"] = default_language_;
+        // 以 raw_json_ 为基底 只覆盖自己认识的字段
+        nlohmann::json out_json = raw_json_.is_object()  ? raw_json_  : nlohmann::json::object();
+
+        out_json["Version"] = version_;
+        out_json["DefaultLanguage"] = default_language_;
 
         std::string tag_mode_str;
         switch (tag_mode_)
@@ -254,18 +259,18 @@ bool ConfigLoader::saveConfig(std::filesystem::path path_utf8)
             break;
         }
 
-        default_config["TagMode"] = tag_mode_str;
-        default_config["ServerWaitingTime"] = server_waiting_time_.count();
-        default_config["DownloadPath"] = download_path_.string();
-        default_config["BroadcastPort"] = broadcast_port_;
-        default_config["BroadcastMagicWord"] = broadcast_magic_word_;
-        default_config["FontSize"] = font_size_;
-        default_config["Theme"] = theme_;
+        out_json["TagMode"] = tag_mode_str;
+        out_json["ServerWaitingTime"] = server_waiting_time_.count();
+        out_json["DownloadPath"] = download_path_.string();
+        out_json["BroadcastPort"] = broadcast_port_;
+        out_json["BroadcastMagicWord"] = broadcast_magic_word_;
+        out_json["FontSize"] = font_size_;
+        out_json["Theme"] = theme_;
 
         std::ofstream file(path_utf8);
         if (file.is_open())
         {
-            file << default_config.dump(4) << std::endl;
+            file << out_json.dump(4) << std::endl;
             error_string_.clear();
             return true;
         }
