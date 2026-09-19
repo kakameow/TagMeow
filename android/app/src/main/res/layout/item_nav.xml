@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/navItem"
+    android:layout_width="0dp"
+    android:layout_height="52dp"
+    android:layout_weight="1"
+    android:background="#00000000"
+    android:foreground="?attr/selectableItemBackground"
+    android:gravity="center"
+    android:orientation="vertical">
+
+    <!-- 图标改成矢量图（颜色由代码 setImageTintList 决定） -->
+    <ImageView
+        android:id="@+id/navIcon"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:contentDescription="@null"
+        android:scaleType="fitCenter" />
+
+    <TextView
+        android:id="@+id/navLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="3dp"
+        android:textColor="#626a75"
+        android:textSize="10sp" />
+</LinearLayout>

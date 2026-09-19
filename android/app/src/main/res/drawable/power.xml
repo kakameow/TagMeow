@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 power.svg 转换而来：24dp / 线宽 2 / 圆头圆角，颜色留给代码 tint -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M12 2 L12 12"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M18.4 6.6 C21.9086 10.1099 21.9138 15.7975 18.4117 19.3138 C14.9096 22.8302 9.222 22.848 5.6979 19.3537 C2.1739 15.8593 2.1435 10.1718 5.63 6.64"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>

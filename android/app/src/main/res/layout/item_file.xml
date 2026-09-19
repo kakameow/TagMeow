@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/fileRow"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/selectableItemBackground"
+    android:gravity="center_vertical"
+    android:minHeight="61dp"
+    android:orientation="horizontal"
+    android:paddingStart="10dp"
+    android:paddingTop="7dp"
+    android:paddingEnd="4dp"
+    android:paddingBottom="7dp">
+
+    <!-- 文件图标：图片 / 视频会换成缩略图，其余按类型上矢量图 -->
+    <ImageView
+        android:id="@+id/fileIcon"
+        android:layout_width="33dp"
+        android:layout_height="33dp"
+        android:clipToOutline="true"
+        android:contentDescription="@null"
+        android:padding="7dp"
+        android:scaleType="fitCenter" />
+
+    <!-- 左侧信息区占 8/10 -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_weight="8"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/fileName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="middle"
+            android:maxLines="1"
+            android:textColor="#20242b"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/filePath"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:ellipsize="middle"
+            android:maxLines="1"
+            android:textColor="#8c939f"
+            android:textSize="10sp" />
+
+        <LinearLayout
+            android:id="@+id/fileTags"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:orientation="horizontal" />
+    </LinearLayout>
+
+    <!--
+      右侧标签修改入口占 2/10
+      整块都是点击区 点它打开这个文件的标签编辑界面
+    -->
+    <LinearLayout
+        android:id="@+id/fileMore"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="2"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center"
+        android:minHeight="46dp"
+        android:orientation="vertical">
+
+        <ImageView
+            android:id="@+id/fileMoreIcon"
+            android:layout_width="17dp"
+            android:layout_height="17dp"
+            android:contentDescription="@null"
+            android:scaleType="fitCenter"
+            android:src="@drawable/tag"
+            android:tint="#9aa1ab" />
+
+        <TextView
+            android:id="@+id/fileMoreLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="标签"
+            android:textColor="#9aa1ab"
+            android:textSize="10sp" />
+    </LinearLayout>
+</LinearLayout>

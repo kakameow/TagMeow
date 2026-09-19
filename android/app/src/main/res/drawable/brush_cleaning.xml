@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 Lucide 的 brush-cleaning.svg 转换而来：24dp / 线宽 2 / 圆头圆角 -->
+<!-- 颜色留给代码 tint（默认黑色），改配色不用重新导图 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M16 22 L15 18"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19 14 C19.5523 14 20 13.5523 20 13 L20 12 C20 10.8954 19.1046 10 18 10 L15 10 C14.4477 10 14 9.5523 14 9 L14 4 C14 2.8954 13.1046 2 12 2 C10.8954 2 10 2.8954 10 4 L10 9 C10 9.5523 9.5523 10 9 10 L6 10 C4.8954 10 4 10.8954 4 12 L4 13 C4 13.5523 4.4477 14 5 14"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19 14 L5 14 L3.027 20.767 C2.9556 21.0649 3.0247 21.379 3.2145 21.6195 C3.4042 21.8599 3.6937 22.0002 4 22 L20 22 C20.3063 22.0002 20.5958 21.8599 20.7855 21.6195 C20.9753 21.379 21.0444 21.0649 20.973 20.767 Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M8 22 L9 18"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>

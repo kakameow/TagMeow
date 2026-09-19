@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 Lucide 的 wrench.svg 转换而来：24dp / 线宽 2 / 圆头圆角 -->
+<!-- 颜色留给代码 tint（默认黑色），改配色不用重新导图 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M14.7 6.3 C14.3189 6.6888 14.3189 7.3112 14.7 7.7 L16.3 9.3 C16.6888 9.6811 17.3112 9.6811 17.7 9.3 L20.806 6.195 C21.126 5.873 21.669 5.975 21.789 6.413 C22.4058 8.6563 21.6702 11.0539 19.9014 12.5652 C18.1326 14.0766 15.6496 14.4292 13.53 13.47 L5.62 21.38 C4.7916 22.2082 3.4487 22.2079 2.6205 21.3795 C1.7923 20.5511 1.7926 19.2082 2.621 18.38 L10.531 10.47 C9.5718 8.3504 9.9244 5.8674 11.4358 4.0986 C12.9471 2.3298 15.3447 1.5942 17.588 2.211 C18.026 2.331 18.128 2.873 17.807 3.195 Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>
