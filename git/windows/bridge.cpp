@@ -26,6 +26,9 @@ Bridge::Bridge(QObject *parent) : QObject(parent), config_(), dm_("./config/path
     // SyncServer/SyncClient 工作线程回调 -> 主线程状态栏
     QObject::connect(this, &Bridge::syncServerTip, this, &Bridge::onServerTipArrived);
     QObject::connect(this, &Bridge::syncClientTip, this, &Bridge::onClientTipArrived);
+    // 任务(目录)级完成提示：工作线程发信号 -> 主线程格式化文案
+    QObject::connect(this, &Bridge::syncServerTaskDone, this, &Bridge::onServerTaskDone);
+    QObject::connect(this, &Bridge::syncClientTaskDone, this, &Bridge::onClientTaskDone);
 }
 
 Bridge::~Bridge() = default;
@@ -719,7 +722,23 @@ const TextItem kUiTextTable[] = {
     { "status.client.failed", "客户端: 下载失败/断开" },
     { "status.client.cleared", "已清除下载记录" },
     { "status.client.disconnected", "已断开连接" },
-    };
+    // 任务(一个入队目录)完成提示：%1 任务名 %2 文件数 %3 大小
+    { "status.server.taskDone", "服务器: 任务完成 %1 (%2 个文件, %3)" },
+    { "status.client.taskDone", "客户端: 任务完成 %1 (%2 个文件, %3)" },
+    { "status.client.cacheHint", "（如果没有失败重下的需要 请点击 [清除下载记录缓存]）" },
+};
+
+// 字节数 -> 便于阅读的大小文本（任务完成提示用）
+QString formatBytes(qulonglong bytes)
+{
+    const double mb = static_cast<double>(bytes) / (1024.0 * 1024.0);
+    if (mb >= 1.0)
+    {
+        return QString::number(mb, 'f', 1) + QStringLiteral(" MB");
+    }
+    const double kb = static_cast<double>(bytes) / 1024.0;
+    return QString::number(kb, 'f', 1) + QStringLiteral(" KB");
+}
 } // namespace
 
 QString Bridge::uiText(const char *id, const char *zh) const
@@ -863,7 +882,7 @@ void Bridge::pushLanguageList()
     if (QObject *combo = findObject("languageCombo"))
     {
         int idx = 0;
-        for (size_t i = 0; i < langs.size(); ++i)
+        for (size_t i = 0; i < langs.size(); i++)
         {
             if (langs[i] == config_.default_language_)
             {
@@ -1042,7 +1061,13 @@ void Bridge::onClientDownloadClicked()
         }
         else
         {
+            // 具体失败原因（哪个文件、收了多少 / 共多少 错误码）由核心层 getLastError 提供
             msg = uiText("status.client.failed", "客户端: 下载失败/断开");
+            const QString detail = QString::fromStdString(s_client_->getLastError()).trimmed();
+            if (!detail.isEmpty())
+            {
+                msg += QStringLiteral(" - ") + detail;
+            }
         }
         emit syncClientTip(msg);
     });
@@ -1068,6 +1093,27 @@ void Bridge::onClientTipArrived(const QString &msg)
     setStatusLabel("clientStatusLabel", msg);
 }
 
+// 任务(目录)级完成提示：工作线程只传数据 这里在主线程格式化后写状态栏
+void Bridge::onServerTaskDone(const QString &name, int fileCount, qulonglong byteCount)
+{
+    const QString msg = uiText("status.server.taskDone", "服务器: 任务完成 %1 (%2 个文件, %3)")
+                            .arg(name)
+                            .arg(fileCount)
+                            .arg(formatBytes(byteCount));
+    qInfo() << msg;
+    setStatusLabel("serverStatusLabel", msg);
+}
+
+void Bridge::onClientTaskDone(const QString &name, int fileCount, qulonglong byteCount)
+{
+    const QString msg = uiText("status.client.taskDone", "客户端: 任务完成 %1 (%2 个文件, %3)")
+                            .arg(name)
+                            .arg(fileCount)
+                            .arg(formatBytes(byteCount));
+    qInfo() << msg;
+    setStatusLabel("clientStatusLabel", msg);
+}
+
 // 首次点击 snycWindow(打开同步窗口)时惰性创建 SyncServer/SyncClient
 // 参数与 cli/test.cpp 一致(config_ 的值); 只创建一次, 重复点击不再重建
 void Bridge::onSyncWindowOpened()
@@ -1075,12 +1121,26 @@ void Bridge::onSyncWindowOpened()
     if (!s_server_)
     {
         s_server_ = std::make_unique<SyncServer>(config_.broadcast_port_, config_.broadcast_magic_word_, config_.server_waiting_time_);
+        // 任务(入队目录)发完 -> 主线程状态栏提示（工作线程只发信号 不碰 QML）
+        s_server_->setTaskCallback([this](const TaskReport &report)
+        {
+            emit syncServerTaskDone(QString::fromStdString(report.name_), static_cast<int>(report.file_count_),
+                                    static_cast<qulonglong>(report.byte_count_));
+        });
         qInfo() << "[sync] SyncServer 已创建(首次打开同步窗口)";
     }
     if (!s_client_)
     {
         s_client_ = std::make_unique<SyncClient>(config_.broadcast_port_, config_.broadcast_magic_word_, config_.download_path_);
+        // 任务(入队目录)收完 -> 主线程状态栏提示（工作线程只发信号 不碰 QML）
+        s_client_->setTaskCallback([this](const TaskReport &report)
+        {
+            emit syncClientTaskDone(QString::fromStdString(report.name_), static_cast<int>(report.file_count_),
+                                    static_cast<qulonglong>(report.byte_count_));
+        });
         qInfo() << "[sync] SyncClient 已创建(首次打开同步窗口)";
+        // 客户端状态栏默认提示：下载记录缓存只增不减 需要重下时由用户手动清理
+        setStatusLabel("clientStatusLabel", uiText("status.client.cacheHint", "（如果没有失败重下的需要 请点击 [清除下载记录缓存]）"));
     }
 }
 
