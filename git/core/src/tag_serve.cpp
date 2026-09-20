@@ -477,7 +477,7 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
         std::error_code ec;
         std::filesystem::recursive_directory_iterator iter(root, ec);
         std::filesystem::recursive_directory_iterator end_iter;
-        for (; iter != end_iter; ++iter)
+        for (; iter != end_iter; iter++)
         {
             if (ec)
             {
@@ -541,7 +541,7 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
         std::error_code ec;
         std::filesystem::recursive_directory_iterator iter(root, ec);
         std::filesystem::recursive_directory_iterator end_iter;
-        for (; iter != end_iter; ++iter)
+        for (; iter != end_iter; iter++)
         {
             if (ec)
             {
@@ -691,7 +691,7 @@ bool TagServe::syncFileToDBNoLock(const std::filesystem::path &file_path_utf8)
     std::string rel_path;
     std::string best_root_str;
 
-    for (size_t i = 0; i < root_list_.size(); ++i)
+    for (size_t i = 0; i < root_list_.size(); i++)
     {
         const auto &root = root_list_[i];
 

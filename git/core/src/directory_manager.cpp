@@ -239,7 +239,7 @@ const std::vector<Directory> &DirectoryConfigManager::getDirectories() const
 
 const std::filesystem::path &DirectoryConfigManager::getLastValidDir() const
 {
-    for (auto it = managed_directories_.rbegin(); it != managed_directories_.rend(); ++it)
+    for (auto it = managed_directories_.rbegin(); it != managed_directories_.rend(); it++)
     {
         if (it->is_valid_)
         {
