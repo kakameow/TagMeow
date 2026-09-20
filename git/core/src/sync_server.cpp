@@ -157,6 +157,25 @@ void SyncServer::disconnect(std::error_code &ec)
     cv_.notify_all();
 }
 
+void SyncServer::setTaskCallback(std::function<void(const TaskReport &report)> cb)
+{
+    std::lock_guard<std::mutex> lock(task_mutex_);
+    task_callback_ = cb;
+}
+
+void SyncServer::notifyTask(const TaskReport &report)
+{
+    std::function<void(const TaskReport &report)> cb;
+    {
+        std::lock_guard<std::mutex> lock(task_mutex_);
+        cb = task_callback_;
+    }
+    if (cb)
+    {
+        cb(report);
+    }
+}
+
 std::string SyncServer::getLastError() const
 {
     std::lock_guard<std::mutex> lock(error_mutex_);
@@ -357,8 +376,15 @@ bool SyncServer::sendDirectory(const std::filesystem::path &dir, std::error_code
     std::vector<std::filesystem::path> files;
     collectFiles(dir, files);
 
-    for (const auto &file_path : files)
+    // 任务(入队目录)级统计：文件数固定 字节数按实际发送量累加（客户端跳过的不计）
+    TaskReport report;
+    report.name_ = dir.filename().u8string();
+    report.file_count_ = files.size();
+    report.byte_count_ = 0;
+
+    for (std::size_t file_index = 0; file_index < files.size(); file_index++)
     {
+        const std::filesystem::path &file_path = files[file_index];
         if (!running_ || disconnect_requested_)
         {
             ec = std::make_error_code(std::errc::operation_canceled);
@@ -400,6 +426,8 @@ bool SyncServer::sendDirectory(const std::filesystem::path &dir, std::error_code
         header.parent_dir_ = parent_dir;
         header.file_name_ = file_path.filename().u8string();
         header.file_size_ = file_size;
+        // 任务(目录)的最后一个文件打标记：接收端据此给出任务完成提示
+        header.last_in_dir_ = (file_index + 1 == files.size());
 
         client_->sendHeader(header, ec);
         if (ec)
@@ -441,7 +469,10 @@ bool SyncServer::sendDirectory(const std::filesystem::path &dir, std::error_code
             }
             offset += sent;
         }
+        report.byte_count_ += header.file_size_; // 实际发送量（客户端跳过的不计）
     }
+    // 任务(入队目录)全部文件处理完毕：通知上层（会话级回调语义不变）
+    notifyTask(report);
 
     return true;
 }
@@ -591,7 +622,7 @@ bool SyncServer::getInterfaceInfo(std::string &ip, std::string &broadcast, std::
     ec.clear();
 #ifdef _WIN32
     ULONG buf_len = 15000;
-    for (int attempt = 0; attempt < 3; ++attempt)
+    for (int attempt = 0; attempt < 3; attempt++)
     {
         IP_ADAPTER_ADDRESSES *adapters = static_cast<IP_ADAPTER_ADDRESSES *>(malloc(buf_len));
         if (adapters == nullptr)

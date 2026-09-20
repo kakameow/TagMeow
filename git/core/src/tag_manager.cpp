@@ -1050,7 +1050,7 @@ bool TagFileManager::writeSidecar(const std::filesystem::path &sidecar_path_utf8
     }
 
     std::string tag_str;
-    for (size_t i = 0; i < tags.size(); ++i)
+    for (size_t i = 0; i < tags.size(); i++)
     {
         if (i > 0)
             tag_str += ",";

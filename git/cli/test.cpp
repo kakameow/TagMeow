@@ -1,11 +1,11 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 
-#include "module_1/directory_manager.h"
-#include "module_1/language_manager.h"
-#include "module_2/tag_serve.h"
-#include "module_3/sync_server.h"
-#include "module_3/sync_client.h"
+#include "directory_manager.h"
+#include "language_manager.h"
+#include "tag_serve.h"
+#include "sync_server.h"
+#include "sync_client.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -1105,7 +1105,7 @@ int main(int argc, char const *argv[])
                 }
                 else
                 {
-                    //std::cout << s_client.getLastError() << std::endl;
+                    std::cout << s_client.getLastError() << std::endl;
                 }
             };
 

@@ -57,6 +57,9 @@ public:
     // 置位断开请求并唤醒工作线程 由工作线程在下一个有界阻塞点完成断开
     // （不直接操作 client_ 避免与工作线程的指针竞态）
     void disconnect(std::error_code &ec);
+    // 任务(入队目录)级完成通知：一个目录下的所有文件发送完毕时在工作线程调用
+    // 上层需自行保证线程安全
+    void setTaskCallback(std::function<void(const TaskReport &report)> cb);
     // 手动指定对外广告的 IP（默认 start 时按本机首个可用接口自动解析
     // 多网卡/VPN 环境自动解析错误时可覆盖 须在 start() 前调用）
     void setAdvertiseIP(const std::string &ip);
@@ -90,6 +93,10 @@ private:
     mutable std::mutex error_mutex_;
     mutable std::string error_string_;
 
+    // 任务级完成通知回调（主线程设置 工作线程调用 同一把锁保护）
+    std::function<void(const TaskReport &report)> task_callback_;
+    mutable std::mutex task_mutex_;
+
     // 工作线程主循环（状态机：广播 + 轮询 accept <-> 会话发送）
     // 所有阻塞 I/O 均有界（套接字超时）保证 stop()/disconnect() 可打断并安全 join
     void workerLoop(std::function<void(bool, std::error_code)> cb);
@@ -105,6 +112,8 @@ private:
     void closeClient(std::error_code &ec);
     // 线程安全设置错误信息
     void setError(const std::string &msg);
+    // 任务完成回调：拷贝回调后在锁外调用（不持锁执行上层代码）
+    void notifyTask(const TaskReport &report);
     // 获取本机 IP（多网卡时取首个非回环 v4 地址 必要时调用方可自行指定）
     std::string getLocalIP() const;
 

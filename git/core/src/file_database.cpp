@@ -708,7 +708,7 @@ std::vector<table::FileInfo> FileDatabase::searchByTags(const SearchOptions &opt
         }
 
         sql += " AND NOT EXISTS (SELECT 1 FROM tags t2 WHERE t2.file_id = f.file_id AND t2.tag NOT IN (";
-        for (size_t i = 0; i < only_set.size(); ++i)
+        for (size_t i = 0; i < only_set.size(); i++)
         {
             if (i > 0)
             {
@@ -749,7 +749,7 @@ std::vector<table::FileInfo> FileDatabase::searchByTags(const SearchOptions &opt
         if (!valid_include.empty())
         {
             sql += " AND (";
-            for (size_t i = 0; i < valid_include.size(); ++i)
+            for (size_t i = 0; i < valid_include.size(); i++)
             {
                 if (i > 0)
                 {
