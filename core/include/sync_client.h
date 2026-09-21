@@ -19,10 +19,15 @@
 // 1. 上层调用 scanServers() 同步扫描局域网 阻塞返回去重后的服务器列表
 // 2. 调用 startDownload(server_index, cb) 发起一次下载会话（异步立即返回）
 //    连接服务器后客户端不再需要上层操作 会话内被动接收 结束/失败/断开时回调
-//    每个文件：接收文件头 -> 与本地“成功下载记录”比对：
-//        无记录：发送 1 字节 '1' 通知服务器发送文件 接收文件数据 成功后写入记录
-//        已有成功记录 发送 1 字节 '0' 通知服务器跳过该文件
-//    特殊情况 服务器发送队列为空时由服务器主动断开连接
+//    每个文件：接收文件头 -> 与本地“成功下载记录”比对（记录命中还要校验磁盘文件存在且大小一致）：
+//        无记录或磁盘不一致：发送 1 字节 '1' 通知服务器发送文件 接收文件数据 成功后写入记录
+//        已有成功记录：发送 1 字节 '0' 通知服务器跳过该文件
+//    接收失败/中断：未传完的临时文件（目标路径 + ".part"）由 TcpConnection::receiveFileTo 删除 不留残留
+//    下载记录只增不减：命中（记录 + 磁盘文件存在且大小一致）即跳过 下次下载只补缺失的文件
+//    记录清理由上层手动触发（clearDownloadRecords） 核心层不做自动删除
+//    会话正常结束：服务器收尾时发送"会话结束"控制帧 客户端回确认后按正常完成回调
+//    连接中断：EOF/套接字错误且未收到该控制帧 一律按失败回调（不再当成服务器正常断开）
+//    特殊情况 服务器发送队列为空时同样走正常结束流程（回调 ec=errc::no_message_available）
 //    回调以 success=true、ec=errc::no_message_available 提示上层“发送队列为空”（本次无文件可下载）
 
 // 已知限制(仅注释说明, 未改动): 构造函数即创建 BroadcastReceiver 并绑定 UDP_DEFAULT_PORT(11451)
@@ -57,14 +62,18 @@ public:
     // - isDownloading() 为 true 时重复调用：立即回调失败（ec = errc::operation_in_progress）
     // - server_index 越界：立即回调失败（ec = errc::result_out_of_range）
     // - 回调语义：
-    //     success=true  ec 清空                         —— 至少完成 1 个文件后服务器正常断开
+    //     success=true  ec 清空                         —— 至少完成 1 个文件 且收到服务器"会话结束"标记后正常完成
     //     success=true  ec=errc::no_message_available   —— 服务器发送队列为空 本次无文件可下载（正常完成）
-    //     success=false ec=其他                         —— 连接失败/中途断开/协议错误
+    //     success=false ec=其他                         —— 连接失败/中途中断(含未收到会话结束标记的 EOF)/协议错误
     void startDownload(std::size_t server_index, std::function<void(bool success, std::error_code ec)> cb);
 
     // 断开当前连接并终止下载会话（工作线程在下一个有界阻塞点退出并回调失败）
     // 会话级断开：仅中断当前下载会话 工作线程保持存活 之后可再次扫描/下载
     void disconnect();
+
+    // 任务(入队目录)级完成通知：服务器一个目录下的文件全部处理完（接收或跳过）时在工作线程调用
+    // 上层需自行保证线程安全（Qt 侧用信号排队到主线程） 建议在首次下载前设置
+    void setTaskCallback(std::function<void(const TaskReport &report)> cb);
 
     // 清除下载缓存记录（records.json）：下次下载将重新下载全部文件（不删除已下载的文件本身）
     // 线程安全：下载进行中调用也不会产生数据竞争
@@ -86,10 +95,14 @@ private:
     std::unique_ptr<BroadcastReceiver> receiver_;
     std::unique_ptr<TcpConnection> conn_;
 
-    // 成功下载记录 持久化到 records_path_
+    // 成功下载记录 持久化到 records_path_（文件级续传依据：失败重连后据此跳过已完成的文件）
     std::vector<DownloadRecord> download_records_;
     std::filesystem::path records_path_;
     mutable std::mutex records_mutex_; // 保护 download_records_ 与记录文件
+
+    // 任务级完成通知回调（主线程设置 工作线程调用 同一把锁保护）
+    std::function<void(const TaskReport &report)> task_callback_;
+    mutable std::mutex task_mutex_;
 
     // 线程管理
     std::thread worker_thread_;
@@ -112,9 +125,13 @@ private:
     // 接收整个会话：文件头 -> 比对记录 -> 回复 -> 接收数据 循环；
     // 服务器发送队列为空主动断开时返回 errc::no_message_available
     bool syncReceiveAll(std::error_code &ec);
-    // 检查文件是否已有成功下载记录（记录是跳过判定的唯一依据）
+    // 检查文件是否已有成功下载记录且磁盘上确实存在同样大小的文件
+    // 记录命中后额外校验磁盘：文件被删除/移动或大小不一致时按未下载处理（重新接收）
+    // 避免回复 '0' 跳过导致本地永久缺文件
     // 清除记录后（clearDownloadRecords）下次下载将重新下载全部文件
     bool isFileAlreadyExists(const FileHeader &header) const;
+    // 任务完成回调：拷贝回调后在锁外调用（不持锁执行上层代码）
+    void notifyTask(const TaskReport &report);
     // 发送回复字节：true -> '1'(发送文件)，false -> '0'(跳过)
     bool sendReply(bool should_send, std::error_code &ec);
     // 下载记录读写（加载失败不致命 仅记录错误信息）

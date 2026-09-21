@@ -1,5 +1,6 @@
 #include "sync_client.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <fstream>
 #include <sstream>
@@ -8,6 +9,20 @@
 #ifndef _WIN32
 #include <poll.h>
 #endif
+
+namespace
+{
+    // 取相对父目录的首段作为任务(入队目录)名：服务端 parent_dir 首段即入队目录名
+    std::string firstDirComponent(const std::string &parent_dir)
+    {
+        std::size_t pos = parent_dir.find_first_of("/\\");
+        if (pos == std::string::npos)
+        {
+            return parent_dir;
+        }
+        return parent_dir.substr(0, pos);
+    }
+}
 
 SyncClient::SyncClient(std::uint16_t port, std::string magic_word, const std::filesystem::path &download_path)
     : port_(port), magic_word_(std::move(magic_word)), download_path_(download_path), records_path_(download_path / "records.json")
@@ -51,7 +66,7 @@ std::vector<ServerInfo> SyncClient::scanServers(size_t num_attempts)
     std::unordered_set<std::string> seen;
     std::error_code ec;
 
-    for (size_t i = 0; i < num_attempts; ++i)
+    for (size_t i = 0; i < num_attempts; i++)
     {
         auto servers = receiver_->scan(ec);
         if (ec)
@@ -76,6 +91,7 @@ void SyncClient::startDownload(std::size_t server_index, std::function<void(bool
 {
     if (!running_)
     {
+        setError("[warning] download failed: client is not running");
         if (cb)
         {
             cb(false, std::make_error_code(std::errc::operation_canceled));
@@ -86,6 +102,7 @@ void SyncClient::startDownload(std::size_t server_index, std::function<void(bool
     bool expected = false;
     if (!is_busy_.compare_exchange_strong(expected, true))
     {
+        setError("[warning] download failed: another download is already in progress");
         if (cb)
         {
             cb(false, std::make_error_code(std::errc::operation_in_progress));
@@ -96,6 +113,7 @@ void SyncClient::startDownload(std::size_t server_index, std::function<void(bool
     if (server_index >= servers_.size())
     {
         is_busy_ = false;
+        setError("[warning] download failed: server index out of range");
         if (cb)
         {
             cb(false, std::make_error_code(std::errc::result_out_of_range));
@@ -202,6 +220,7 @@ void SyncClient::doDownload(std::size_t index, std::function<void(bool, std::err
         if (index >= servers_.size())
         {
             ec = std::make_error_code(std::errc::result_out_of_range);
+            setError("[warning] download failed: server index out of range");
         }
         else
         {
@@ -211,6 +230,11 @@ void SyncClient::doDownload(std::size_t index, std::function<void(bool, std::err
                 // 成功时 ec 可能为清空（完成 ≥1 文件）或 no_message_available（服务器队列为空）
                 success = syncReceiveAll(ec);
             }
+            else
+            {
+                // 具体错误信息给上层：连接目标与失败原因
+                setError("[warning] download failed: connect " + server.ip_ + ":" + std::to_string(server.port_) + " failed: " + ec.message());
+            }
         }
     }
     catch (const std::exception &e)
@@ -218,6 +242,9 @@ void SyncClient::doDownload(std::size_t index, std::function<void(bool, std::err
         ec = std::make_error_code(std::errc::io_error);
         setError(std::string("[warning] download exception: ") + e.what());
     }
+
+    // 下载记录只增不减：命中（记录 + 磁盘文件大小一致）即跳过 下次下载只补缺失的文件
+    // 记录清理由上层/用户手动触发（clearDownloadRecords） 核心层不做自动删除
 
     // 会话结束：关闭连接
     if (conn_)
@@ -275,6 +302,10 @@ bool SyncClient::syncReceiveAll(std::error_code &ec)
     ec.clear();
     size_t received_count = 0;
 
+    // 当前任务(服务端一个入队目录)的统计：已处理文件数 / 已接收字节数
+    std::size_t task_files = 0;
+    uint64_t task_bytes = 0;
+
     while (running_ && !disconnect_requested_)
     {
         FileHeader header = conn_->receiveHeader(ec);
@@ -282,22 +313,41 @@ bool SyncClient::syncReceiveAll(std::error_code &ec)
         {
             if (ec == asio::error::eof)
             {
-                ec.clear();
-                if (received_count > 0)
-                {
-                    // 服务器发送完毕正常断开
-                    return true;
-                }
-                // 无文件可下载（服务器发送队列为空）：正常完成 以 ec 提示上层
-                ec = std::make_error_code(std::errc::no_message_available);
+                // 不能用 TCP EOF 判定"服务器正常结束"：网络中断同样表现为 EOF
+                // 正常结束必须收到服务端的"会话结束"控制帧（见下面 header.session_end_ 分支）
+                ec = std::make_error_code(std::errc::connection_aborted);
+                setError("[warning] download failed: connection closed without session-end marker (interrupted)");
+                return false;
+            }
+            setError("[warning] download failed: receive file header failed: " + ec.message());
+            return false;
+        }
+
+        if (header.session_end_)
+        {
+            // 服务端显式声明本次会话正常结束：回一个确认字节（服务端据此确认收尾成功）
+            // 数据已完整收到 确认发送失败只影响服务端判定 客户端仍按正常完成处理
+            std::error_code ack_ec;
+            sendReply(true, ack_ec);
+            if (ack_ec)
+            {
+                setError("[warning] download done but session-end ack failed: " + ack_ec.message());
+            }
+
+            ec.clear();
+            if (received_count > 0)
+            {
                 return true;
             }
-            return false;
+            // 无文件可下载（服务器发送队列为空）：正常完成 以 ec 提示上层
+            ec = std::make_error_code(std::errc::no_message_available);
+            return true;
         }
 
         if (header.file_name_.empty())
         {
             ec = std::make_error_code(std::errc::protocol_error);
+            setError("[warning] download failed: invalid file header (empty file name)");
             return false;
         }
 
@@ -306,57 +356,132 @@ bool SyncClient::syncReceiveAll(std::error_code &ec)
              // '0' 跳过
             if (!sendReply(false, ec))
             {
+                setError("[warning] download failed: skip reply send error: " + ec.message());
                 return false;
             }
-            continue;
+            task_files++; // 跳过的文件也属于该任务（字节按 0 计）
+        }
+        else
+        {
+            // '1' 发送文件数据
+            if (!sendReply(true, ec))
+            {
+                setError("[warning] download failed: reply send error: " + ec.message());
+                return false;
+            }
+
+            std::filesystem::path save_path = buildSavePath(download_path_, header.parent_dir_, header.file_name_);
+            uint64_t bytes_received = 0;
+            conn_->receiveFileTo(save_path, header.file_size_, ec, &bytes_received);
+            if (ec)
+            {
+                // 具体错误信息给上层：哪个文件、收了多少 / 共多少、失败原因
+                // 未传完的临时文件（save_path + ".part"）已由 receiveFileTo 删除 不留残留
+                setError("[warning] download failed: " + header.parent_dir_ + "/" + header.file_name_ +
+                        " (" + std::to_string(bytes_received) + "/" + std::to_string(header.file_size_) +
+                        " bytes): " + ec.message());
+                return false;
+            }
+
+            DownloadRecord rec;
+            rec.parent_dir_ = header.parent_dir_;
+            rec.file_name_ = header.file_name_;
+            rec.file_size_ = header.file_size_;
+            {
+                std::lock_guard<std::mutex> lock(records_mutex_);
+                // 同一身份(父目录 + 文件名 + 大小)只保留一条：本地删除后重下不会让记录反复膨胀
+                bool recorded_before = false;
+                for (const auto &item : download_records_)
+                {
+                    if (item.parent_dir_ == rec.parent_dir_ && item.file_name_ == rec.file_name_ && item.file_size_ == rec.file_size_)
+                    {
+                        recorded_before = true;
+                        break;
+                    }
+                }
+                if (!recorded_before)
+                {
+                    download_records_.push_back(rec);
+                }
+            }
+
+            std::error_code save_ec;
+            saveRecords(save_ec);
+            if (save_ec)
+            {
+                setError("[warning] download record save failed: " + save_ec.message());
+            }
+            received_count++;
+            task_files++;
+            task_bytes += bytes_received;
         }
 
-        // '1' 发送文件数据
-        if (!sendReply(true, ec)) 
+        // 服务端标记的任务(目录)最后一个文件处理完毕：任务完成通知（会话级成功/失败提示不变）
+        if (header.last_in_dir_)
         {
-            return false;
+            TaskReport report;
+            report.name_ = firstDirComponent(header.parent_dir_);
+            report.file_count_ = task_files;
+            report.byte_count_ = task_bytes;
+            notifyTask(report);
+            task_files = 0;
+            task_bytes = 0;
         }
-
-        std::filesystem::path save_path = buildSavePath(download_path_, header.parent_dir_, header.file_name_);
-        conn_->receiveFileTo(save_path, header.file_size_, ec);
-        if (ec)
-        {
-            return false;
-        }
-
-        DownloadRecord rec;
-        rec.parent_dir_ = header.parent_dir_;
-        rec.file_name_ = header.file_name_;
-        rec.file_size_ = header.file_size_;
-        {
-            std::lock_guard<std::mutex> lock(records_mutex_);
-            download_records_.push_back(rec);
-        }
-
-        std::error_code save_ec;
-        saveRecords(save_ec);
-        if (save_ec)
-        {
-            setError("[warning] download record save failed: " + save_ec.message());
-        }
-        ++received_count;
     }
 
     ec = std::make_error_code(std::errc::operation_canceled);
+    setError("[warning] download aborted: " + ec.message());
     return false;
 }
 
 bool SyncClient::isFileAlreadyExists(const FileHeader &header) const
 {
-    std::lock_guard<std::mutex> lock(records_mutex_);
-    for (const auto &rec : download_records_)
+    bool recorded = false;
     {
-        if (rec.parent_dir_ == header.parent_dir_ && rec.file_name_ == header.file_name_ && rec.file_size_ == header.file_size_)
+        std::lock_guard<std::mutex> lock(records_mutex_);
+        for (const auto &rec : download_records_)
         {
-            return true;
+            if (rec.parent_dir_ == header.parent_dir_ && rec.file_name_ == header.file_name_ && rec.file_size_ == header.file_size_)
+            {
+                recorded = true;
+                break;
+            }
         }
     }
-    return false;
+
+    if (!recorded)
+    {
+        return false;
+    }
+
+    // 记录命中后校验磁盘：文件可能已被删除/移动或大小不一致
+    // 不一致按“未下载”处理（重新接收）避免回复 '0' 跳过导致本地永久缺文件
+    std::error_code size_ec;
+    auto disk_size = std::filesystem::file_size(buildSavePath(download_path_, header.parent_dir_, header.file_name_), size_ec);
+    if (size_ec)
+    {
+        return false;
+    }
+    return disk_size == header.file_size_;
+}
+
+void SyncClient::setTaskCallback(std::function<void(const TaskReport &report)> cb)
+{
+    std::lock_guard<std::mutex> lock(task_mutex_);
+    task_callback_ = cb;
+}
+
+void SyncClient::notifyTask(const TaskReport &report)
+{
+    std::function<void(const TaskReport &report)> cb;
+    {
+        std::lock_guard<std::mutex> lock(task_mutex_);
+        cb = task_callback_;
+    }
+    if (cb)
+    {
+        cb(report);
+    }
 }
 
 bool SyncClient::sendReply(bool should_send, std::error_code &ec)

@@ -24,6 +24,8 @@
 //    每个文件：发送文件头 -> 等待客户端回复 1 字节（'1' = 发送数据，'0' = 跳过）
 //    会话期间 enqueueDirectory() 推入的目录会继续按序发送
 // 3. 队列为空：等待 empty_queue_wait 分钟（期间有新目录继续发送）超时仍为空才断开客户端
+//    断开前先发"会话结束"控制帧并等客户端确认（有界） 确认成功才算正常结束
+//    （TCP EOF 无法区分正常断开与网络中断 故不以其作为正常结束依据）失败按会话出错上报
 //    清空队列并重新开始广播
 // 4. stop()/析构：停止工作线程并清理
 
@@ -57,6 +59,9 @@ public:
     // 置位断开请求并唤醒工作线程 由工作线程在下一个有界阻塞点完成断开
     // （不直接操作 client_ 避免与工作线程的指针竞态）
     void disconnect(std::error_code &ec);
+    // 任务(入队目录)级完成通知：一个目录下的所有文件发送完毕时在工作线程调用
+    // 上层需自行保证线程安全
+    void setTaskCallback(std::function<void(const TaskReport &report)> cb);
     // 手动指定对外广告的 IP（默认 start 时按本机首个可用接口自动解析
     // 多网卡/VPN 环境自动解析错误时可覆盖 须在 start() 前调用）
     void setAdvertiseIP(const std::string &ip);
@@ -90,6 +95,10 @@ private:
     mutable std::mutex error_mutex_;
     mutable std::string error_string_;
 
+    // 任务级完成通知回调（主线程设置 工作线程调用 同一把锁保护）
+    std::function<void(const TaskReport &report)> task_callback_;
+    mutable std::mutex task_mutex_;
+
     // 工作线程主循环（状态机：广播 + 轮询 accept <-> 会话发送）
     // 所有阻塞 I/O 均有界（套接字超时）保证 stop()/disconnect() 可打断并安全 join
     void workerLoop(std::function<void(bool, std::error_code)> cb);
@@ -105,6 +114,11 @@ private:
     void closeClient(std::error_code &ec);
     // 线程安全设置错误信息
     void setError(const std::string &msg);
+    // 任务完成回调：拷贝回调后在锁外调用（不持锁执行上层代码）
+    void notifyTask(const TaskReport &report);
+    // 等待客户端对"会话结束"控制帧的确认（有界 可被 stop()/disconnect() 打断）
+    // 返回 true = 客户端确认收到 会话才算正常结束
+    bool waitForSessionEndAck(std::error_code &ec);
     // 获取本机 IP（多网卡时取首个非回环 v4 地址 必要时调用方可自行指定）
     std::string getLocalIP() const;
 

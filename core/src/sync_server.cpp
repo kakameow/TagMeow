@@ -41,7 +41,7 @@ bool SyncServer::start(std::string server_name, std::uint16_t port, std::error_c
         return false;
     }
 
-    // 打开并绑定 TCP 监听（port == 0 时系统分配，广播广告实际端口）
+    // 打开并绑定 TCP 监听（port == 0 时系统分配 广播广告实际端口）
     acceptor_.open(asio::ip::tcp::v4(), ec);
     if (ec)
     {
@@ -157,6 +157,25 @@ void SyncServer::disconnect(std::error_code &ec)
     cv_.notify_all();
 }
 
+void SyncServer::setTaskCallback(std::function<void(const TaskReport &report)> cb)
+{
+    std::lock_guard<std::mutex> lock(task_mutex_);
+    task_callback_ = cb;
+}
+
+void SyncServer::notifyTask(const TaskReport &report)
+{
+    std::function<void(const TaskReport &report)> cb;
+    {
+        std::lock_guard<std::mutex> lock(task_mutex_);
+        cb = task_callback_;
+    }
+    if (cb)
+    {
+        cb(report);
+    }
+}
+
 std::string SyncServer::getLastError() const
 {
     std::lock_guard<std::mutex> lock(error_mutex_);
@@ -236,16 +255,32 @@ void SyncServer::workerLoop(std::function<void(bool, std::error_code)> cb)
             }
 
             // 队列为空且等待超时：会话正常结束 被停止或请求断开则视为中断
-            if (cb)
+            if (running_ && !disconnect_requested_)
             {
-                if (running_ && !disconnect_requested_)
+                // 先显式发送"会话结束"控制帧并等客户端确认 才算正常结束
+                // （TCP EOF 无法区分正常断开与网络中断 故不以其作为正常结束依据）
+                std::error_code end_ec;
+                if (client_)
                 {
-                    cb(true, std::error_code());
+                    client_->sendSessionEnd(end_ec);
+                    if (!end_ec)
+                    {
+                        waitForSessionEndAck(end_ec);
+                    }
                 }
                 else
                 {
-                    cb(false, std::make_error_code(std::errc::operation_canceled));
+                    end_ec = std::make_error_code(std::errc::not_connected);
                 }
+
+                if (cb)
+                {
+                    cb(!end_ec, end_ec);
+                }
+            }
+            else if (cb)
+            {
+                cb(false, std::make_error_code(std::errc::operation_canceled));
             }
             disconnect_requested_ = false; // 消费断开请求（等待被断开请求唤醒时）
             std::error_code close_ec;
@@ -357,8 +392,15 @@ bool SyncServer::sendDirectory(const std::filesystem::path &dir, std::error_code
     std::vector<std::filesystem::path> files;
     collectFiles(dir, files);
 
-    for (const auto &file_path : files)
+    // 任务(入队目录)级统计：文件数固定 字节数按实际发送量累加（客户端跳过的不计）
+    TaskReport report;
+    report.name_ = dir.filename().u8string();
+    report.file_count_ = files.size();
+    report.byte_count_ = 0;
+
+    for (std::size_t file_index = 0; file_index < files.size(); file_index++)
     {
+        const std::filesystem::path &file_path = files[file_index];
         if (!running_ || disconnect_requested_)
         {
             ec = std::make_error_code(std::errc::operation_canceled);
@@ -400,6 +442,8 @@ bool SyncServer::sendDirectory(const std::filesystem::path &dir, std::error_code
         header.parent_dir_ = parent_dir;
         header.file_name_ = file_path.filename().u8string();
         header.file_size_ = file_size;
+        // 任务(目录)的最后一个文件打标记：接收端据此给出任务完成提示
+        header.last_in_dir_ = (file_index + 1 == files.size());
 
         client_->sendHeader(header, ec);
         if (ec)
@@ -441,9 +485,53 @@ bool SyncServer::sendDirectory(const std::filesystem::path &dir, std::error_code
             }
             offset += sent;
         }
+        report.byte_count_ += header.file_size_; // 实际发送量（客户端跳过的不计）
     }
+    // 任务(入队目录)全部文件处理完毕：通知上层（会话级回调语义不变）
+    notifyTask(report);
 
     return true;
+}
+
+bool SyncServer::waitForSessionEndAck(std::error_code &ec)
+{
+    ec.clear();
+
+    if (!client_)
+    {
+        ec = std::make_error_code(std::errc::not_connected);
+        return false;
+    }
+
+    // 有界等待：每 500ms 一轮 便于 stop()/disconnect() 及时打断
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (running_ && !disconnect_requested_)
+    {
+        char value = 0;
+        std::error_code recv_ec;
+        if (client_->receiveByte(value, recv_ec, std::chrono::milliseconds(500)))
+        {
+            if (value == '1')
+            {
+                return true;
+            }
+            ec = std::make_error_code(std::errc::protocol_error);
+            return false;
+        }
+        if (recv_ec && recv_ec != std::errc::timed_out)
+        {
+            ec = recv_ec;
+            return false;
+        }
+        if (std::chrono::steady_clock::now() >= deadline)
+        {
+            ec = std::make_error_code(std::errc::timed_out);
+            return false;
+        }
+    }
+
+    ec = std::make_error_code(std::errc::operation_canceled);
+    return false;
 }
 
 bool SyncServer::waitForClientReply(std::error_code &ec, bool &shouldSend)
@@ -494,7 +582,7 @@ void SyncServer::closeClient(std::error_code &ec)
         client_.reset();
     }
     client_connected_ = false;
-    broadcasting_ = true; // 会话结束（正常/断开/出错）后恢复广播，便于重新被发现
+    broadcasting_ = true; // 会话结束（正常/断开/出错）后恢复广播 便于重新被发现
 
     // 清空待发送队列
     {
@@ -536,7 +624,9 @@ std::string SyncServer::getLocalIP() const
         for (auto it = endpoints.begin(); it != endpoints.end(); it++)
         {
             auto addr = it->endpoint().address();
-            if (addr.is_v4() && !addr.is_loopback() && !addr.is_multicast())
+            // 回环 / 组播 / 链路本地（169.254.x.x）都不适合当广告地址
+            if (addr.is_v4() && !addr.is_loopback() && !addr.is_multicast()
+                && (addr.to_v4().to_uint() & 0xFFFF0000u) != 0xA9FE0000u)
             {
                 return addr.to_string();
             }
@@ -586,12 +676,20 @@ void SyncServer::collectFiles(const std::filesystem::path &root, std::vector<std
     std::sort(out.begin(), out.end());
 }
 
+#ifdef _WIN32
+// 只认「物理介质类型」的网卡：以太网 / 无线
+static bool isPhysicalInterfaceType(ULONG if_type)
+{
+    return if_type == IF_TYPE_ETHERNET_CSMACD || if_type == IF_TYPE_IEEE80211;
+}
+#endif
+
 bool SyncServer::getInterfaceInfo(std::string &ip, std::string &broadcast, std::error_code &ec)
 {
     ec.clear();
 #ifdef _WIN32
     ULONG buf_len = 15000;
-    for (int attempt = 0; attempt < 3; ++attempt)
+    for (int attempt = 0; attempt < 3; attempt++)
     {
         IP_ADAPTER_ADDRESSES *adapters = static_cast<IP_ADAPTER_ADDRESSES *>(malloc(buf_len));
         if (adapters == nullptr)
@@ -601,7 +699,8 @@ bool SyncServer::getInterfaceInfo(std::string &ip, std::string &broadcast, std::
         }
         ULONG rc = GetAdaptersAddresses(
             AF_INET,
-            GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_PREFIX,
+            GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_PREFIX
+                | GAA_FLAG_INCLUDE_GATEWAYS, // 下面要靠 FirstGatewayAddress 区分物理网卡与代理/虚拟网卡
             nullptr, adapters, &buf_len);
         if (rc == ERROR_BUFFER_OVERFLOW)
         {
@@ -615,15 +714,20 @@ bool SyncServer::getInterfaceInfo(std::string &ip, std::string &broadcast, std::
             return false;
         }
 
+        // 有默认网关的候选留作兜底：点对点直连的局域网确实可能没有网关
+        uint32_t fallback_addr = 0;
+        ULONG fallback_prefix = 0;
+        bool has_fallback = false;
+
         for (IP_ADAPTER_ADDRESSES *a = adapters; a != nullptr; a = a->Next)
         {
             if (a->OperStatus != IfOperStatusUp)
             {
                 continue;
             }
-            if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK || a->IfType == IF_TYPE_TUNNEL)
+            if (!isPhysicalInterfaceType(a->IfType))
             {
-                continue;
+                continue; // 隧道 / 回环 / 代理自建类型
             }
             for (IP_ADAPTER_UNICAST_ADDRESS *u = a->FirstUnicastAddress; u != nullptr; u = u->Next)
             {
@@ -637,11 +741,29 @@ bool SyncServer::getInterfaceInfo(std::string &ip, std::string &broadcast, std::
                 {
                     continue;
                 }
+                if ((addr & 0xFFFF0000u) == 0xA9FE0000u)
+                {
+                    continue;
+                }
                 ULONG prefix = u->OnLinkPrefixLength;
                 if (prefix > 32)
                 {
                     continue; // 前缀无效（如 255）
                 }
+
+                if (a->FirstGatewayAddress == nullptr)
+                {
+                    // 没有网关：类型也可能是物理的
+                    // 留着当兜底
+                    if (!has_fallback)
+                    {
+                        fallback_addr = addr;
+                        fallback_prefix = prefix;
+                        has_fallback = true;
+                    }
+                    continue;
+                }
+
                 uint32_t mask = 0xFFFFFFFFu;
                 if (prefix < 32)
                 {
@@ -653,6 +775,20 @@ bool SyncServer::getInterfaceInfo(std::string &ip, std::string &broadcast, std::
                 return true;
             }
         }
+
+        if (has_fallback)
+        {
+            uint32_t mask = 0xFFFFFFFFu;
+            if (fallback_prefix < 32)
+            {
+                mask = (fallback_prefix == 0) ? 0u : (0xFFFFFFFFu << (32 - fallback_prefix));
+            }
+            ip = asio::ip::address_v4(fallback_addr).to_string();
+            broadcast = asio::ip::address_v4((fallback_addr & mask) | (~mask)).to_string();
+            free(adapters);
+            return true;
+        }
+
         free(adapters);
         break;
     }
@@ -672,13 +808,20 @@ bool SyncServer::getInterfaceInfo(std::string &ip, std::string &broadcast, std::
         {
             continue;
         }
-        if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0)
+        // IFF_POINTOPOINT
+        if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0
+            || (ifa->ifa_flags & IFF_POINTOPOINT) != 0)
         {
             continue;
         }
         const sockaddr_in *sin = reinterpret_cast<const sockaddr_in *>(ifa->ifa_addr);
         uint32_t addr = ntohl(sin->sin_addr.s_addr);
         if ((addr >> 24) == 127)
+        {
+            continue;
+        }
+        // 链路本地地址（169.254.0.0/16）不做广告 与 Windows 分支保持一致
+        if ((addr & 0xFFFF0000u) == 0xA9FE0000u)
         {
             continue;
         }

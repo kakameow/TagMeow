@@ -260,12 +260,23 @@ void TcpConnection::sendHeader(const FileHeader &header, std::error_code &ec)
     j["parent_dir"] = header.parent_dir_;
     j["file_name"] = header.file_name_;
     j["file_size"] = header.file_size_;
+    j["last_in_dir"] = header.last_in_dir_; // 任务(目录)最后一个文件标记 旧端忽略该字段
     std::string json_str = j.dump();
 
     std::vector<char> data(json_str.begin(), json_str.end());
     sendMessage(data, ec);
 }
 
+void TcpConnection::sendSessionEnd(std::error_code &ec)
+{
+    // 控制帧：只带一个标记 接收端据此判定会话正常结束
+    nlohmann::json j;
+    j["session_end"] = true;
+    std::string json_str = j.dump();
+
+    std::vector<char> data(json_str.begin(), json_str.end());
+    sendMessage(data, ec);
+}
 void TcpConnection::sendFileData(const std::filesystem::path &file_path_utf8, uint64_t offset, size_t chunk_size, std::error_code &ec, size_t *bytes_sent)
 {
     if (bytes_sent)
@@ -326,6 +337,14 @@ FileHeader TcpConnection::receiveHeader(std::error_code &ec)
     try
     {
         nlohmann::json j = nlohmann::json::parse(json_str);
+
+        // 会话结束控制帧：不携带文件字段 仅表示服务端正常收尾
+        if (j.value("session_end", false))
+        {
+            FileHeader end_header;
+            end_header.session_end_ = true;
+            return end_header;
+        }
         // 与 parseUDPMessage 一致：严格校验必需字段 缺失即协议错误
         if (!j.contains("parent_dir") || !j.contains("file_name") || !j.contains("file_size"))
         {
@@ -337,6 +356,7 @@ FileHeader TcpConnection::receiveHeader(std::error_code &ec)
         header.parent_dir_ = j["parent_dir"].get<std::string>();
         header.file_name_ = j["file_name"].get<std::string>();
         header.file_size_ = j["file_size"].get<uint64_t>();
+        header.last_in_dir_ = j.value("last_in_dir", false); // 旧服务端无此字段时为 false
         return header;
     }
     catch (const std::exception &)
@@ -346,8 +366,55 @@ FileHeader TcpConnection::receiveHeader(std::error_code &ec)
     }
 }
 
-void TcpConnection::receiveFileTo(const std::filesystem::path &save_path, uint64_t file_size, std::error_code &ec)
+namespace
 {
+    // 未 commit 时析构删除临时文件
+    // 覆盖全部失败路径（打开失败/读取中断/写盘失败/改名失败/异常展开） 保证不留残留
+    class PartialFileGuard
+    {
+    public:
+        explicit PartialFileGuard(const std::filesystem::path &path);
+        ~PartialFileGuard();
+
+        // 接收成功：不再删除临时文件
+        void commit();
+
+    private:
+        std::filesystem::path path_;
+        bool committed_;
+    };
+
+    PartialFileGuard::PartialFileGuard(const std::filesystem::path &path)
+        : path_(path), committed_(false)
+    {
+    }
+
+    PartialFileGuard::~PartialFileGuard()
+    {
+        if (committed_)
+        {
+            return;
+        }
+        // 清理用独立 error_code：删除失败不得污染上层错误码
+        std::error_code remove_ec;
+        std::filesystem::remove(path_, remove_ec);
+    }
+
+    void PartialFileGuard::commit()
+    {
+        committed_ = true;
+    }
+}
+
+void TcpConnection::receiveFileTo(const std::filesystem::path &save_path, uint64_t file_size, std::error_code &ec, uint64_t *bytes_received)
+{
+    ec.clear();
+
+    if (bytes_received != nullptr)
+    {
+        *bytes_received = 0;
+    }
+
     // 创建保存目录（无父目录时跳过 如相对当前目录的文件名）
     if (!save_path.parent_path().empty())
     {
@@ -360,7 +427,13 @@ void TcpConnection::receiveFileTo(const std::filesystem::path &save_path, uint64
         }
     }
 
-    std::ofstream file(save_path, std::ios::binary);
+    // 临时文件：数据先写 .part 收完并通过落盘校验后才改名到 save_path
+    // 失败时由守卫删除 已存在的 save_path 原文件不会被破坏
+    std::filesystem::path part_path = save_path;
+    part_path += std::filesystem::path(".part");
+    PartialFileGuard part_guard(part_path);
+
+    std::ofstream file(part_path, std::ios::binary | std::ios::trunc);
     if (!file)
     {
         ec = std::make_error_code(std::errc::permission_denied);
@@ -377,9 +450,10 @@ void TcpConnection::receiveFileTo(const std::filesystem::path &save_path, uint64
         size_t bytes = 0;
         if (!readInterruptible(buffer.data(), to_read, bytes, ec))
         {
-            if (bytes > 0)
+            // 连接中断/EOF/套接字错误：不保留半截数据 由守卫删除 .part
+            if (bytes_received != nullptr)
             {
-                file.write(buffer.data(), bytes);
+                *bytes_received = received;
             }
             return;
         }
@@ -388,10 +462,71 @@ void TcpConnection::receiveFileTo(const std::filesystem::path &save_path, uint64
         if (!file)
         {
             ec = std::make_error_code(std::errc::io_error);
+            if (bytes_received != nullptr)
+            {
+                *bytes_received = received;
+            }
             return;
         }
         received += bytes;
     }
+
+    // 落盘校验：flush/close 失败（磁盘满/网络盘写失败）不能当成功 否则记录与文件实际内容不一致
+    file.flush();
+    if (!file)
+    {
+        ec = std::make_error_code(std::errc::io_error);
+        if (bytes_received != nullptr)
+        {
+            *bytes_received = received;
+        }
+        return;
+    }
+    file.close();
+    if (file.fail())
+    {
+        ec = std::make_error_code(std::errc::io_error);
+        if (bytes_received != nullptr)
+        {
+            *bytes_received = received;
+        }
+        return;
+    }
+
+    // 字节数完整性校验
+    if (received != file_size)
+    {
+        ec = std::make_error_code(std::errc::io_error);
+        if (bytes_received != nullptr)
+        {
+            *bytes_received = received;
+        }
+        return;
+    }
+
+    if (bytes_received != nullptr)
+    {
+        *bytes_received = received;
+    }
+
+    // 改名到目标路径：MSVC 的 rename 覆盖已存在目标
+    // 部分工具链（MinGW/Android 的 rename）不覆盖已存在文件 此时先删目标再改名一次
+    std::error_code rename_ec;
+    std::filesystem::rename(part_path, save_path, rename_ec);
+    if (rename_ec)
+    {
+        std::error_code remove_ec;
+        std::filesystem::remove(save_path, remove_ec);
+        rename_ec.clear();
+        std::filesystem::rename(part_path, save_path, rename_ec);
+        if (rename_ec)
+        {
+            ec = rename_ec;
+            return;
+        }
+    }
+
+    part_guard.commit();
 }
 
 void TcpConnection::sendByte(char value, std::error_code &ec)
