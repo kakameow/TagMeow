@@ -41,7 +41,7 @@ bool SyncServer::start(std::string server_name, std::uint16_t port, std::error_c
         return false;
     }
 
-    // 打开并绑定 TCP 监听（port == 0 时系统分配，广播广告实际端口）
+    // 打开并绑定 TCP 监听（port == 0 时系统分配 广播广告实际端口）
     acceptor_.open(asio::ip::tcp::v4(), ec);
     if (ec)
     {
@@ -678,6 +678,7 @@ void SyncServer::collectFiles(const std::filesystem::path &root, std::vector<std
 
 #ifdef _WIN32
 // 只认「物理介质类型」的网卡：以太网 / 无线
+static bool isPhysicalInterfaceType(ULONG if_type)
 {
     return if_type == IF_TYPE_ETHERNET_CSMACD || if_type == IF_TYPE_IEEE80211;
 }
