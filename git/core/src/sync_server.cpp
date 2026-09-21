@@ -582,7 +582,7 @@ void SyncServer::closeClient(std::error_code &ec)
         client_.reset();
     }
     client_connected_ = false;
-    broadcasting_ = true; // 会话结束（正常/断开/出错）后恢复广播，便于重新被发现
+    broadcasting_ = true; // 会话结束（正常/断开/出错）后恢复广播 便于重新被发现
 
     // 清空待发送队列
     {
@@ -624,7 +624,9 @@ std::string SyncServer::getLocalIP() const
         for (auto it = endpoints.begin(); it != endpoints.end(); it++)
         {
             auto addr = it->endpoint().address();
-            if (addr.is_v4() && !addr.is_loopback() && !addr.is_multicast())
+            // 回环 / 组播 / 链路本地（169.254.x.x）都不适合当广告地址
+            if (addr.is_v4() && !addr.is_loopback() && !addr.is_multicast()
+                && (addr.to_v4().to_uint() & 0xFFFF0000u) != 0xA9FE0000u)
             {
                 return addr.to_string();
             }
@@ -674,6 +676,13 @@ void SyncServer::collectFiles(const std::filesystem::path &root, std::vector<std
     std::sort(out.begin(), out.end());
 }
 
+#ifdef _WIN32
+// 只认「物理介质类型」的网卡：以太网 / 无线
+{
+    return if_type == IF_TYPE_ETHERNET_CSMACD || if_type == IF_TYPE_IEEE80211;
+}
+#endif
+
 bool SyncServer::getInterfaceInfo(std::string &ip, std::string &broadcast, std::error_code &ec)
 {
     ec.clear();
@@ -689,7 +698,8 @@ bool SyncServer::getInterfaceInfo(std::string &ip, std::string &broadcast, std::
         }
         ULONG rc = GetAdaptersAddresses(
             AF_INET,
-            GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_PREFIX,
+            GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_PREFIX
+                | GAA_FLAG_INCLUDE_GATEWAYS, // 下面要靠 FirstGatewayAddress 区分物理网卡与代理/虚拟网卡
             nullptr, adapters, &buf_len);
         if (rc == ERROR_BUFFER_OVERFLOW)
         {
@@ -703,15 +713,20 @@ bool SyncServer::getInterfaceInfo(std::string &ip, std::string &broadcast, std::
             return false;
         }
 
+        // 有默认网关的候选留作兜底：点对点直连的局域网确实可能没有网关
+        uint32_t fallback_addr = 0;
+        ULONG fallback_prefix = 0;
+        bool has_fallback = false;
+
         for (IP_ADAPTER_ADDRESSES *a = adapters; a != nullptr; a = a->Next)
         {
             if (a->OperStatus != IfOperStatusUp)
             {
                 continue;
             }
-            if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK || a->IfType == IF_TYPE_TUNNEL)
+            if (!isPhysicalInterfaceType(a->IfType))
             {
-                continue;
+                continue; // 隧道 / 回环 / 代理自建类型
             }
             for (IP_ADAPTER_UNICAST_ADDRESS *u = a->FirstUnicastAddress; u != nullptr; u = u->Next)
             {
@@ -725,11 +740,29 @@ bool SyncServer::getInterfaceInfo(std::string &ip, std::string &broadcast, std::
                 {
                     continue;
                 }
+                if ((addr & 0xFFFF0000u) == 0xA9FE0000u)
+                {
+                    continue;
+                }
                 ULONG prefix = u->OnLinkPrefixLength;
                 if (prefix > 32)
                 {
                     continue; // 前缀无效（如 255）
                 }
+
+                if (a->FirstGatewayAddress == nullptr)
+                {
+                    // 没有网关：类型也可能是物理的
+                    // 留着当兜底
+                    if (!has_fallback)
+                    {
+                        fallback_addr = addr;
+                        fallback_prefix = prefix;
+                        has_fallback = true;
+                    }
+                    continue;
+                }
+
                 uint32_t mask = 0xFFFFFFFFu;
                 if (prefix < 32)
                 {
@@ -741,6 +774,20 @@ bool SyncServer::getInterfaceInfo(std::string &ip, std::string &broadcast, std::
                 return true;
             }
         }
+
+        if (has_fallback)
+        {
+            uint32_t mask = 0xFFFFFFFFu;
+            if (fallback_prefix < 32)
+            {
+                mask = (fallback_prefix == 0) ? 0u : (0xFFFFFFFFu << (32 - fallback_prefix));
+            }
+            ip = asio::ip::address_v4(fallback_addr).to_string();
+            broadcast = asio::ip::address_v4((fallback_addr & mask) | (~mask)).to_string();
+            free(adapters);
+            return true;
+        }
+
         free(adapters);
         break;
     }
@@ -760,13 +807,20 @@ bool SyncServer::getInterfaceInfo(std::string &ip, std::string &broadcast, std::
         {
             continue;
         }
-        if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0)
+        // IFF_POINTOPOINT
+        if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0
+            || (ifa->ifa_flags & IFF_POINTOPOINT) != 0)
         {
             continue;
         }
         const sockaddr_in *sin = reinterpret_cast<const sockaddr_in *>(ifa->ifa_addr);
         uint32_t addr = ntohl(sin->sin_addr.s_addr);
         if ((addr >> 24) == 127)
+        {
+            continue;
+        }
+        // 链路本地地址（169.254.0.0/16）不做广告 与 Windows 分支保持一致
+        if ((addr & 0xFFFF0000u) == 0xA9FE0000u)
         {
             continue;
         }
