@@ -103,6 +103,9 @@ public class MainActivity extends AppCompatActivity {
     // 同步（局域网）相关设置
     private static final String KEY_SYNC_SERVER_NAME = "sync_server_name";
     private static final String KEY_SYNC_DOWNLOAD_PATH = "sync_download_path";
+    // 「其他方式分享」上次选好的目录
+    private static final String KEY_SYNC_EXPORT_DIR = "sync_export_dir";
+
 
     // 第一次运行时的默认语言（界面上不再有「跟随系统」这一项）
     private static final String DEFAULT_LANGUAGE_CODE = "zh_CN";
@@ -219,10 +222,26 @@ public class MainActivity extends AppCompatActivity {
     private String sync_share_text = "";
     private String sync_client_text = "";
 
+    // 其他方式分享子界面（压缩成 zip 交给系统分享面板）
+    private View sync_export_overlay;
+    private TextView tv_sync_export_zip_dir;
+    private TextView tv_sync_export_dir;
+    private TextView tv_sync_export_status;
+    private TextView tv_sync_export_progress;
+    // 分享面板回来之后待确认删除的压缩包
+    private File pending_export_zip;
+    // 压缩进行中：挡住重复点击（工作线程会写 所以加 volatile）
+    private volatile boolean export_running = false;
+    private String export_text = "";
+
+
     // 目录浏览子界面被借用的用途（给同步挑目录时不能顺手加进受管理目录）
     private static final int BROWSER_PURPOSE_ROOT = 0;
     private static final int BROWSER_PURPOSE_SHARE_DIR = 1;
     private static final int BROWSER_PURPOSE_DOWNLOAD_DIR = 2;
+    // 其他方式分享：同一个目录浏览器 第三种用途（挑「要分享的目录」）
+    private static final int BROWSER_PURPOSE_EXPORT_DIR = 3;
+
 
     private int dir_browser_purpose = BROWSER_PURPOSE_ROOT;
 
@@ -559,6 +578,8 @@ public class MainActivity extends AppCompatActivity {
         tv_sync_status = findViewById(R.id.tvSyncStatus);
         findViewById(R.id.btnSyncShare).setOnClickListener(v -> showSyncShareOverlay());
         findViewById(R.id.btnSyncDownload).setOnClickListener(v -> showSyncDownloadOverlay());
+        findViewById(R.id.btnSyncExport).setOnClickListener(v -> showSyncExportOverlay());
+
 
         edit_include = findViewById(R.id.editInclude);
         edit_exclude = findViewById(R.id.editExclude);
@@ -1555,6 +1576,13 @@ public class MainActivity extends AppCompatActivity {
         sync_device_list = null;
         tv_sync_device_empty = null;
         tv_sync_download_path = null;
+
+        sync_export_overlay = null;
+        tv_sync_export_zip_dir = null;
+        tv_sync_export_dir = null;
+        tv_sync_export_status = null;
+        tv_sync_export_progress = null;
+
         tv_sync_share_status = null;
         tv_sync_client_status = null;
         tv_sync_share_progress = null;
@@ -1607,7 +1635,10 @@ public class MainActivity extends AppCompatActivity {
             setText(dir_browser_overlay, R.id.btnDirBrowserChoose, "sync.pick_share_dir");
         } else if (dir_browser_purpose == BROWSER_PURPOSE_DOWNLOAD_DIR) {
             setText(dir_browser_overlay, R.id.btnDirBrowserChoose, "sync.pick_download_dir");
+        } else if (dir_browser_purpose == BROWSER_PURPOSE_EXPORT_DIR) {
+            setText(dir_browser_overlay, R.id.btnDirBrowserChoose, "sync.pick_export_dir");
         }
+
 
         renderDirBrowser();
     }
@@ -1801,6 +1832,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        if (purpose == BROWSER_PURPOSE_EXPORT_DIR) {
+            applySyncExportDir(target);
+            showSyncExportOverlay();
+
+            return;
+        }
+
+
         addFilesRoot(target);
     }
 
@@ -1912,7 +1951,16 @@ public class MainActivity extends AppCompatActivity {
                 toast(Lang.get("storage.perm_denied"));
             }
         }
+
+        // 从系统分享面板回来：问一下要不要把刚生成的压缩包删掉（删除 = 清空压缩包目录）
+        File pending_zip = pending_export_zip;
+
+        if (pending_zip != null) {
+            pending_export_zip = null;
+            showExportDeleteDialog(pending_zip);
+        }
     }
+
 
     // 这个目录的授权还在不在：真的去读一次（只在 worker 线程调用）
     // 存储层还不认识这个 root（比如刚读配置）就先注册一下
@@ -3157,7 +3205,19 @@ public class MainActivity extends AppCompatActivity {
             setText(sync_download_overlay, R.id.btnSyncClearRecords, "sync.clearRecords");
             setText(sync_download_overlay, R.id.btnSyncClientDisconnect, "sync.disconnect_short");
         }
+
+        if (sync_export_overlay != null) {
+            setText(sync_export_overlay, R.id.tvSyncExportTitle, "sync.export");
+            setText(sync_export_overlay, R.id.btnSyncExportBack, "sync.back");
+            setText(sync_export_overlay, R.id.tvSyncExportZipDirLabel, "sync.export_zip_label");
+            setText(sync_export_overlay, R.id.tvSyncExportDirLabel, "sync.export_src_label");
+            setText(sync_export_overlay, R.id.btnSyncExportBrowse, "sync.export_browse");
+            setText(sync_export_overlay, R.id.btnSyncExportStart, "sync.export_start");
+            setText(sync_export_overlay, R.id.btnSyncExportDelete, "sync.export_delete");
+            setText(sync_export_overlay, R.id.tvSyncExportHint, "sync.export_hint");
+        }
     }
+
 
     private void setSyncShareStatus(String text) {
         sync_share_text = text;
@@ -3931,10 +3991,15 @@ public class MainActivity extends AppCompatActivity {
         setText(R.id.tvSyncShareDesc, "sync.share_desc");
         setText(R.id.tvSyncDownload, "sync.download");
         setText(R.id.tvSyncDownloadDesc, "sync.download_desc");
+        setText(R.id.tvSyncExport, "sync.export");
+        setText(R.id.tvSyncExportDesc, "sync.export_desc");
+
         setText(R.id.tvSyncStatus, "sync.idle");
 
         setCompoundIcon((TextView) findViewById(R.id.tvSyncShare), R.drawable.database_plus, COLOR_TEXT, 14);
         setCompoundIcon((TextView) findViewById(R.id.tvSyncDownload), R.drawable.download, COLOR_TEXT, 14);
+        setCompoundIcon((TextView) findViewById(R.id.tvSyncExport), R.drawable.file_up, COLOR_TEXT, 14);
+
 
         renderSyncTabStatus();
     }
@@ -4216,6 +4281,225 @@ public class MainActivity extends AppCompatActivity {
                 .setPositiveButton(Lang.get("common.know"), null)
                 .show();
     }
+
+
+    // ---------- 其他方式分享（系统分享面板） ----------
+
+    // 压缩包存放目录：程序内部目录，分享完可以一键全部删掉
+    // getExternalFilesDir 拿不到（外置存储没挂载）就退回应用私有目录，两条路都在 FileProvider 覆盖范围内
+    private File exportZipDir() {
+        File external = getExternalFilesDir("share");
+        File dir = external != null ? external : new File(getFilesDir(), "share");
+
+        if (!dir.isDirectory()) {
+            dir.mkdirs();
+        }
+
+        return dir;
+    }
+
+    // 上次选好的待分享目录（没选过就是 null）
+    private File exportSourceDir() {
+        String saved = prefs.getString(KEY_SYNC_EXPORT_DIR, null);
+
+        return saved == null || saved.isEmpty() ? null : new File(saved);
+    }
+
+    private void showSyncExportOverlay() {
+        overlay_host.removeAllViews();
+        sync_export_overlay = getLayoutInflater().inflate(R.layout.overlay_sync_export, overlay_host, false);
+        overlay_host.addView(sync_export_overlay);
+        overlay_host.setVisibility(View.VISIBLE);
+
+        tv_sync_export_zip_dir = sync_export_overlay.findViewById(R.id.tvSyncExportZipDir);
+        tv_sync_export_dir = sync_export_overlay.findViewById(R.id.tvSyncExportDir);
+        tv_sync_export_progress = sync_export_overlay.findViewById(R.id.tvSyncExportProgress);
+        tv_sync_export_status = sync_export_overlay.findViewById(R.id.tvSyncExportStatus);
+
+        sync_export_overlay.findViewById(R.id.btnSyncExportBack).setOnClickListener(v -> hideOverlay());
+        sync_export_overlay.findViewById(R.id.btnSyncExportBrowse).setOnClickListener(v -> onSyncExportBrowse());
+        sync_export_overlay.findViewById(R.id.btnSyncExportStart).setOnClickListener(v -> onSyncExportStart());
+        sync_export_overlay.findViewById(R.id.btnSyncExportDelete).setOnClickListener(v -> onSyncExportDelete());
+
+        applyOverlayTexts();
+
+        renderSyncExportPaths();
+        setSyncExportProgress("");
+        setSyncExportStatus(export_text);
+    }
+
+    private void renderSyncExportPaths() {
+        File source = exportSourceDir();
+
+        if (tv_sync_export_zip_dir != null) {
+            tv_sync_export_zip_dir.setText(exportZipDir().getAbsolutePath());
+        }
+
+        if (tv_sync_export_dir != null) {
+            tv_sync_export_dir.setText(source == null
+                    ? Lang.get("sync.export_src_empty")
+                    : source.getAbsolutePath());
+        }
+    }
+
+    private void setSyncExportStatus(String text) {
+        export_text = text;
+
+        if (tv_sync_export_status != null) {
+            tv_sync_export_status.setText(text);
+        }
+    }
+
+    private void setSyncExportProgress(String text) {
+        if (tv_sync_export_progress == null) {
+            return;
+        }
+
+        tv_sync_export_progress.setText(text);
+        tv_sync_export_progress.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    // 选目录：还是借那个目录浏览子界面（第三种用途）
+    private void onSyncExportBrowse() {
+        browseForSync(BROWSER_PURPOSE_EXPORT_DIR, exportSourceDir());
+    }
+
+    // 选好目录：记住它，回到子界面
+    private void applySyncExportDir(File dir) {
+        prefs.edit().putString(KEY_SYNC_EXPORT_DIR, dir.getAbsolutePath()).apply();
+        setSyncExportStatus(Lang.f("status.export.dirChanged", dir.getAbsolutePath()));
+    }
+
+    // 压缩并交给系统分享面板
+    private void onSyncExportStart() {
+        if (export_running) {
+            setSyncExportStatus(Lang.get("status.export.busy"));
+
+            return;
+        }
+
+        final File source = exportSourceDir();
+
+        if (source == null || !source.isDirectory()) {
+            setSyncExportStatus(Lang.get("status.export.noDir"));
+
+            return;
+        }
+
+        if (!hasAllFilesAccess()) {
+            setSyncExportStatus(Lang.get("status.export.noPerm"));
+            showAllFilesPermissionDialog();
+
+            return;
+        }
+
+        final File zip_file = new File(exportZipDir(), zipFileNameOf(source));
+
+        export_running = true;
+
+        setSyncExportStatus(Lang.f("status.export.zipping", source.getName()));
+        setSyncExportProgress(Lang.f("status.export.progress", 0, formatBytes(0L)));
+
+        sync_worker.execute(() -> {
+            try {
+                DirectoryZipper.Result result = DirectoryZipper.zip(source, zip_file,
+                        (entry_name, file_count, byte_count) -> runOnUiThread(
+                                () -> setSyncExportProgress(Lang.f("status.export.progress",
+                                        file_count, formatBytes(byte_count)))));
+
+                if (result.file_count == 0) {
+                    // 空目录：不留一个空压缩包
+                    zip_file.delete();
+
+                    runOnUiThread(() -> setSyncExportStatus(Lang.get("status.export.empty")));
+
+                    return;
+                }
+
+                runOnUiThread(() -> {
+                    setSyncExportStatus(Lang.f("status.export.done",
+                            zip_file.getName(), result.file_count, formatBytes(result.byte_count)));
+
+                    // 分享面板一回来就问要不要删（onResume 里消费它）
+                    pending_export_zip = zip_file;
+                    shareZip(zip_file);
+                });
+            } catch (IOException error) {
+                runOnUiThread(() -> setSyncExportStatus(
+                        Lang.f("status.export.failed", String.valueOf(error.getMessage()))));
+            } finally {
+                export_running = false;
+                runOnUiThread(() -> setSyncExportProgress(""));
+            }
+        });
+    }
+
+    // 交给系统分享面板：应用内部目录的文件必须先过 FileProvider
+    private void shareZip(File zip_file) {
+        Uri uri = providerUriOf(zip_file);
+
+        if (uri == null) {
+            setSyncExportStatus(Lang.f("status.export.failed", zip_file.getAbsolutePath()));
+
+            return;
+        }
+
+        Intent intent = new Intent(Intent.ACTION_SEND);
+        intent.setType("application/zip");
+        intent.putExtra(Intent.EXTRA_STREAM, uri);
+        intent.putExtra(Intent.EXTRA_SUBJECT, zip_file.getName());
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        try {
+            startActivity(Intent.createChooser(intent, Lang.get("status.export.share_chooser")));
+        } catch (ActivityNotFoundException error) {
+            setSyncExportStatus(Lang.get("status.export.noApp"));
+        }
+    }
+
+    // 删除全部压缩包：压缩包目录是这个功能私有的，所以直接清空
+    private void onSyncExportDelete() {
+        File[] files = exportZipDir().listFiles();
+        int deleted = 0;
+
+        if (files != null) {
+            for (File file : files) {
+                if (file.isFile() && file.delete()) {
+                    deleted++;
+                }
+            }
+        }
+
+        pending_export_zip = null;
+
+        setSyncExportStatus(deleted > 0
+                ? Lang.f("status.export.deleteDone", deleted)
+                : Lang.get("status.export.deleteNone"));
+    }
+
+    // 从分享面板回来：问要不要删掉刚生成的压缩包
+    private void showExportDeleteDialog(File zip_file) {
+        new AlertDialog.Builder(this)
+                .setTitle(Lang.get("status.export.delete_title"))
+                .setMessage(Lang.f("status.export.deleteAsk",
+                        zip_file.getName(), exportZipDir().getAbsolutePath()))
+                .setPositiveButton(Lang.get("common.delete"), (dialog, which) -> onSyncExportDelete())
+                .setNegativeButton(Lang.get("common.reserved"), null)
+                .show();
+    }
+
+    // 压缩包名：<目录名>_<时间戳>.zip（同一个目录多次分享不会互相覆盖）
+    private static String zipFileNameOf(File source_dir) {
+        String name = source_dir.getName();
+
+        if (name == null || name.isEmpty()) {
+            // 根目录（比如 /storage/emulated/0）没有名字
+            name = "root";
+        }
+
+        return name + "_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) + ".zip";
+    }
+
 
 
     // 基础设施

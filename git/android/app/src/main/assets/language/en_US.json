@@ -340,6 +340,33 @@
     { "id": "status.client.cleared", "str": "Download records cleared" },
     { "id": "status.client.disconnected", "str": "Disconnected" },
     { "id": "status.client.taskDone", "str": "Client: task done %1 (%2 file(s), %3)" },
-    { "id": "status.client.cacheHint", "str": "(Click [Clear download record cache] if nothing needs re-downloading)" }
+    { "id": "status.client.cacheHint", "str": "(Click [Clear download record cache] if nothing needs re-downloading)" },
+
+{ "id": "sync.export", "str": "Share other ways" },
+    { "id": "sync.export_desc", "str": "Zip a folder and hand it to the system share sheet" },
+    { "id": "sync.export_zip_label", "str": "Zip folder" },
+    { "id": "sync.export_src_label", "str": "Folder to share" },
+    { "id": "sync.export_src_empty", "str": "No folder picked yet" },
+    { "id": "sync.export_browse", "str": "Choose folder" },
+    { "id": "sync.export_start", "str": "Zip and share" },
+    { "id": "sync.export_delete", "str": "Delete all zips" },
+    { "id": "sync.export_hint", "str": "Zips stay in the app's own folder, so you can delete them all in one tap" },
+    { "id": "sync.pick_export_dir", "str": "Use as share folder" },
+
+    { "id": "status.export.zipping", "str": "Zipping %1 ..." },
+    { "id": "status.export.progress", "str": "Zipping: %1 files · %2" },
+    { "id": "status.export.done", "str": "Zip done %1 (%2 files, %3)" },
+    { "id": "status.export.empty", "str": "Nothing to zip in this folder" },
+    { "id": "status.export.failed", "str": "Zip failed: %1" },
+    { "id": "status.export.busy", "str": "The previous zip is still running" },
+    { "id": "status.export.noDir", "str": "Pick the folder to share first" },
+    { "id": "status.export.noPerm", "str": "'All files access' is required to read this folder" },
+    { "id": "status.export.dirChanged", "str": "Folder picked: %1" },
+    { "id": "status.export.share_chooser", "str": "Share zip" },
+    { "id": "status.export.noApp", "str": "No app on this device can take a zip" },
+    { "id": "status.export.delete_title", "str": "Delete zips" },
+    { "id": "status.export.deleteAsk", "str": "Just created: %1\n\nDelete every zip in the zip folder?\n%2" },
+    { "id": "status.export.deleteDone", "str": "Deleted %1 zip(s)" },
+    { "id": "status.export.deleteNone", "str": "No zip to delete" }
   ]
 }

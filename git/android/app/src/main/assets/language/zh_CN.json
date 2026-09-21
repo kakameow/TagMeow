@@ -340,6 +340,33 @@
     { "id": "status.client.cleared", "str": "已清除下载记录" },
     { "id": "status.client.disconnected", "str": "已断开连接" },
     { "id": "status.client.taskDone", "str": "客户端: 任务完成 %1 (%2 个文件, %3)" },
-    { "id": "status.client.cacheHint", "str": "（如果没有失败重下的需要 请点击 [清除下载记录缓存]）" }
+    { "id": "status.client.cacheHint", "str": "（如果没有失败重下的需要 请点击 [清除下载记录缓存]）" },
+
+{ "id": "sync.export", "str": "其他方式分享" },
+    { "id": "sync.export_desc", "str": "把目录压成 zip 交给系统分享面板" },
+    { "id": "sync.export_zip_label", "str": "压缩包目录" },
+    { "id": "sync.export_src_label", "str": "要分享的目录" },
+    { "id": "sync.export_src_empty", "str": "还没选目录" },
+    { "id": "sync.export_browse", "str": "选择目录" },
+    { "id": "sync.export_start", "str": "压缩并分享" },
+    { "id": "sync.export_delete", "str": "删除全部压缩包" },
+    { "id": "sync.export_hint", "str": "压缩包只放在应用内部目录里，分享完可以一键全部删掉" },
+    { "id": "sync.pick_export_dir", "str": "选为分享目录" },
+
+    { "id": "status.export.zipping", "str": "正在压缩 %1 ..." },
+    { "id": "status.export.progress", "str": "正在压缩：%1 个文件 · %2" },
+    { "id": "status.export.done", "str": "压缩完成 %1（%2 个文件, %3）" },
+    { "id": "status.export.empty", "str": "目录里没有可压缩的文件" },
+    { "id": "status.export.failed", "str": "压缩失败: %1" },
+    { "id": "status.export.busy", "str": "上一次压缩还没结束" },
+    { "id": "status.export.noDir", "str": "请先选择要分享的目录" },
+    { "id": "status.export.noPerm", "str": "需要「所有文件访问」权限才能读这个目录" },
+    { "id": "status.export.dirChanged", "str": "已选好目录: %1" },
+    { "id": "status.export.share_chooser", "str": "分享压缩包" },
+    { "id": "status.export.noApp", "str": "系统里没有能接收压缩包的应用" },
+    { "id": "status.export.delete_title", "str": "删除压缩包" },
+    { "id": "status.export.deleteAsk", "str": "刚生成的压缩包：%1\n\n要删除压缩包目录里的全部压缩包吗？\n%2" },
+    { "id": "status.export.deleteDone", "str": "已删除 %1 个压缩包" },
+    { "id": "status.export.deleteNone", "str": "没有可删除的压缩包" }
   ]
 }
