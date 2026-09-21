@@ -17,6 +17,15 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
 
+    <!-- 局域网同步：裸 UDP/TCP 一样需要 INTERNET（不是只有 HTTP 才要） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- 不少机型的 Wi-Fi 驱动在省电模式下会直接丢弃广播帧 不持有 MulticastLock
+         就表现为「搜索不到设备」 对应 BroadcastReceiver 里那一段 -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"

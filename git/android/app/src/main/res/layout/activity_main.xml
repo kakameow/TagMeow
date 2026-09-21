@@ -723,15 +723,117 @@
                             android:layout_height="1dp"
                             android:background="#edf0f3" />
 
-                        <TextView
-                            android:id="@+id/tvSyncWip"
+                        <LinearLayout
+                            android:id="@+id/btnSyncShare"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:gravity="center"
-                            android:padding="28dp"
-                            android:text="同步功能开发中喵…"
+                            android:background="?attr/selectableItemBackground"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingStart="12dp"
+                            android:paddingTop="12dp"
+                            android:paddingEnd="12dp"
+                            android:paddingBottom="12dp">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:id="@+id/tvSyncShare"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="从本机分享文件"
+                                    android:textColor="#20242b"
+                                    android:textSize="13sp" />
+
+                                <TextView
+                                    android:id="@+id/tvSyncShareDesc"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="选好目录后广播给局域网里的其它设备"
+                                    android:textColor="#8c939f"
+                                    android:textSize="10sp" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="›"
+                                android:textColor="#8c939f"
+                                android:textSize="15sp" />
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:background="#edf0f3" />
+
+                        <LinearLayout
+                            android:id="@+id/btnSyncDownload"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:background="?attr/selectableItemBackground"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingStart="12dp"
+                            android:paddingTop="12dp"
+                            android:paddingEnd="12dp"
+                            android:paddingBottom="12dp">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:id="@+id/tvSyncDownload"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="从其他设备下载"
+                                    android:textColor="#20242b"
+                                    android:textSize="13sp" />
+
+                                <TextView
+                                    android:id="@+id/tvSyncDownloadDesc"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="搜索同一局域网里的设备并下载文件"
+                                    android:textColor="#8c939f"
+                                    android:textSize="10sp" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="›"
+                                android:textColor="#8c939f"
+                                android:textSize="15sp" />
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:background="#edf0f3" />
+
+                        <TextView
+                            android:id="@+id/tvSyncStatus"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:ellipsize="middle"
+                            android:maxLines="2"
+                            android:paddingStart="12dp"
+                            android:paddingTop="10dp"
+                            android:paddingEnd="12dp"
+                            android:paddingBottom="14dp"
+                            android:text="未在分享"
                             android:textColor="#8c939f"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
             </LinearLayout>
