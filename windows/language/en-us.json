@@ -63,6 +63,7 @@
         { "id": "status.server.queueEmpty", "str": "Server: queue empty, waiting for directories..." },
         { "id": "status.server.sessionEnd", "str": "Server: session ended" },
         { "id": "status.server.sessionErr", "str": "Server: session error/interrupted" },
+        { "id": "status.server.taskDone", "str": "Server: task completed %1 (%2 files, %3)" },
         { "id": "status.client.scanning", "str": "Scanning local network..." },
         { "id": "status.client.scanDone", "str": "Scan complete, %1 device(s) found" },
         { "id": "status.client.noSelect", "str": "Please scan and select a device first" },
@@ -71,6 +72,8 @@
         { "id": "status.client.done", "str": "Client: download completed" },
         { "id": "status.client.failed", "str": "Client: download failed/disconnected" },
         { "id": "status.client.cleared", "str": "Download records cleared" },
-        { "id": "status.client.disconnected", "str": "Disconnected" }
+        { "id": "status.client.disconnected", "str": "Disconnected" },
+        { "id": "status.client.taskDone", "str": "Client: task completed %1 (%2 files, %3)" },
+        { "id": "status.client.cacheHint", "str": "(if no failed re-download is needed, click [Clear download record cache])" }
     ]
 }

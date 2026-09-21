@@ -63,6 +63,7 @@
         { "id": "status.server.queueEmpty", "str": "服务器: 队列为空 等待目录..." },
         { "id": "status.server.sessionEnd", "str": "服务器: 会话结束" },
         { "id": "status.server.sessionErr", "str": "服务器: 会话出错/中断" },
+        { "id": "status.server.taskDone", "str": "服务器: 任务完成 %1 (%2 个文件, %3)" },
         { "id": "status.client.scanning", "str": "正在扫描局域网..." },
         { "id": "status.client.scanDone", "str": "扫描完成 %1 台设备" },
         { "id": "status.client.noSelect", "str": "请先扫描并选中一台设备" },
@@ -71,6 +72,8 @@
         { "id": "status.client.done", "str": "客户端: 下载完成" },
         { "id": "status.client.failed", "str": "客户端: 下载失败/断开" },
         { "id": "status.client.cleared", "str": "已清除下载记录" },
-        { "id": "status.client.disconnected", "str": "已断开连接" }
+        { "id": "status.client.disconnected", "str": "已断开连接" },
+        { "id": "status.client.taskDone", "str": "客户端: 任务完成 %1 (%2 个文件, %3)" },
+        { "id": "status.client.cacheHint", "str": "（如果没有失败重下的需要 请点击 [清除下载记录缓存]）" }
     ]
 }

@@ -169,6 +169,8 @@ ApplicationWindow {
                 font.pixelSize: window.fontSize
             }
 
+
+
             Label {
                 text: window.uiText["settings.tags"]
                 font.pixelSize: window.fontSize

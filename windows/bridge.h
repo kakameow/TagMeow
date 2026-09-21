@@ -77,10 +77,15 @@ signals:
     // SyncServer/SyncClient 工作线程回调 -> 主线程刷新状态栏(跨线程自动排队)
     void syncServerTip(const QString &msg);
     void syncClientTip(const QString &msg);
+    // 任务(一个入队目录)完成 -> 主线程状态栏提示（工作线程只传数据 文案在主线程格式化）
+    void syncServerTaskDone(const QString &name, int fileCount, qulonglong byteCount);
+    void syncClientTaskDone(const QString &name, int fileCount, qulonglong byteCount);
 
 private slots:
     void onServerTipArrived(const QString &msg);
     void onClientTipArrived(const QString &msg);
+    void onServerTaskDone(const QString &name, int fileCount, qulonglong byteCount);
+    void onClientTaskDone(const QString &name, int fileCount, qulonglong byteCount);
 
 private:
     void pushFileList(); // path_tags_ -> FileContainer.fileList
