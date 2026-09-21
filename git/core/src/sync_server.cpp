@@ -255,16 +255,32 @@ void SyncServer::workerLoop(std::function<void(bool, std::error_code)> cb)
             }
 
             // 队列为空且等待超时：会话正常结束 被停止或请求断开则视为中断
-            if (cb)
+            if (running_ && !disconnect_requested_)
             {
-                if (running_ && !disconnect_requested_)
+                // 先显式发送"会话结束"控制帧并等客户端确认 才算正常结束
+                // （TCP EOF 无法区分正常断开与网络中断 故不以其作为正常结束依据）
+                std::error_code end_ec;
+                if (client_)
                 {
-                    cb(true, std::error_code());
+                    client_->sendSessionEnd(end_ec);
+                    if (!end_ec)
+                    {
+                        waitForSessionEndAck(end_ec);
+                    }
                 }
                 else
                 {
-                    cb(false, std::make_error_code(std::errc::operation_canceled));
+                    end_ec = std::make_error_code(std::errc::not_connected);
                 }
+
+                if (cb)
+                {
+                    cb(!end_ec, end_ec);
+                }
+            }
+            else if (cb)
+            {
+                cb(false, std::make_error_code(std::errc::operation_canceled));
             }
             disconnect_requested_ = false; // 消费断开请求（等待被断开请求唤醒时）
             std::error_code close_ec;
@@ -475,6 +491,47 @@ bool SyncServer::sendDirectory(const std::filesystem::path &dir, std::error_code
     notifyTask(report);
 
     return true;
+}
+
+bool SyncServer::waitForSessionEndAck(std::error_code &ec)
+{
+    ec.clear();
+
+    if (!client_)
+    {
+        ec = std::make_error_code(std::errc::not_connected);
+        return false;
+    }
+
+    // 有界等待：每 500ms 一轮 便于 stop()/disconnect() 及时打断
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (running_ && !disconnect_requested_)
+    {
+        char value = 0;
+        std::error_code recv_ec;
+        if (client_->receiveByte(value, recv_ec, std::chrono::milliseconds(500)))
+        {
+            if (value == '1')
+            {
+                return true;
+            }
+            ec = std::make_error_code(std::errc::protocol_error);
+            return false;
+        }
+        if (recv_ec && recv_ec != std::errc::timed_out)
+        {
+            ec = recv_ec;
+            return false;
+        }
+        if (std::chrono::steady_clock::now() >= deadline)
+        {
+            ec = std::make_error_code(std::errc::timed_out);
+            return false;
+        }
+    }
+
+    ec = std::make_error_code(std::errc::operation_canceled);
+    return false;
 }
 
 bool SyncServer::waitForClientReply(std::error_code &ec, bool &shouldSend)

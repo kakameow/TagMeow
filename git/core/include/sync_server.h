@@ -24,6 +24,8 @@
 //    每个文件：发送文件头 -> 等待客户端回复 1 字节（'1' = 发送数据，'0' = 跳过）
 //    会话期间 enqueueDirectory() 推入的目录会继续按序发送
 // 3. 队列为空：等待 empty_queue_wait 分钟（期间有新目录继续发送）超时仍为空才断开客户端
+//    断开前先发"会话结束"控制帧并等客户端确认（有界） 确认成功才算正常结束
+//    （TCP EOF 无法区分正常断开与网络中断 故不以其作为正常结束依据）失败按会话出错上报
 //    清空队列并重新开始广播
 // 4. stop()/析构：停止工作线程并清理
 
@@ -114,6 +116,9 @@ private:
     void setError(const std::string &msg);
     // 任务完成回调：拷贝回调后在锁外调用（不持锁执行上层代码）
     void notifyTask(const TaskReport &report);
+    // 等待客户端对"会话结束"控制帧的确认（有界 可被 stop()/disconnect() 打断）
+    // 返回 true = 客户端确认收到 会话才算正常结束
+    bool waitForSessionEndAck(std::error_code &ec);
     // 获取本机 IP（多网卡时取首个非回环 v4 地址 必要时调用方可自行指定）
     std::string getLocalIP() const;
 

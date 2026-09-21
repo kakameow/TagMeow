@@ -267,6 +267,16 @@ void TcpConnection::sendHeader(const FileHeader &header, std::error_code &ec)
     sendMessage(data, ec);
 }
 
+void TcpConnection::sendSessionEnd(std::error_code &ec)
+{
+    // 控制帧：只带一个标记 接收端据此判定会话正常结束
+    nlohmann::json j;
+    j["session_end"] = true;
+    std::string json_str = j.dump();
+
+    std::vector<char> data(json_str.begin(), json_str.end());
+    sendMessage(data, ec);
+}
 void TcpConnection::sendFileData(const std::filesystem::path &file_path_utf8, uint64_t offset, size_t chunk_size, std::error_code &ec, size_t *bytes_sent)
 {
     if (bytes_sent)
@@ -327,6 +337,14 @@ FileHeader TcpConnection::receiveHeader(std::error_code &ec)
     try
     {
         nlohmann::json j = nlohmann::json::parse(json_str);
+
+        // 会话结束控制帧：不携带文件字段 仅表示服务端正常收尾
+        if (j.value("session_end", false))
+        {
+            FileHeader end_header;
+            end_header.session_end_ = true;
+            return end_header;
+        }
         // 与 parseUDPMessage 一致：严格校验必需字段 缺失即协议错误
         if (!j.contains("parent_dir") || !j.contains("file_name") || !j.contains("file_size"))
         {

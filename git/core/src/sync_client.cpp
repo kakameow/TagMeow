@@ -313,18 +313,35 @@ bool SyncClient::syncReceiveAll(std::error_code &ec)
         {
             if (ec == asio::error::eof)
             {
-                ec.clear();
-                if (received_count > 0)
-                {
-                    // 服务器发送完毕正常断开
-                    return true;
-                }
-                // 无文件可下载（服务器发送队列为空）：正常完成 以 ec 提示上层
-                ec = std::make_error_code(std::errc::no_message_available);
-                return true;
+                // 不能用 TCP EOF 判定"服务器正常结束"：网络中断同样表现为 EOF
+                // 正常结束必须收到服务端的"会话结束"控制帧（见下面 header.session_end_ 分支）
+                ec = std::make_error_code(std::errc::connection_aborted);
+                setError("[warning] download failed: connection closed without session-end marker (interrupted)");
+                return false;
             }
             setError("[warning] download failed: receive file header failed: " + ec.message());
             return false;
+        }
+
+        if (header.session_end_)
+        {
+            // 服务端显式声明本次会话正常结束：回一个确认字节（服务端据此确认收尾成功）
+            // 数据已完整收到 确认发送失败只影响服务端判定 客户端仍按正常完成处理
+            std::error_code ack_ec;
+            sendReply(true, ack_ec);
+            if (ack_ec)
+            {
+                setError("[warning] download done but session-end ack failed: " + ack_ec.message());
+            }
+
+            ec.clear();
+            if (received_count > 0)
+            {
+                return true;
+            }
+            // 无文件可下载（服务器发送队列为空）：正常完成 以 ec 提示上层
+            ec = std::make_error_code(std::errc::no_message_available);
+            return true;
         }
 
         if (header.file_name_.empty())

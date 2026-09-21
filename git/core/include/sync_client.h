@@ -25,7 +25,9 @@
 //    接收失败/中断：未传完的临时文件（目标路径 + ".part"）由 TcpConnection::receiveFileTo 删除 不留残留
 //    下载记录只增不减：命中（记录 + 磁盘文件存在且大小一致）即跳过 下次下载只补缺失的文件
 //    记录清理由上层手动触发（clearDownloadRecords） 核心层不做自动删除
-//    特殊情况 服务器发送队列为空时由服务器主动断开连接
+//    会话正常结束：服务器收尾时发送"会话结束"控制帧 客户端回确认后按正常完成回调
+//    连接中断：EOF/套接字错误且未收到该控制帧 一律按失败回调（不再当成服务器正常断开）
+//    特殊情况 服务器发送队列为空时同样走正常结束流程（回调 ec=errc::no_message_available）
 //    回调以 success=true、ec=errc::no_message_available 提示上层“发送队列为空”（本次无文件可下载）
 
 // 已知限制(仅注释说明, 未改动): 构造函数即创建 BroadcastReceiver 并绑定 UDP_DEFAULT_PORT(11451)
@@ -60,9 +62,9 @@ public:
     // - isDownloading() 为 true 时重复调用：立即回调失败（ec = errc::operation_in_progress）
     // - server_index 越界：立即回调失败（ec = errc::result_out_of_range）
     // - 回调语义：
-    //     success=true  ec 清空                         —— 至少完成 1 个文件后服务器正常断开
+    //     success=true  ec 清空                         —— 至少完成 1 个文件 且收到服务器"会话结束"标记后正常完成
     //     success=true  ec=errc::no_message_available   —— 服务器发送队列为空 本次无文件可下载（正常完成）
-    //     success=false ec=其他                         —— 连接失败/中途断开/协议错误
+    //     success=false ec=其他                         —— 连接失败/中途中断(含未收到会话结束标记的 EOF)/协议错误
     void startDownload(std::size_t server_index, std::function<void(bool success, std::error_code ec)> cb);
 
     // 断开当前连接并终止下载会话（工作线程在下一个有界阻塞点退出并回调失败）

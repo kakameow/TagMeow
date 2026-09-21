@@ -32,6 +32,8 @@
 //    total_timeout 按 ip:port 去重 非法报文与魔术字不匹配仅跳过 不中断扫描
 // 4. TcpConnection 单条连接 4 字节长度前缀成帧 不自动重连
 //    接收端对长度前缀设上限 防止恶意报文导致超大内存分配
+// 5. 会话正常结束以显式控制帧（session_end）为准 不用 TCP EOF：
+//    EOF 无法区分"服务端正常断开"与"网络中断" 两端必须一起更新该协议
 
 struct FileHeader
 {
@@ -41,6 +43,9 @@ struct FileHeader
     // 本文件是所在任务(入队目录)的最后一个文件（可选字段 旧端不识别时按 false 处理）
     // 接收端据此在一个任务的全部文件处理完后给出任务完成提示
     bool last_in_dir_ = false;
+    // 会话结束控制帧标记（不携带文件信息 仅服务端正常收尾时发送）
+    // TCP EOF 不能区分正常断开与网络中断 接收端以该标记判定正常结束
+    bool session_end_ = false;
 };
 
 // 任务(入队目录)级完成报告：一个目录下的文件全部发送/接收完毕时由工作线程通知上层
@@ -135,11 +140,14 @@ public:
 
     // 发送文件头 JSON 不含文件数据
     void sendHeader(const FileHeader &header, std::error_code &ec);
+    // 发送"会话结束"控制帧（不携带文件字段的 JSON 标记）
+    // 服务端正常收尾时发送 接收端以收到该帧作为会话正常结束的唯一依据
+    void sendSessionEnd(std::error_code &ec);
     // 发送文件数据块 从 offset 开始读取最多 chunk_size 字节并发送
     // bytes_sent 可空 回传实际发送字节数 0 表示已到文件末尾 正常结束 ec 清零
     // 调用方应据此停止发送 避免对端死等剩余字节
     void sendFileData(const std::filesystem::path &file_path_utf8, uint64_t offset, size_t chunk_size, std::error_code &ec, size_t *bytes_sent = nullptr);
-    // 接收文件头 严格校验必需字段
+    // 接收文件头 严格校验必需字段（会话结束控制帧 session_end_ 不校验文件字段）
     FileHeader receiveHeader(std::error_code &ec);
     // 接收文件数据到指定路径 内部循环接收直到 file_size 字节
     // 落盘策略（临时文件 + 成功后改名）：
