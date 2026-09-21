@@ -41,7 +41,7 @@ import java.util.Objects;
 // }
 // 同时兼容原版的纯字符串数组写法
 
-class DirectoryConfigManager {
+public class DirectoryConfigManager {
 
     public static final class Directory {
 

@@ -2,12 +2,14 @@ package com.example.tagmeow;
 
 import android.content.Context;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
@@ -102,7 +104,11 @@ public final class Lang {
         return manager.getString(id);
     }
 
-    // 带占位符：Lang.f("toast.item_count", 3) 对应 "共 %1$d 项"
+    // 带占位符：Lang.f("toast.item_count", 3) 对应 "共 %1 项"
+    //
+    // 占位符统一用 Qt 的写法 %1 %2 %3（QString::arg）：桌面端与 Android 端共用同一份文案，
+    // 两边的字符串文件才能逐字一致。Java 的 String.format 要的是 %1$s，所以这里把 %N
+    // 补成 %N$s（%s 对数字和字符串都吃）；已经是 %N$s / %N$d 的旧写法保持不动。
     public static synchronized String f(String id, Object... args) {
         if (manager == null) {
             return LanguageManager.MISSING_STRING;
@@ -115,10 +121,19 @@ public final class Lang {
         }
 
         try {
-            return String.format(Locale.getDefault(), template, args);
+            return String.format(Locale.getDefault(), toJavaPlaceholders(template), args);
         } catch (RuntimeException error) {
             return template;
         }
+    }
+
+    // %1 -> %1$s（负数/已带 $ 的写法不动）
+    private static String toJavaPlaceholders(String template) {
+        if (template.indexOf('%') < 0) {
+            return template;
+        }
+
+        return template.replaceAll("%(\\d+)(?!\\$)", "%$1\\$s");
     }
 
     // 当前语言代码（zh_CN）
@@ -154,8 +169,12 @@ public final class Lang {
         return new File(context.getFilesDir(), LANGUAGE_DIR);
     }
 
-    // 把内置语言铺到内部目录（已经有的不覆盖）
+    // 把内置语言铺到内部目录
     // 铺完之后所有语言都从内部目录读 内置 / 导入同构
+    // 判定标准是「和 assets 里的内容一样不一样」而不是「文件在不在」：
+    // 只按存在性铺的话 加了新文案的版本装到老设备上 手里那份 json 永远不会更新
+    // 新 key 会一直显示 MISSING_STRING（同步进度那几条就踩过这个坑）
+    // 代价：同名的外部导入语言会被内置的盖掉 —— 内置语言由应用负责维护 这是有意的
     private static void seedBuiltInLanguages(File directory) {
         if (!directory.isDirectory() && !directory.mkdirs()) {
             return;
@@ -175,7 +194,7 @@ public final class Lang {
 
                 File target = new File(directory, name);
 
-                if (target.isFile()) {
+                if (target.isFile() && sameAsAsset(ASSET_DIR + "/" + name, target)) {
                     continue;
                 }
 
@@ -184,6 +203,33 @@ public final class Lang {
         } catch (IOException error) {
             // assets 里没有语言目录时忽略
         }
+    }
+
+    // 内部那份和 assets 里的内置语言是不是同一份内容
+    // 比内容而不是记版本号：不会出现「改了文案忘了把版本号加一」这种坑
+    private static boolean sameAsAsset(String asset_path, File target) {
+        if (context == null) {
+            return false;
+        }
+
+        try (InputStream input = context.getAssets().open(asset_path)) {
+            return Arrays.equals(readAll(input), Files.readAllBytes(target.toPath()));
+        } catch (IOException error) {
+            return false;
+        }
+    }
+
+    private static byte[] readAll(InputStream input) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        int read = input.read(chunk);
+
+        while (read > 0) {
+            buffer.write(chunk, 0, read);
+            read = input.read(chunk);
+        }
+
+        return buffer.toByteArray();
     }
 
     private static void copyAsset(String asset_path, File target) {

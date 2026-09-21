@@ -18,6 +18,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -98,6 +100,13 @@ public class MainActivity extends AppCompatActivity {
     private static final String KEY_DEFAULT_MODE = "default_mode";
     private static final String KEY_LANGUAGE = "language";
 
+    // 同步（局域网）相关设置
+    private static final String KEY_SYNC_SERVER_NAME = "sync_server_name";
+    private static final String KEY_SYNC_DOWNLOAD_PATH = "sync_download_path";
+    // 「其他方式分享」上次选好的目录
+    private static final String KEY_SYNC_EXPORT_DIR = "sync_export_dir";
+
+
     // 第一次运行时的默认语言（界面上不再有「跟随系统」这一项）
     private static final String DEFAULT_LANGUAGE_CODE = "zh_CN";
     // 存储方式只剩一种：所有文件访问（绝对路径）+ 应用内选目录
@@ -159,6 +168,94 @@ public class MainActivity extends AppCompatActivity {
 
     // 缩略图单独一个线程池：图片多的时候不要把 worker 队列堵住
     private final ExecutorService thumb_worker = Executors.newFixedThreadPool(2);
+
+    // 同步单独一条线程：scanServers 会阻塞到 2 秒、stop() 要 join 服务端工作线程
+    // 不能压在 worker（标签模块）上 否则浏览列表会跟着卡住
+    private final ExecutorService sync_worker = Executors.newSingleThreadExecutor();
+
+    // 同步进度轮询
+    // core 的 sync 只在「会话」边界给回调（队列为空 / 会话结束）中间完全不吭声，
+    // 所以传输中的进度只能拿 core 已经维护的状态自己轮询着画
+    private static final int SYNC_PROGRESS_INTERVAL_MS = 600;
+
+    private final Handler sync_progress_handler = new Handler(Looper.getMainLooper());
+
+    private boolean sync_progress_running = false;
+
+    private final Runnable sync_progress_tick = new Runnable() {
+        @Override
+        public void run() {
+            sync_progress_running = false;
+
+            renderSyncProgress();
+
+            // 子界面还开着就接着轮询 关掉了自然就停
+            if (sync_share_overlay != null || sync_download_overlay != null) {
+                sync_progress_running = true;
+                sync_progress_handler.postDelayed(this, SYNC_PROGRESS_INTERVAL_MS);
+            }
+        }
+    };
+
+    // ---- 同步页（同步标签页）状态 ----
+
+    // 同步页里的控件
+    private TextView tv_sync_status;
+
+    // 同步子界面里的控件（子界面关闭时全部置 null）
+    private View sync_share_overlay;
+    private View sync_download_overlay;
+    private LinearLayout sync_queue_list;
+    private TextView tv_sync_queue_empty;
+    private LinearLayout sync_root_list;
+    private TextView tv_sync_roots_empty;
+    private LinearLayout sync_device_list;
+    private TextView tv_sync_device_empty;
+    private TextView tv_sync_download_path;
+    private TextView tv_sync_share_status;
+    private TextView tv_sync_client_status;
+    private TextView tv_sync_share_progress;
+    private TextView tv_sync_client_progress;
+    private TextView btn_sync_path_change;
+
+    // 状态行文案：子界面关掉之后回调还可能回来 所以文案存在字段里 重开时再贴回去
+    private String sync_share_text = "";
+    private String sync_client_text = "";
+
+    // 其他方式分享子界面（压缩成 zip 交给系统分享面板）
+    private View sync_export_overlay;
+    private TextView tv_sync_export_zip_dir;
+    private TextView tv_sync_export_dir;
+    private TextView tv_sync_export_status;
+    private TextView tv_sync_export_progress;
+    // 分享面板回来之后待确认删除的压缩包
+    private File pending_export_zip;
+    // 压缩进行中：挡住重复点击（工作线程会写 所以加 volatile）
+    private volatile boolean export_running = false;
+    private String export_text = "";
+
+
+    // 目录浏览子界面被借用的用途（给同步挑目录时不能顺手加进受管理目录）
+    private static final int BROWSER_PURPOSE_ROOT = 0;
+    private static final int BROWSER_PURPOSE_SHARE_DIR = 1;
+    private static final int BROWSER_PURPOSE_DOWNLOAD_DIR = 2;
+    // 其他方式分享：同一个目录浏览器 第三种用途（挑「要分享的目录」）
+    private static final int BROWSER_PURPOSE_EXPORT_DIR = 3;
+
+
+    private int dir_browser_purpose = BROWSER_PURPOSE_ROOT;
+
+    // 设备列表里选中的下标（-1 表示没选）
+    private int selected_sync_device = -1;
+
+    // 分享端是否已经启动（只影响状态行文案）
+    private boolean sync_server_running = false;
+
+    // 服务器名称留空时的兜底（与 Windows 端 onServerStartClicked 一致）
+    private static final String DEFAULT_SYNC_SERVER_NAME = "tagmeow";
+
+    // 会话中发送队列为空后的等待时长（core 的 ServerWaitingTime 默认 5 分钟）
+    private static final int SYNC_EMPTY_QUEUE_WAIT_MINUTES = 5;
 
     // 缩略图缓存（key 里带上修改时间 文件改过就会重新取）
     private final LruCache<String, Bitmap> thumb_cache =
@@ -448,8 +545,17 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        stopSyncProgress();
+
         worker.shutdown();
         thumb_worker.shutdown();
+        sync_worker.shutdown();
+
+        // 转屏 / 改字号也会走到 onDestroy（那时 isFinishing 是 false）同步得接着跑
+        // 只有真的退出应用才释放套接字与工作线程（等价 Windows 端的进程退出）
+        if (isFinishing()) {
+            SyncEngine.closeAll();
+        }
     }
 
     private void bindViews() {
@@ -467,6 +573,13 @@ public class MainActivity extends AppCompatActivity {
         general_group = findViewById(R.id.groupGeneral);
         data_group = findViewById(R.id.groupData);
         support_group = findViewById(R.id.groupSupport);
+
+        // 同步页：两个入口 + 一行状态
+        tv_sync_status = findViewById(R.id.tvSyncStatus);
+        findViewById(R.id.btnSyncShare).setOnClickListener(v -> showSyncShareOverlay());
+        findViewById(R.id.btnSyncDownload).setOnClickListener(v -> showSyncDownloadOverlay());
+        findViewById(R.id.btnSyncExport).setOnClickListener(v -> showSyncExportOverlay());
+
 
         edit_include = findViewById(R.id.editInclude);
         edit_exclude = findViewById(R.id.editExclude);
@@ -557,6 +670,9 @@ public class MainActivity extends AppCompatActivity {
         }
 
         reload();
+
+        // 同步页的状态行（是否正在分享 / 保存目录在哪）
+        renderSyncTabStatus();
     }
 
     private void initEngine() {
@@ -1447,6 +1563,31 @@ public class MainActivity extends AppCompatActivity {
         file_tag_target = null;
         editor_selected_type = null;
         editor_selected_tag = null;
+
+        // 同步子界面
+        stopSyncProgress();
+
+        sync_share_overlay = null;
+        sync_download_overlay = null;
+        sync_queue_list = null;
+        tv_sync_queue_empty = null;
+        sync_root_list = null;
+        tv_sync_roots_empty = null;
+        sync_device_list = null;
+        tv_sync_device_empty = null;
+        tv_sync_download_path = null;
+
+        sync_export_overlay = null;
+        tv_sync_export_zip_dir = null;
+        tv_sync_export_dir = null;
+        tv_sync_export_status = null;
+        tv_sync_export_progress = null;
+
+        tv_sync_share_status = null;
+        tv_sync_client_status = null;
+        tv_sync_share_progress = null;
+        tv_sync_client_progress = null;
+        btn_sync_path_change = null;
     }
 
     // 目录
@@ -1459,6 +1600,10 @@ public class MainActivity extends AppCompatActivity {
             showAllFilesPermissionDialog();
             return;
         }
+
+        // 目录浏览子界面是共用的：从正式入口进来一定是「加进受管理目录」
+        // 不重置的话上一次同步挑目录留下的用途会让「选择此目录」跳到同步子界面去
+        dir_browser_purpose = BROWSER_PURPOSE_ROOT;
 
         showDirBrowserOverlay(Environment.getExternalStorageDirectory());
     }
@@ -1484,6 +1629,17 @@ public class MainActivity extends AppCompatActivity {
         dir_browser_overlay.findViewById(R.id.btnDirBrowserChoose).setOnClickListener(v -> chooseBrowserFolder());
 
         applyOverlayTexts();
+
+        // 同一个浏览器被同步子界面借用时把「选择此目录」的意思说清楚
+        if (dir_browser_purpose == BROWSER_PURPOSE_SHARE_DIR) {
+            setText(dir_browser_overlay, R.id.btnDirBrowserChoose, "sync.pick_share_dir");
+        } else if (dir_browser_purpose == BROWSER_PURPOSE_DOWNLOAD_DIR) {
+            setText(dir_browser_overlay, R.id.btnDirBrowserChoose, "sync.pick_download_dir");
+        } else if (dir_browser_purpose == BROWSER_PURPOSE_EXPORT_DIR) {
+            setText(dir_browser_overlay, R.id.btnDirBrowserChoose, "sync.pick_export_dir");
+        }
+
+
         renderDirBrowser();
     }
 
@@ -1649,15 +1805,41 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
-    // 选择当前目录 -> 加进受管理目录
+    // 选择当前目录
+    // 默认是「加进受管理目录」；同步的两个子界面借用同一个浏览器时改成填路径
     private void chooseBrowserFolder() {
         if (dir_browser_path == null) {
             return;
         }
 
         File target = dir_browser_path;
+        int purpose = dir_browser_purpose;
+
+        dir_browser_purpose = BROWSER_PURPOSE_ROOT;
 
         hideOverlay();
+
+        if (purpose == BROWSER_PURPOSE_SHARE_DIR) {
+            openSyncShareOverlay(target);
+
+            return;
+        }
+
+        if (purpose == BROWSER_PURPOSE_DOWNLOAD_DIR) {
+            applySyncDownloadPath(target);
+            openSyncDownloadOverlay();
+
+            return;
+        }
+
+        if (purpose == BROWSER_PURPOSE_EXPORT_DIR) {
+            applySyncExportDir(target);
+            showSyncExportOverlay();
+
+            return;
+        }
+
+
         addFilesRoot(target);
     }
 
@@ -1769,7 +1951,16 @@ public class MainActivity extends AppCompatActivity {
                 toast(Lang.get("storage.perm_denied"));
             }
         }
+
+        // 从系统分享面板回来：问一下要不要把刚生成的压缩包删掉（删除 = 清空压缩包目录）
+        File pending_zip = pending_export_zip;
+
+        if (pending_zip != null) {
+            pending_export_zip = null;
+            showExportDeleteDialog(pending_zip);
+        }
     }
+
 
     // 这个目录的授权还在不在：真的去读一次（只在 worker 线程调用）
     // 存储层还不认识这个 root（比如刚读配置）就先注册一下
@@ -2894,6 +3085,732 @@ public class MainActivity extends AppCompatActivity {
                 : Lang.get("settings.storage_all_denied");
     }
 
+    // ==================== 同步（局域网）====================
+    //
+    // 与 core 的 sync 模块一一对应：
+    //   SyncServer <- core SyncServer   UDP 广播 + TCP 接受连接 + 按队列发送目录
+    //   SyncClient <- core SyncClient   UDP 扫描 + 异步下载会话 + records.json 断点记录
+    //   SyncBasic  <- core sync_basic   端口 / 魔术字 / 报文结构
+    // 线协议完全一致（UDP 11451 + 魔术字 0x114514 做发现，TCP 4 字节大端长度前缀帧，
+    // 每个文件一个 '1'/'0' 回复字节），所以 Android 端与 Windows 端可以互相发现、互相传输。
+    //
+    // 线程约定与工程其它部分一致：
+    // - 所有同步 API 调用都在 sync_worker 上（scanServers 会阻塞到 2 秒，stop() 要 join 工作线程）
+    // - 工作线程回调（下载结束 / 会话结束）先 runOnUiThread 再碰 View
+
+    // 默认保存目录（对应 Windows 端 config.json 的 DownloadPath，默认 ./download）
+    // Android 没有进程工作目录，所以落在内部存储根下的 TagMeow/download：
+    // 用户看得见、能直接用系统文件管理器打开，也能一键加成受管理目录
+    private File syncDownloadDir() {
+        String saved = prefs.getString(KEY_SYNC_DOWNLOAD_PATH, null);
+
+        if (saved != null && !saved.isEmpty()) {
+            return new File(saved);
+        }
+
+        return new File(Environment.getExternalStorageDirectory(), "TagMeow/download");
+    }
+
+    private void saveSyncDownloadDir(File dir) {
+        prefs.edit().putString(KEY_SYNC_DOWNLOAD_PATH, dir.getAbsolutePath()).apply();
+    }
+
+    private String syncServerName() {
+        String name = prefs.getString(KEY_SYNC_SERVER_NAME, null);
+
+        return name == null || name.isEmpty() ? DEFAULT_SYNC_SERVER_NAME : name;
+    }
+
+    // 惰性创建 SyncServer / SyncClient
+    // 对应 Windows 端的 onSyncWindowOpened（首次打开同步界面时创建 只创建一次）
+    private SyncServer syncServer() {
+        SyncServer server = SyncEngine.server(
+                SyncBasic.UDP_DEFAULT_PORT, SyncBasic.UDP_DEFAULT_MAGIC, SYNC_EMPTY_QUEUE_WAIT_MINUTES);
+
+        // 任务(入队目录)级完成通知（core 部分5 起）：一个目录发完就给一条明确的完成提示
+        // 回调在服务端工作线程上跑 所以先排队回主线程再碰 View
+        server.setTaskCallback(report -> runOnUiThread(() -> setSyncShareStatus(syncTaskText(report, true))));
+
+        return server;
+    }
+
+    private SyncClient syncClient() throws SyncException {
+        SyncClient client = SyncEngine.client(
+                getApplicationContext(), SyncBasic.UDP_DEFAULT_PORT, SyncBasic.UDP_DEFAULT_MAGIC, syncDownloadDir());
+
+        // 任务(入队目录)级完成通知（core 部分5 起）：每收完一个目录给一条明确的完成提示
+        client.setTaskCallback(report -> runOnUiThread(() -> setSyncClientStatus(syncTaskText(report, false))));
+
+        return client;
+    }
+
+    // 任务完成文案：目录名 + 文件数 + 字节数
+    // 与桌面端 status.server.taskDone / status.client.taskDone 用同一份文案（占位符也是同一套 %1/%2/%3）
+    // core 的 TaskReport.byte_count 在接收侧把「跳过的文件」按 0 计 所以字节数是真实传输量
+    private static String syncTaskText(SyncBasic.TaskReport report, boolean sending) {
+        return Lang.f(sending ? "status.server.taskDone" : "status.client.taskDone",
+                report.name, report.file_count, formatBytes(report.byte_count));
+    }
+
+    // 同步页底部那行状态
+    private void renderSyncTabStatus() {
+        if (tv_sync_status == null) {
+            return;
+        }
+
+        if (SyncEngine.hasServer() && sync_server_running) {
+            SyncServer server = SyncEngine.server();
+
+            // ip:port 是 Android 端独有的一行：core 没给桌面端留 getter 所以它不进共享文案
+            tv_sync_status.setText(Lang.f("sync.running",
+                    server.getAdvertiseIP() + ":" + server.getServerPort()));
+
+            return;
+        }
+
+        tv_sync_status.setText(Lang.f("sync.idle", syncDownloadDir().getAbsolutePath()));
+    }
+
+    // 子界面里的静态文案
+    private void applySyncOverlayTexts() {
+        if (sync_share_overlay != null) {
+            setText(sync_share_overlay, R.id.tvSyncShareTitle, "sync.share");
+            setText(sync_share_overlay, R.id.btnSyncShareBack, "sync.back");
+            setText(sync_share_overlay, R.id.tvSyncNameLabel, "sync.serverName");
+            setText(sync_share_overlay, R.id.tvSyncDirLabel, "sync.dirPath");
+            setText(sync_share_overlay, R.id.tvSyncQueueTitle, "sync.queue_title");
+            setText(sync_share_overlay, R.id.tvSyncRootsTitle, "sync.roots_title");
+            setText(sync_share_overlay, R.id.tvSyncQueueEmpty, "sync.queue_empty");
+            setText(sync_share_overlay, R.id.tvSyncRootsEmpty, "sync.roots_empty");
+            setHint(sync_share_overlay, R.id.editSyncServerName, "sync.serverName");
+            setHint(sync_share_overlay, R.id.editSyncSharePath, "sync.dirPath");
+            setText(sync_share_overlay, R.id.btnSyncServerStart, "sync.start");
+            setText(sync_share_overlay, R.id.btnSyncServerStop, "sync.stop");
+            setText(sync_share_overlay, R.id.btnSyncShareBrowse, "sync.browse");
+            setText(sync_share_overlay, R.id.btnSyncShareAdd, "sync.addDir");
+            setText(sync_share_overlay, R.id.btnSyncServerDisconnect, "sync.disconnect");
+        }
+
+        if (sync_download_overlay != null) {
+            setText(sync_download_overlay, R.id.tvSyncDownloadTitle, "sync.download");
+            setText(sync_download_overlay, R.id.btnSyncDownloadBack, "sync.back");
+            setText(sync_download_overlay, R.id.tvSyncPathLabel, "sync.save_to");
+            setText(sync_download_overlay, R.id.tvSyncDeviceTitle, "sync.device_title");
+            setText(sync_download_overlay, R.id.tvSyncDeviceEmpty, "sync.device_empty");
+            setText(sync_download_overlay, R.id.tvSyncRecordHint, "status.client.cacheHint");
+            setText(sync_download_overlay, R.id.btnSyncPathChange, "sync.change_path");
+            setText(sync_download_overlay, R.id.btnSyncPathAsRoot, "sync.path_as_root");
+            setText(sync_download_overlay, R.id.btnSyncScan, "sync.scan");
+            setText(sync_download_overlay, R.id.btnSyncDownloadSel, "sync.downloadSel");
+            setText(sync_download_overlay, R.id.btnSyncClearRecords, "sync.clearRecords");
+            setText(sync_download_overlay, R.id.btnSyncClientDisconnect, "sync.disconnect_short");
+        }
+
+        if (sync_export_overlay != null) {
+            setText(sync_export_overlay, R.id.tvSyncExportTitle, "sync.export");
+            setText(sync_export_overlay, R.id.btnSyncExportBack, "sync.back");
+            setText(sync_export_overlay, R.id.tvSyncExportZipDirLabel, "sync.export_zip_label");
+            setText(sync_export_overlay, R.id.tvSyncExportDirLabel, "sync.export_src_label");
+            setText(sync_export_overlay, R.id.btnSyncExportBrowse, "sync.export_browse");
+            setText(sync_export_overlay, R.id.btnSyncExportStart, "sync.export_start");
+            setText(sync_export_overlay, R.id.btnSyncExportDelete, "sync.export_delete");
+            setText(sync_export_overlay, R.id.tvSyncExportHint, "sync.export_hint");
+        }
+    }
+
+
+    private void setSyncShareStatus(String text) {
+        sync_share_text = text;
+
+        if (tv_sync_share_status != null) {
+            tv_sync_share_status.setText(text);
+        }
+    }
+
+    private void setSyncClientStatus(String text) {
+        sync_client_text = text;
+
+        if (tv_sync_client_status != null) {
+            tv_sync_client_status.setText(text);
+        }
+    }
+
+    // ---------- 分享端 ----------
+
+    private void showSyncShareOverlay() {
+        openSyncShareOverlay(null);
+    }
+
+    private void openSyncShareOverlay(File fill_path) {
+        overlay_host.removeAllViews();
+        sync_share_overlay = getLayoutInflater().inflate(R.layout.overlay_sync_share, overlay_host, false);
+        overlay_host.addView(sync_share_overlay);
+        overlay_host.setVisibility(View.VISIBLE);
+
+        sync_queue_list = sync_share_overlay.findViewById(R.id.syncQueueList);
+        tv_sync_queue_empty = sync_share_overlay.findViewById(R.id.tvSyncQueueEmpty);
+        sync_root_list = sync_share_overlay.findViewById(R.id.syncRootList);
+        tv_sync_roots_empty = sync_share_overlay.findViewById(R.id.tvSyncRootsEmpty);
+        tv_sync_share_status = sync_share_overlay.findViewById(R.id.tvSyncShareStatus);
+        tv_sync_share_progress = sync_share_overlay.findViewById(R.id.tvSyncShareProgress);
+
+        final EditText name_field = sync_share_overlay.findViewById(R.id.editSyncServerName);
+        final EditText path_field = sync_share_overlay.findViewById(R.id.editSyncSharePath);
+
+        name_field.setText(syncServerName());
+
+        if (fill_path != null) {
+            path_field.setText(fill_path.getAbsolutePath());
+        }
+
+        tv_sync_share_status.setText(sync_share_text);
+
+        sync_share_overlay.findViewById(R.id.btnSyncShareBack).setOnClickListener(v -> hideOverlay());
+        sync_share_overlay.findViewById(R.id.btnSyncShareBrowse)
+                .setOnClickListener(v -> browseForSync(BROWSER_PURPOSE_SHARE_DIR, new File(path_field.getText().toString().trim())));
+        sync_share_overlay.findViewById(R.id.btnSyncShareAdd)
+                .setOnClickListener(v -> onSyncAddDir(path_field));
+        sync_share_overlay.findViewById(R.id.btnSyncServerStart)
+                .setOnClickListener(v -> onSyncServerStart(name_field));
+        sync_share_overlay.findViewById(R.id.btnSyncServerStop).setOnClickListener(v -> onSyncServerStop());
+        sync_share_overlay.findViewById(R.id.btnSyncServerDisconnect)
+                .setOnClickListener(v -> onSyncServerDisconnect());
+
+        applyOverlayTexts();
+        renderSyncQueue();
+        renderSyncRoots();
+
+        startSyncProgress();
+    }
+
+    // 借用目录浏览子界面挑目录（同一个浏览器 三种用途）
+    private void browseForSync(int purpose, File start) {
+        if (!hasAllFilesAccess()) {
+            showAllFilesPermissionDialog();
+
+            return;
+        }
+
+        File from = start;
+
+        if (from == null || !from.isDirectory()) {
+            from = syncDownloadDir();
+        }
+
+        if (!from.isDirectory()) {
+            from = Environment.getExternalStorageDirectory();
+        }
+
+        dir_browser_purpose = purpose;
+        showDirBrowserOverlay(from);
+    }
+
+    private void renderSyncQueue() {
+        if (sync_queue_list == null) {
+            return;
+        }
+
+        sync_queue_list.removeAllViews();
+
+        List<File> queue = SyncEngine.hasServer()
+                ? SyncEngine.server().getTaskQueue()
+                : new ArrayList<File>();
+
+        if (queue.isEmpty()) {
+            tv_sync_queue_empty.setVisibility(View.VISIBLE);
+
+            return;
+        }
+
+        tv_sync_queue_empty.setVisibility(View.GONE);
+
+        for (File dir : queue) {
+            addRow(sync_queue_list, buildRow(R.drawable.folder, dir.getName(), dir.getAbsolutePath(), null, null));
+        }
+    }
+
+    // 受管理目录一键入队
+    // Windows 端只能手打绝对路径（serverDirField）这里多给一条捷径，但同样不做授权校验以外的限制
+    private void renderSyncRoots() {
+        worker.execute(() -> {
+            final List<String> names = new ArrayList<>();
+            final List<String> paths = new ArrayList<>();
+
+            TagServe current = serve;
+
+            if (current != null) {
+                for (DirectoryConfigManager.Directory root : current.getDirectoryConfigManager().getValidDirList()) {
+                    File dir = new File(root.getId());
+
+                    if (!dir.isDirectory()) {
+                        continue;
+                    }
+
+                    names.add(root.getDisplayName());
+                    paths.add(dir.getAbsolutePath());
+                }
+            }
+
+            runOnUiThread(() -> {
+                LinearLayout list = sync_root_list;
+
+                if (list == null) {
+                    return;
+                }
+
+                list.removeAllViews();
+
+                if (paths.isEmpty()) {
+                    tv_sync_roots_empty.setVisibility(View.VISIBLE);
+
+                    return;
+                }
+
+                tv_sync_roots_empty.setVisibility(View.GONE);
+
+                for (int i = 0; i < paths.size(); i++) {
+                    final File dir = new File(paths.get(i));
+
+                    addRow(list, buildRow(R.drawable.folder_plus, names.get(i), paths.get(i), buildValue("+"),
+                            () -> onSyncEnqueue(dir)));
+                }
+            });
+        });
+    }
+
+    private void onSyncEnqueue(final File dir) {
+        sync_worker.execute(() -> {
+            syncServer().enqueueDirectory(dir);
+
+            runOnUiThread(() -> {
+                setSyncShareStatus(Lang.f("status.server.enqueued", dir.getAbsolutePath()));
+                renderSyncQueue();
+            });
+        });
+    }
+
+    private void onSyncAddDir(EditText path_field) {
+        String text = path_field.getText().toString().trim();
+
+        if (text.isEmpty()) {
+            setSyncShareStatus(Lang.get("status.server.dirEmpty"));
+
+            return;
+        }
+
+        final File dir = new File(text);
+
+        if (!dir.isDirectory()) {
+            setSyncShareStatus(Lang.f("status.server.invalidDir", text));
+
+            return;
+        }
+
+        sync_worker.execute(() -> {
+            // 去掉末尾分隔符 否则 core 的 parent_dir 首段（入队目录名）会变成空串
+            final File target = new File(StorageAccess.normalizePath(dir.getAbsolutePath()));
+
+            syncServer().enqueueDirectory(target);
+
+            runOnUiThread(() -> {
+                path_field.setText("");
+                setSyncShareStatus(Lang.f("status.server.enqueued", target.getAbsolutePath()));
+                renderSyncQueue();
+            });
+        });
+    }
+
+    private void onSyncServerStart(EditText name_field) {
+        final String name = name_field.getText().toString().trim();
+
+        prefs.edit().putString(KEY_SYNC_SERVER_NAME, name).apply();
+
+        sync_worker.execute(() -> {
+            final SyncServer server = syncServer();
+
+            // 回调在工作线程上：先排队到主线程再改 View
+            SyncError error = server.start(name, 0, (success, session_error) ->
+                    runOnUiThread(() -> setSyncShareStatus(syncServerSessionText(success, session_error))));
+
+            runOnUiThread(() -> {
+                sync_server_running = server.isStarted();
+
+                if (error == SyncError.NONE) {
+                    // 共享文案只报服务器名（桌面端拿不到 ip:port 的 getter 两端文案才对得上）
+                    // ip:port 放在 Android 独有的 sync.running 状态行里
+                    setSyncShareStatus(Lang.f("status.server.start",
+                            name.isEmpty() ? DEFAULT_SYNC_SERVER_NAME : name));
+                } else if (error == SyncError.OPERATION_IN_PROGRESS) {
+                    setSyncShareStatus(Lang.get("sync.server_busy"));
+                } else {
+                    setSyncShareStatus(Lang.f("status.server.startFail", server.getLastError()));
+                }
+
+                renderSyncTabStatus();
+            });
+        });
+    }
+
+    private void onSyncServerStop() {
+        sync_worker.execute(() -> {
+            SyncEngine.closeServer();
+
+            runOnUiThread(() -> {
+                sync_server_running = false;
+                setSyncShareStatus(Lang.get("status.server.stop"));
+                renderSyncQueue();
+                renderSyncTabStatus();
+            });
+        });
+    }
+
+    private void onSyncServerDisconnect() {
+        sync_worker.execute(() -> {
+            if (SyncEngine.hasServer()) {
+                SyncEngine.server().disconnect();
+            }
+
+            runOnUiThread(() -> {
+                setSyncShareStatus(Lang.get("status.server.disconnected"));
+                renderSyncQueue();
+            });
+        });
+    }
+
+    // 会话级提示
+    // 「发了多少」由 core 的任务级回调（TaskReport）负责 见 syncTaskText
+    // 这里只留 core 的两个会话边界文案：队列为空 / 会话结束（与桌面端逐字一致）
+    private static String syncServerSessionText(boolean success, SyncError error) {
+        if (!success) {
+            return Lang.get("status.server.sessionErr");
+        }
+
+        return error == SyncError.NO_MESSAGE_AVAILABLE
+                ? Lang.get("status.server.queueEmpty")
+                : Lang.get("status.server.sessionEnd");
+    }
+
+    // 进度行：正在发送 / 正在接收
+    private void renderSyncProgress() {
+        if (tv_sync_share_progress != null) {
+            SyncServer server = SyncEngine.server();
+
+            if (server != null && server.isClientConnected()) {
+                tv_sync_share_progress.setText(Lang.f("sync.progress_sending",
+                        server.getSentFileCount(), formatBytes(server.getSentBytes())));
+                tv_sync_share_progress.setVisibility(View.VISIBLE);
+            } else {
+                tv_sync_share_progress.setVisibility(View.GONE);
+            }
+        }
+
+        SyncClient client = SyncEngine.client();
+        boolean downloading = client != null && client.isDownloading();
+
+        if (tv_sync_client_progress != null) {
+            if (downloading) {
+                tv_sync_client_progress.setText(Lang.f("sync.progress_receiving",
+                        client.getReceivedFileCount(), formatBytes(client.getReceivedBytes())));
+                tv_sync_client_progress.setVisibility(View.VISIBLE);
+            } else {
+                tv_sync_client_progress.setVisibility(View.GONE);
+            }
+        }
+
+        // 下载 / 连接进行中把「更改保存目录」压暗做视觉提示
+        // （不禁用点击：点了要给出明确原因 而不是点了没反应）
+        if (btn_sync_path_change != null) {
+            btn_sync_path_change.setAlpha(downloading ? 0.45f : 1.0f);
+        }
+    }
+
+    private void startSyncProgress() {
+        if (sync_progress_running) {
+            return;
+        }
+
+        sync_progress_running = true;
+        sync_progress_handler.post(sync_progress_tick);
+    }
+
+    private void stopSyncProgress() {
+        sync_progress_running = false;
+        sync_progress_handler.removeCallbacks(sync_progress_tick);
+    }
+
+    // 人类可读的字节数（进度行和完成提示共用）
+    private static String formatBytes(long bytes) {
+        if (bytes < 1024L) {
+            return bytes + " B";
+        }
+
+        if (bytes < 1024L * 1024L) {
+            return String.format(Locale.getDefault(), "%.1f KB", bytes / 1024.0);
+        }
+
+        if (bytes < 1024L * 1024L * 1024L) {
+            return String.format(Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024.0));
+        }
+
+        return String.format(Locale.getDefault(), "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0));
+    }
+
+    // ---------- 下载端 ----------
+
+    private void showSyncDownloadOverlay() {
+        openSyncDownloadOverlay();
+    }
+
+    private void openSyncDownloadOverlay() {
+        overlay_host.removeAllViews();
+        sync_download_overlay = getLayoutInflater().inflate(R.layout.overlay_sync_download, overlay_host, false);
+        overlay_host.addView(sync_download_overlay);
+        overlay_host.setVisibility(View.VISIBLE);
+
+        sync_device_list = sync_download_overlay.findViewById(R.id.syncDeviceList);
+        tv_sync_device_empty = sync_download_overlay.findViewById(R.id.tvSyncDeviceEmpty);
+        tv_sync_download_path = sync_download_overlay.findViewById(R.id.tvSyncDownloadPath);
+        tv_sync_client_status = sync_download_overlay.findViewById(R.id.tvSyncClientStatus);
+        tv_sync_client_progress = sync_download_overlay.findViewById(R.id.tvSyncClientProgress);
+
+        tv_sync_download_path.setText(syncDownloadDir().getAbsolutePath());
+        tv_sync_client_status.setText(sync_client_text);
+
+        sync_download_overlay.findViewById(R.id.btnSyncDownloadBack).setOnClickListener(v -> hideOverlay());
+        btn_sync_path_change = sync_download_overlay.findViewById(R.id.btnSyncPathChange);
+        btn_sync_path_change.setOnClickListener(v -> onSyncChangePath());
+        sync_download_overlay.findViewById(R.id.btnSyncPathAsRoot).setOnClickListener(v -> onSyncPathAsRoot());
+        sync_download_overlay.findViewById(R.id.btnSyncScan).setOnClickListener(v -> onSyncScan());
+        sync_download_overlay.findViewById(R.id.btnSyncDownloadSel).setOnClickListener(v -> onSyncDownloadSelected());
+        sync_download_overlay.findViewById(R.id.btnSyncClearRecords).setOnClickListener(v -> onSyncClearRecords());
+        sync_download_overlay.findViewById(R.id.btnSyncClientDisconnect).setOnClickListener(v -> onSyncClientDisconnect());
+
+        applyOverlayTexts();
+
+        selected_sync_device = -1;
+        renderSyncDevices();
+
+        startSyncProgress();
+    }
+
+    // 更改保存目录：下载 / 连接进行中一律不允许
+    //
+    // 换目录会重建 SyncClient（core 的下载路径是构造时固定的 SyncEngine 会 closeClient）
+    // 正在跑的会话会被直接掐断 所以这里必须先挡住
+    private void onSyncChangePath() {
+        SyncClient client = SyncEngine.client();
+
+        if (client != null && client.isDownloading()) {
+            setSyncClientStatus(Lang.get("sync.change_path_blocked"));
+
+            return;
+        }
+
+        browseForSync(BROWSER_PURPOSE_DOWNLOAD_DIR, syncDownloadDir());
+    }
+
+    private void renderSyncDevices() {
+        if (sync_device_list == null) {
+            return;
+        }
+
+        List<SyncBasic.ServerInfo> devices = SyncEngine.hasClient()
+                ? SyncEngine.client().getServers()
+                : new ArrayList<SyncBasic.ServerInfo>();
+
+        sync_device_list.removeAllViews();
+
+        if (devices.isEmpty()) {
+            tv_sync_device_empty.setVisibility(View.VISIBLE);
+
+            return;
+        }
+
+        tv_sync_device_empty.setVisibility(View.GONE);
+
+        for (int i = 0; i < devices.size(); i++) {
+            final int index = i;
+            SyncBasic.ServerInfo device = devices.get(i);
+
+            View right = index == selected_sync_device ? buildBadge(Lang.get("sync.selected")) : null;
+
+            addRow(sync_device_list, buildRow(R.drawable.monitor_smartphone, device.name,
+                    device.ip + ":" + device.port, right, () -> {
+                        selected_sync_device = index;
+                        renderSyncDevices();
+                    }));
+        }
+    }
+
+    // 换保存目录：core 的下载路径是构造时固定的，所以这里把旧 client 关掉
+    // SyncEngine.client() 下次会用新路径重建（records.json 跟着目录走）
+    private void applySyncDownloadPath(File dir) {
+        saveSyncDownloadDir(dir);
+
+        if (SyncEngine.hasClient()) {
+            SyncEngine.closeClient();
+        }
+
+        if (tv_sync_download_path != null) {
+            tv_sync_download_path.setText(dir.getAbsolutePath());
+        }
+
+        setSyncClientStatus(Lang.f("sync.path_changed", dir.getAbsolutePath()));
+        renderSyncTabStatus();
+    }
+
+    // 把保存目录加成受管理目录：下载完的文件就能直接进索引（Windows 端要手动做这一步）
+    private void onSyncPathAsRoot() {
+        final File dir = syncDownloadDir();
+
+        if (!dir.isDirectory() && !dir.mkdirs()) {
+            toast(Lang.get("sync.download_dir_failed") + dir.getAbsolutePath());
+
+            return;
+        }
+
+        addFilesRoot(dir);
+        setSyncClientStatus(Lang.f("sync.path_as_root_done", dir.getAbsolutePath()));
+    }
+
+    private void onSyncScan() {
+        sync_worker.execute(() -> {
+            final SyncClient client;
+
+            try {
+                client = syncClient();
+            } catch (SyncException error) {
+                runOnUiThread(() -> setSyncClientStatus(Lang.get("sync.client_init_failed") + error.getMessage()));
+
+                return;
+            }
+
+            runOnUiThread(() -> setSyncClientStatus(Lang.get("status.client.scanning")));
+
+            final List<SyncBasic.ServerInfo> found = client.scanServers(1);
+
+            runOnUiThread(() -> {
+                selected_sync_device = -1;
+                renderSyncDevices();
+                setSyncClientStatus(Lang.f("status.client.scanDone", found.size()));
+            });
+        });
+    }
+
+    private void onSyncDownloadSelected() {
+        final int index = selected_sync_device;
+
+        if (index < 0) {
+            setSyncClientStatus(Lang.get("status.client.noSelect"));
+
+            return;
+        }
+
+        sync_worker.execute(() -> {
+            final SyncClient client;
+
+            try {
+                client = syncClient();
+            } catch (SyncException error) {
+                runOnUiThread(() -> setSyncClientStatus(Lang.get("sync.client_init_failed") + error.getMessage()));
+
+                return;
+            }
+
+            List<SyncBasic.ServerInfo> devices = client.getServers();
+            final String label = index < devices.size() ? devices.get(index).name : "";
+
+            runOnUiThread(() -> setSyncClientStatus(Lang.f("status.client.downloading", label)));
+
+            client.startDownload(index, (success, error) -> {
+                runOnUiThread(() -> setSyncClientStatus(syncClientResultText(success, error)));
+
+                if (success) {
+                    refreshDownloadRootIfManaged();
+                }
+            });
+        });
+    }
+
+    private void onSyncClearRecords() {
+        sync_worker.execute(() -> {
+            final SyncClient client;
+
+            try {
+                client = syncClient();
+            } catch (SyncException error) {
+                runOnUiThread(() -> setSyncClientStatus(Lang.get("sync.client_init_failed") + error.getMessage()));
+
+                return;
+            }
+
+            client.clearDownloadRecords();
+
+            runOnUiThread(() -> setSyncClientStatus(Lang.get("status.client.cleared")));
+        });
+    }
+
+    private void onSyncClientDisconnect() {
+        sync_worker.execute(() -> {
+            if (SyncEngine.hasClient()) {
+                SyncEngine.client().disconnect();
+            }
+
+            runOnUiThread(() -> setSyncClientStatus(Lang.get("status.client.disconnected")));
+        });
+    }
+
+    // 下载完成后：保存目录已经在受管理目录里就顺手刷新索引，新文件立刻能搜到
+    // （Windows 端不自动做这一步，得手动「强制刷新」；Android 上多补这一下）
+    private void refreshDownloadRootIfManaged() {
+        final File dir = syncDownloadDir();
+
+        worker.execute(() -> {
+            TagServe current = serve;
+
+            if (current == null) {
+                return;
+            }
+
+            String root_id = StorageAccess.normalizePath(dir.getAbsolutePath());
+
+            if (current.getDirectoryConfigManager().containsRoot(root_id)) {
+                current.refreshRoot(root_id);
+                reload();
+            }
+        });
+    }
+
+    // 下载结束提示
+    // 「收了多少」交给 core 的任务级回调（TaskReport） 这里只报会话结果 文案与桌面端逐字一致
+    // 失败时把 core 的具体原因接在后面（哪个文件、收了多少 / 共多少）与桌面端做法相同
+    private static String syncClientResultText(boolean success, SyncError error) {
+        if (success) {
+            return error == SyncError.NO_MESSAGE_AVAILABLE
+                    ? Lang.get("status.client.queueEmpty")
+                    : Lang.get("status.client.done");
+        }
+
+        if (error == SyncError.CONNECTION_ABORTED) {
+            // core 部分6 起：连接断了但没等到服务端的「会话结束」控制帧 —— 不能当成功
+            return Lang.get("status.client.interrupted") + syncErrorDetail();
+        }
+
+        if (error == SyncError.OPERATION_IN_PROGRESS) {
+            return Lang.get("sync.client_busy");
+        }
+
+        return Lang.get("status.client.failed") + syncErrorDetail();
+    }
+
+    // core 核心层给出的具体原因（与桌面端 onClientDownloadClicked 拼法一致）
+    private static String syncErrorDetail() {
+        SyncClient client = SyncEngine.client();
+        String detail = client == null ? "" : client.getLastError().trim();
+
+        return detail.isEmpty() ? "" : " - " + detail;
+    }
+
     private void addRow(LinearLayout group, View row) {
         if (group.getChildCount() > 0) {
             View divider = new View(this);
@@ -3070,7 +3987,21 @@ public class MainActivity extends AppCompatActivity {
         setText(R.id.tvGroupSupport, "settings.group_support");
         setText(R.id.btnSaveSettings, "settings.save");
         setText(R.id.tvSyncTitle, "nav.sync");
-        setText(R.id.tvSyncWip, "sync.wip");
+        setText(R.id.tvSyncShare, "sync.share");
+        setText(R.id.tvSyncShareDesc, "sync.share_desc");
+        setText(R.id.tvSyncDownload, "sync.download");
+        setText(R.id.tvSyncDownloadDesc, "sync.download_desc");
+        setText(R.id.tvSyncExport, "sync.export");
+        setText(R.id.tvSyncExportDesc, "sync.export_desc");
+
+        setText(R.id.tvSyncStatus, "sync.idle");
+
+        setCompoundIcon((TextView) findViewById(R.id.tvSyncShare), R.drawable.database_plus, COLOR_TEXT, 14);
+        setCompoundIcon((TextView) findViewById(R.id.tvSyncDownload), R.drawable.download, COLOR_TEXT, 14);
+        setCompoundIcon((TextView) findViewById(R.id.tvSyncExport), R.drawable.file_up, COLOR_TEXT, 14);
+
+
+        renderSyncTabStatus();
     }
 
     // 图标统一走矢量图 + tint：颜色跟着文字走
@@ -3109,6 +4040,7 @@ public class MainActivity extends AppCompatActivity {
 
     // 子界面里的静态文案（子界面每次打开都会重新 inflate 所以每次都要刷一遍）
     private void applyOverlayTexts() {
+        applySyncOverlayTexts();
         if (file_tag_overlay != null) {
             setCompoundIcon((TextView) file_tag_overlay.findViewById(R.id.tvFileTagCurrentTitle), R.drawable.tag_x, COLOR_TEXT, 14);
             setCompoundIcon((TextView) file_tag_overlay.findViewById(R.id.tvFileTagLibraryTitle), R.drawable.tag, COLOR_TEXT, 14);
@@ -3349,6 +4281,225 @@ public class MainActivity extends AppCompatActivity {
                 .setPositiveButton(Lang.get("common.know"), null)
                 .show();
     }
+
+
+    // ---------- 其他方式分享（系统分享面板） ----------
+
+    // 压缩包存放目录：程序内部目录，分享完可以一键全部删掉
+    // getExternalFilesDir 拿不到（外置存储没挂载）就退回应用私有目录，两条路都在 FileProvider 覆盖范围内
+    private File exportZipDir() {
+        File external = getExternalFilesDir("share");
+        File dir = external != null ? external : new File(getFilesDir(), "share");
+
+        if (!dir.isDirectory()) {
+            dir.mkdirs();
+        }
+
+        return dir;
+    }
+
+    // 上次选好的待分享目录（没选过就是 null）
+    private File exportSourceDir() {
+        String saved = prefs.getString(KEY_SYNC_EXPORT_DIR, null);
+
+        return saved == null || saved.isEmpty() ? null : new File(saved);
+    }
+
+    private void showSyncExportOverlay() {
+        overlay_host.removeAllViews();
+        sync_export_overlay = getLayoutInflater().inflate(R.layout.overlay_sync_export, overlay_host, false);
+        overlay_host.addView(sync_export_overlay);
+        overlay_host.setVisibility(View.VISIBLE);
+
+        tv_sync_export_zip_dir = sync_export_overlay.findViewById(R.id.tvSyncExportZipDir);
+        tv_sync_export_dir = sync_export_overlay.findViewById(R.id.tvSyncExportDir);
+        tv_sync_export_progress = sync_export_overlay.findViewById(R.id.tvSyncExportProgress);
+        tv_sync_export_status = sync_export_overlay.findViewById(R.id.tvSyncExportStatus);
+
+        sync_export_overlay.findViewById(R.id.btnSyncExportBack).setOnClickListener(v -> hideOverlay());
+        sync_export_overlay.findViewById(R.id.btnSyncExportBrowse).setOnClickListener(v -> onSyncExportBrowse());
+        sync_export_overlay.findViewById(R.id.btnSyncExportStart).setOnClickListener(v -> onSyncExportStart());
+        sync_export_overlay.findViewById(R.id.btnSyncExportDelete).setOnClickListener(v -> onSyncExportDelete());
+
+        applyOverlayTexts();
+
+        renderSyncExportPaths();
+        setSyncExportProgress("");
+        setSyncExportStatus(export_text);
+    }
+
+    private void renderSyncExportPaths() {
+        File source = exportSourceDir();
+
+        if (tv_sync_export_zip_dir != null) {
+            tv_sync_export_zip_dir.setText(exportZipDir().getAbsolutePath());
+        }
+
+        if (tv_sync_export_dir != null) {
+            tv_sync_export_dir.setText(source == null
+                    ? Lang.get("sync.export_src_empty")
+                    : source.getAbsolutePath());
+        }
+    }
+
+    private void setSyncExportStatus(String text) {
+        export_text = text;
+
+        if (tv_sync_export_status != null) {
+            tv_sync_export_status.setText(text);
+        }
+    }
+
+    private void setSyncExportProgress(String text) {
+        if (tv_sync_export_progress == null) {
+            return;
+        }
+
+        tv_sync_export_progress.setText(text);
+        tv_sync_export_progress.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    // 选目录：还是借那个目录浏览子界面（第三种用途）
+    private void onSyncExportBrowse() {
+        browseForSync(BROWSER_PURPOSE_EXPORT_DIR, exportSourceDir());
+    }
+
+    // 选好目录：记住它，回到子界面
+    private void applySyncExportDir(File dir) {
+        prefs.edit().putString(KEY_SYNC_EXPORT_DIR, dir.getAbsolutePath()).apply();
+        setSyncExportStatus(Lang.f("status.export.dirChanged", dir.getAbsolutePath()));
+    }
+
+    // 压缩并交给系统分享面板
+    private void onSyncExportStart() {
+        if (export_running) {
+            setSyncExportStatus(Lang.get("status.export.busy"));
+
+            return;
+        }
+
+        final File source = exportSourceDir();
+
+        if (source == null || !source.isDirectory()) {
+            setSyncExportStatus(Lang.get("status.export.noDir"));
+
+            return;
+        }
+
+        if (!hasAllFilesAccess()) {
+            setSyncExportStatus(Lang.get("status.export.noPerm"));
+            showAllFilesPermissionDialog();
+
+            return;
+        }
+
+        final File zip_file = new File(exportZipDir(), zipFileNameOf(source));
+
+        export_running = true;
+
+        setSyncExportStatus(Lang.f("status.export.zipping", source.getName()));
+        setSyncExportProgress(Lang.f("status.export.progress", 0, formatBytes(0L)));
+
+        sync_worker.execute(() -> {
+            try {
+                DirectoryZipper.Result result = DirectoryZipper.zip(source, zip_file,
+                        (entry_name, file_count, byte_count) -> runOnUiThread(
+                                () -> setSyncExportProgress(Lang.f("status.export.progress",
+                                        file_count, formatBytes(byte_count)))));
+
+                if (result.file_count == 0) {
+                    // 空目录：不留一个空压缩包
+                    zip_file.delete();
+
+                    runOnUiThread(() -> setSyncExportStatus(Lang.get("status.export.empty")));
+
+                    return;
+                }
+
+                runOnUiThread(() -> {
+                    setSyncExportStatus(Lang.f("status.export.done",
+                            zip_file.getName(), result.file_count, formatBytes(result.byte_count)));
+
+                    // 分享面板一回来就问要不要删（onResume 里消费它）
+                    pending_export_zip = zip_file;
+                    shareZip(zip_file);
+                });
+            } catch (IOException error) {
+                runOnUiThread(() -> setSyncExportStatus(
+                        Lang.f("status.export.failed", String.valueOf(error.getMessage()))));
+            } finally {
+                export_running = false;
+                runOnUiThread(() -> setSyncExportProgress(""));
+            }
+        });
+    }
+
+    // 交给系统分享面板：应用内部目录的文件必须先过 FileProvider
+    private void shareZip(File zip_file) {
+        Uri uri = providerUriOf(zip_file);
+
+        if (uri == null) {
+            setSyncExportStatus(Lang.f("status.export.failed", zip_file.getAbsolutePath()));
+
+            return;
+        }
+
+        Intent intent = new Intent(Intent.ACTION_SEND);
+        intent.setType("application/zip");
+        intent.putExtra(Intent.EXTRA_STREAM, uri);
+        intent.putExtra(Intent.EXTRA_SUBJECT, zip_file.getName());
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        try {
+            startActivity(Intent.createChooser(intent, Lang.get("status.export.share_chooser")));
+        } catch (ActivityNotFoundException error) {
+            setSyncExportStatus(Lang.get("status.export.noApp"));
+        }
+    }
+
+    // 删除全部压缩包：压缩包目录是这个功能私有的，所以直接清空
+    private void onSyncExportDelete() {
+        File[] files = exportZipDir().listFiles();
+        int deleted = 0;
+
+        if (files != null) {
+            for (File file : files) {
+                if (file.isFile() && file.delete()) {
+                    deleted++;
+                }
+            }
+        }
+
+        pending_export_zip = null;
+
+        setSyncExportStatus(deleted > 0
+                ? Lang.f("status.export.deleteDone", deleted)
+                : Lang.get("status.export.deleteNone"));
+    }
+
+    // 从分享面板回来：问要不要删掉刚生成的压缩包
+    private void showExportDeleteDialog(File zip_file) {
+        new AlertDialog.Builder(this)
+                .setTitle(Lang.get("status.export.delete_title"))
+                .setMessage(Lang.f("status.export.deleteAsk",
+                        zip_file.getName(), exportZipDir().getAbsolutePath()))
+                .setPositiveButton(Lang.get("common.delete"), (dialog, which) -> onSyncExportDelete())
+                .setNegativeButton(Lang.get("common.reserved"), null)
+                .show();
+    }
+
+    // 压缩包名：<目录名>_<时间戳>.zip（同一个目录多次分享不会互相覆盖）
+    private static String zipFileNameOf(File source_dir) {
+        String name = source_dir.getName();
+
+        if (name == null || name.isEmpty()) {
+            // 根目录（比如 /storage/emulated/0）没有名字
+            name = "root";
+        }
+
+        return name + "_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) + ".zip";
+    }
+
 
 
     // 基础设施
