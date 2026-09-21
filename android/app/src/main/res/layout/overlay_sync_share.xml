@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 同步子界面一：从本机分享文件（对应 Windows 端 syncWindow 的 rect2） -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/syncShareOverlay"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#f5f6f8"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:background="#ffffff"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="12dp">
+
+        <TextView
+            android:id="@+id/btnSyncShareBack"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="返回"
+            android:textColor="#59616e"
+            android:textSize="13sp" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/tvSyncShareTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="从本机分享文件"
+            android:textColor="#20242b"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:layout_width="50dp"
+            android:layout_height="1dp" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#e2e6ee" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="10dp">
+
+            <TextView
+                android:id="@+id/tvSyncNameLabel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="服务器名称"
+                android:textColor="#8c939f"
+                android:textSize="11sp" />
+
+            <EditText
+                android:id="@+id/editSyncServerName"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:background="#ffffff"
+                android:hint="输入服务器名称"
+                android:inputType="text"
+                android:maxLines="1"
+                android:paddingStart="10dp"
+                android:paddingTop="9dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="9dp"
+                android:textColor="#20242b"
+                android:textColorHint="#b6bcc6"
+                android:textSize="13sp" />
+
+            <!-- 启动 / 停止：core 的 start 与 stop 幂等 start 重复调用返回 operation_in_progress -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/btnSyncServerStart"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_mini_primary"
+                    android:gravity="center"
+                    android:text="启动"
+                    android:textColor="#ffffff"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/btnSyncServerStop"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_mini"
+                    android:gravity="center"
+                    android:text="关闭"
+                    android:textColor="#20242b"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvSyncDirLabel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="要分享的目录"
+                android:textColor="#8c939f"
+                android:textSize="11sp" />
+
+            <EditText
+                android:id="@+id/editSyncSharePath"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:background="#ffffff"
+                android:hint="输入目录路径"
+                android:inputType="text"
+                android:maxLines="1"
+                android:paddingStart="10dp"
+                android:paddingTop="9dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="9dp"
+                android:textColor="#20242b"
+                android:textColorHint="#b6bcc6"
+                android:textSize="13sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/btnSyncShareBrowse"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_mini"
+                    android:gravity="center"
+                    android:text="浏览目录"
+                    android:textColor="#20242b"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/btnSyncShareAdd"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_mini_primary"
+                    android:gravity="center"
+                    android:text="加入传输列表"
+                    android:textColor="#ffffff"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvSyncQueueTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="待发送目录"
+                android:textColor="#8c939f"
+                android:textSize="11sp" />
+
+            <LinearLayout
+                android:id="@+id/syncQueueList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:background="#ffffff"
+                android:orientation="vertical" />
+
+            <TextView
+                android:id="@+id/tvSyncQueueEmpty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="22dp"
+                android:text="还没有要发送的目录"
+                android:textColor="#8c939f"
+                android:textSize="12sp" />
+
+            <!-- 每个受管理根目录都能一键入队（Windows 端只能手打路径 这里多给一条捷径） -->
+            <TextView
+                android:id="@+id/tvSyncRootsTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="从受管理目录里选"
+                android:textColor="#8c939f"
+                android:textSize="11sp" />
+
+            <LinearLayout
+                android:id="@+id/syncRootList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:background="#ffffff"
+                android:orientation="vertical" />
+
+            <TextView
+                android:id="@+id/tvSyncRootsEmpty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="22dp"
+                android:text="还没有受管理目录"
+                android:textColor="#8c939f"
+                android:textSize="12sp" />
+        </LinearLayout>
+    </ScrollView>
+
+    <TextView
+        android:id="@+id/tvSyncShareProgress"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#ffffff"
+        android:gravity="center"
+        android:maxLines="1"
+        android:paddingStart="12dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="12dp"
+        android:textColor="#59616e"
+        android:textSize="11sp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/tvSyncShareStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#ffffff"
+        android:ellipsize="middle"
+        android:gravity="center"
+        android:maxLines="2"
+        android:paddingStart="12dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="12dp"
+        android:text=""
+        android:textColor="#8c939f"
+        android:textSize="11sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:background="#ffffff"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp">
+
+        <TextView
+            android:id="@+id/btnSyncServerDisconnect"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_danger"
+            android:gravity="center"
+            android:text="断开连接设备"
+            android:textColor="#df6876"
+            android:textSize="14sp" />
+    </LinearLayout>
+</LinearLayout>
