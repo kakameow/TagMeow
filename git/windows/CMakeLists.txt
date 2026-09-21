@@ -39,6 +39,7 @@ qt_add_executable(TagMeow
     bridge.h
     config_loader.cpp
     config_loader.h
+    app.rc
     ${CORE_SOURCES}
 )
 
