@@ -52,12 +52,13 @@ void Bridge::pushFileList()
     }
 
     QVariantList list;
-    std::set<std::string> pushed;
 
-    const auto appendRow = [this, &list, &pushed](const std::string &path, const std::vector<std::string> &tagList)
+    const auto appendRow = [this, &list](const std::string &path, const std::string &name, const QString &kind, const std::vector<std::string> &tagList)
     {
         QVariantMap item;
         item.insert("text", QString::fromStdString(path));
+        item.insert("name", QString::fromStdString(name));
+        item.insert("kind", kind);
         QVariantList tags;
         for (const auto &t : tagList)
         {
@@ -68,16 +69,39 @@ void Bridge::pushFileList()
         }
         item.insert("tags", tags);
         list << item;
-        pushed.insert(path);
     };
 
-    // 按 TransferData 维护的显示顺序渲染(filename 模式改名不会打乱行顺序)
+    // 目录浏览模式：一行一个直接子项（最上面是"返回上层"入口）
+    if (!td_.browse_current_dir_.empty())
+    {
+        const std::string current = td_.browse_current_dir_;
+        td_.browseDir(current);
+        for (const auto &entry : td_.browse_entries_)
+        {
+            const QString kind = entry.is_parent_ ? QStringLiteral("parent") : (entry.is_dir_ ? QStringLiteral("dir") : QStringLiteral("file"));
+            appendRow(entry.path_, entry.name_, kind, entry.tags_);
+        }
+
+        QQmlProperty(fileContainer_, "fileList").write(list);
+        qInfo() << "[refresh] FileContainer browse" << QString::fromStdString(current) << "rows:" << list.size();
+        return;
+    }
+
+    const auto kindOf = [](const std::string &path)
+    {
+        const QFileInfo info(QString::fromStdString(path));
+        return info.isDir() ? QStringLiteral("dir") : QStringLiteral("file");
+    };
+
+    // 搜索结果模式：按 TransferData 维护的显示顺序渲染(filename 模式改名不会打乱行顺序)
+    std::set<std::string> pushed;
     for (const auto &path : td_.file_order_)
     {
         auto it = td_.path_tags_.find(path);
         if (it != td_.path_tags_.end())
         {
-            appendRow(it->first, it->second);
+            appendRow(it->first, "", kindOf(it->first), it->second);
+            pushed.insert(it->first);
         }
     }
     // 兜底: 顺序表里没有的键(理论上不会出现)
@@ -85,7 +109,7 @@ void Bridge::pushFileList()
     {
         if (pushed.find(kv.first) == pushed.end())
         {
-            appendRow(kv.first, kv.second);
+            appendRow(kv.first, "", kindOf(kv.first), kv.second);
         }
     }
 
@@ -350,15 +374,21 @@ void Bridge::onDirDoubleClicked(const QString &path)
     {
         QQmlProperty(input, "text").write(path);
     }
-    if (td_.getDirFile(path.toStdString()))
+    enterDir(path);
+}
+
+// 进入目录浏览：列该目录一层（不在授权根时最上面是"返回上层"入口）
+void Bridge::enterDir(const QString &path)
+{
+    const std::string dir = path.toStdString();
+    if (!td_.browseDir(dir))
     {
-        qInfo() << "[getDirFile] ok" << path << "files:" << td_.path_tags_.size();
-        pushFileList();
+        qWarning() << "[browse] 无法进入目录(不在授权目录内或不是目录):" << path;
+        return;
     }
-    else
-    {
-        qWarning() << "[getDirFile] failed(不在授权目录内?)" << path;
-    }
+
+    qInfo() << "[browse] enter" << path << "rows:" << td_.browse_entries_.size();
+    pushFileList();
 }
 
 // LibraryTag 类型名行(点击展开/收起): 顺带把类型名回填到 typeInput 输入框
@@ -371,7 +401,7 @@ void Bridge::onLibraryTypeClicked(const QString &type)
     qInfo() << "[library] 类型行点击:" << type;
 }
 
-void Bridge::onFileDoubleClicked(const QString &path)
+void Bridge::openInExplorer(const QString &path)
 {
     const QFileInfo info(path);
     if (!info.exists())
@@ -416,6 +446,47 @@ void Bridge::onFileDoubleClicked(const QString &path)
 #endif
 }
 
+// 双击：返回上层入口 -> 上一级 目录 -> 进入该目录 文件 -> 打开文件
+void Bridge::onFileDoubleClicked(const QString &path, const QString &kind)
+{
+    if (kind == QStringLiteral("parent"))
+    {
+        if (path.isEmpty())
+        {
+            qWarning() << "[browse] 返回上层失败: 路径为空";
+            return;
+        }
+        enterDir(path);
+        return;
+    }
+
+    if (kind == QStringLiteral("dir"))
+    {
+        enterDir(path);
+        return;
+    }
+
+    const QFileInfo info(path);
+    if (!info.exists())
+    {
+        qWarning() << "[open] 文件不存在:" << path;
+        return;
+    }
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(info.absoluteFilePath())))
+    {
+        qWarning() << "[open] 打开文件失败:" << info.absoluteFilePath();
+    }
+}
+
+// 右键：原双击行为（目录 -> 资源管理器打开；文件 -> 打开所在目录并高亮选中）
+void Bridge::onFileRightClicked(const QString &path, const QString &kind)
+{
+    if (kind == QStringLiteral("parent"))
+    {
+        return; // "返回上层"入口不响应右键
+    }
+    openInExplorer(path);
+}
 // refreshButton: 强制刷新
 // 重新校验目录(DirectoryConfigManager 移除失效目录 逐目录 isPathAllowed 校验)
 // 重新加载标签库(TagServe::reLoadTag)
@@ -1193,7 +1264,8 @@ void Bridge::bindTo(QObject *root)
         QObject::connect(fileContainer_, SIGNAL(fileTagAdded(QString, QString)), this, SLOT(onFileTagAdded(QString, QString)));
         QObject::connect(fileContainer_, SIGNAL(fileTagRemoved(QString, QString)), this, SLOT(onFileTagRemoved(QString, QString)));
         QObject::connect(fileContainer_, SIGNAL(fileTagChanged(QString, QString, QString)), this, SLOT(onFileTagChanged(QString, QString, QString)));
-        QObject::connect(fileContainer_, SIGNAL(fileDoubleClicked(QString)), this, SLOT(onFileDoubleClicked(QString)));
+        QObject::connect(fileContainer_, SIGNAL(fileDoubleClicked(QString, QString)), this, SLOT(onFileDoubleClicked(QString, QString)));
+        QObject::connect(fileContainer_, SIGNAL(fileRightClicked(QString, QString)), this, SLOT(onFileRightClicked(QString, QString)));
     }
 
     // DirContainer: 双击目录 -> getDirFile -> 刷新 FileContainer

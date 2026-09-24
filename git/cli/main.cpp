@@ -429,6 +429,7 @@ int main(int argc, char const *argv[])
     std::string color = "#FFB6C1";
 
     command_s.commands_.push_back("help");
+    command_s.commands_.push_back("refresh");
     command_s.commands_.push_back("root");
     command_s.commands_.push_back("tag");
     command_s.commands_.push_back("file");
@@ -462,7 +463,7 @@ int main(int argc, char const *argv[])
     if (input.empty())
     {
         std::cout << "tagmeow <command> [parameters...]" << std::endl;
-        std::cout << "available commands: help / root / tag / file / search" << std::endl;
+        std::cout << "available commands: help / refresh /root / tag / file / search" << std::endl;
         return 0;
     }
 
@@ -476,8 +477,9 @@ int main(int argc, char const *argv[])
 
     // help
     case 0:
-        std::cout << "available commands: help / root / tag / file / search" << std::endl;
+        std::cout << "available commands: help / refresh / root / tag / file / search" << std::endl;
         std::cout << "tagmeow help" << std::endl;
+        std::cout << "tagmeow refresh" << std::endl;
         std::cout << "tagmeow root list" << std::endl;
         std::cout << "tagmeow root add <path>" << std::endl;
         std::cout << "tagmeow root remove <path>" << std::endl;
@@ -495,8 +497,29 @@ int main(int argc, char const *argv[])
         std::cout << "tagmeow search [-i <tag1,tag2,...>] [-e <tag1,tag2,...>] [-o <tag1,tag2,...>]" << std::endl;
         break;
 
-    // root
+    // refresh
     case 1:
+
+        dir_m.clearInvalidPath();
+        if (dir_m.saveToFile())
+        {
+            std::cout << dir_m.getLastError() << std::endl;
+        }
+
+        if (tag_m.reLoadTag("./config/tag.json") && tag_m.reLoadRoot(dir_m.getValidDirList()))
+        {
+            std::cout << "success" << std::endl;
+        }
+        else
+        {
+            std::cout << tag_m.getTagError() << std::endl;
+            std::cout << tag_m.getLastError() << " / " << tag_m.getDBError() << std::endl;
+        }
+
+        break;
+
+    // root
+    case 2:
     {
         bool matched = false;
 
@@ -573,7 +596,7 @@ int main(int argc, char const *argv[])
     }
 
     // tag
-    case 2:
+    case 3:
     {
         bool matched = false;
 
@@ -720,7 +743,7 @@ int main(int argc, char const *argv[])
     }
 
     // file
-    case 3:
+    case 4:
     {
         bool matched = false;
 
@@ -793,7 +816,7 @@ int main(int argc, char const *argv[])
     }
 
     // search
-    case 4:
+    case 5:
 
         if (size > 2)
         {
@@ -854,7 +877,7 @@ int main(int argc, char const *argv[])
         }
         else
         {
-            std::cout << "available commands: help / root / tag / file / search" << std::endl;
+            std::cout << "available commands: help / refresh /root / tag / file / search" << std::endl;
             std::cout << "tagmeow search [-i <tag1,tag2,...>] [-e <tag1,tag2,...>] [-o <tag1,tag2,...>]" << std::endl;
         }
 

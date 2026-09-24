@@ -148,6 +148,9 @@ bool TransferData::getSearch()
     const auto files = ts_->searchByTags(opts);
     path_tags_.clear();
     file_order_.clear();
+    // 搜索与目录浏览是切换关系：搜索优先 结果覆盖列表并退出浏览模式
+    browse_entries_.clear();
+    browse_current_dir_.clear();
     for (const auto &f : files)
     {
         path_tags_[f.path_] = f.tags_;
@@ -186,6 +189,124 @@ bool TransferData::getDirFile(const std::string &path)
     return true;
 }
 
+// 目录浏览（一层）：直接子项 + 数据库里的标签；不在授权根时最上面插入"返回上层"入口
+bool TransferData::browseDir(const std::string &path)
+{
+    if (isBlank(path) || !dm_ || !ts_)
+    {
+        return false;
+    }
+
+    std::error_code ec;
+    const std::filesystem::path p(path);
+    if (!dm_->isPathAllowed(p))
+    {
+        return false; // 不在沙盒(授权目录)内
+    }
+
+    const std::filesystem::path abs_dir = std::filesystem::absolute(p, ec).lexically_normal();
+    if (ec || !std::filesystem::is_directory(abs_dir, ec) || ec)
+    {
+        return false;
+    }
+
+    browse_entries_.clear();
+    browse_current_dir_ = abs_dir.generic_string();
+
+    // 不在授权根目录时 最上面是返回上层的入口
+    if (!isRootPath(browse_current_dir_))
+    {
+        BrowseEntry parent;
+        parent.path_ = abs_dir.parent_path().generic_string();
+        parent.name_ = "..";
+        parent.is_dir_ = true;
+        parent.is_parent_ = true;
+        browse_entries_.push_back(parent);
+    }
+
+    std::vector<BrowseEntry> dirs;
+    std::vector<BrowseEntry> files;
+
+    std::filesystem::directory_iterator it(abs_dir, std::filesystem::directory_options::skip_permission_denied, ec);
+    std::filesystem::directory_iterator end;
+    for (; it != end; it.increment(ec))
+    {
+        if (ec)
+        {
+            break;
+        }
+
+        const std::filesystem::directory_entry &entry = *it;
+        std::error_code ec_type;
+        const bool is_dir = entry.is_directory(ec_type);
+        if (ec_type)
+        {
+            continue;
+        }
+
+        // sidecar 标签目录不进列表
+        if (is_dir && entry.path().filename() == ".tag")
+        {
+            continue;
+        }
+
+        BrowseEntry item;
+        item.path_ = entry.path().generic_string();
+        item.is_dir_ = is_dir;
+        item.name_ = entry.path().filename().u8string();
+        if (is_dir)
+        {
+            item.name_ += "/";
+        }
+
+        // 标签取数据库里的记录（未入库的文件标签为空）
+        auto info = ts_->getFileInfo(entry.path());
+        if (info.has_value())
+        {
+            item.tags_ = info->tags_;
+        }
+
+        if (is_dir)
+        {
+            dirs.push_back(item);
+        }
+        else
+        {
+            files.push_back(item);
+        }
+    }
+
+    const auto byName = [](const BrowseEntry &a, const BrowseEntry &b) { return a.name_ < b.name_; };
+    std::sort(dirs.begin(), dirs.end(), byName);
+    std::sort(files.begin(), files.end(), byName);
+    browse_entries_.insert(browse_entries_.end(), dirs.begin(), dirs.end());
+    browse_entries_.insert(browse_entries_.end(), files.begin(), files.end());
+    return true;
+}
+
+bool TransferData::isRootPath(const std::string &path) const
+{
+    if (!dm_)
+    {
+        return false;
+    }
+
+    const std::filesystem::path target = std::filesystem::path(path).lexically_normal();
+    for (const auto &root : dm_->getValidDirList())
+    {
+        std::error_code ec;
+        const std::filesystem::path abs_root = std::filesystem::absolute(root, ec).lexically_normal();
+        if (ec)
+        {
+            continue;
+        }
+        if (abs_root == target)
+        {
+            return true;
+        }
+    }
+    return false;
+}
 bool TransferData::addDir(const std::string &path)
 {
     if (isBlank(path) || !dm_)

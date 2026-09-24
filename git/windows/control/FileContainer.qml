@@ -22,7 +22,9 @@ Rectangle {
     property int tagColumns: 5
     property int fontSize: 16
 
-    signal fileDoubleClicked(string text)
+    // 行类型 kind: "parent"(返回上层入口) / "dir" / "file"
+    signal fileDoubleClicked(string text, string kind)
+    signal fileRightClicked(string text, string kind)
     // 标签变更信号（拼接路径与标签）
     signal fileTagAdded(string filePath, string tag)
     signal fileTagRemoved(string filePath, string tag)
@@ -171,7 +173,7 @@ Rectangle {
                 Label {
                     anchors.fill: parent
                     anchors.margins: 4
-                    text: root.getDisplayPath(modelData.text)
+                    text: (modelData.name !== undefined && modelData.name !== "") ? modelData.name : root.getDisplayPath(modelData.text)
                     font.pixelSize: root.fontSize
                     horizontalAlignment: Text.AlignLeft
                     verticalAlignment: Text.AlignVCenter
@@ -179,10 +181,17 @@ Rectangle {
                     clip: true
                 }
 
-                // 双击该行 -> 发送文件路径
+                // 左键双击：返回上层入口/目录 -> 进入 文件 -> 打开文件
+                // 右键：目录用资源管理器打开 文件定位并高亮
                 MouseArea {
                     anchors.fill: parent
-                    onDoubleClicked: root.fileDoubleClicked(fileItem.modelData.text)
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onDoubleClicked: root.fileDoubleClicked(fileItem.modelData.text, fileItem.modelData.kind ? fileItem.modelData.kind : "file")
+                    onClicked: function(mouse) {
+                        if (mouse.button === Qt.RightButton) {
+                            root.fileRightClicked(fileItem.modelData.text, fileItem.modelData.kind ? fileItem.modelData.kind : "file")
+                        }
+                    }
                 }
             }
 

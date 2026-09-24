@@ -44,8 +44,10 @@ public slots:
     void onDirDoubleClicked(const QString &path);
     // LibraryTag: 点击类型名行(展开/收起) -> 回填 typeInput
     void onLibraryTypeClicked(const QString &type);
-    // FileContainer 双击某行: 目录 -> 打开该目录; 文件 -> 打开所在目录并高亮选中(explorer /select)
-    void onFileDoubleClicked(const QString &path);
+    // FileContainer 双击某行: 返回上层入口/目录 -> 进入; 文件 -> 打开文件
+    void onFileDoubleClicked(const QString &path, const QString &kind);
+    // FileContainer 右键某行(原双击行为): 目录 -> 资源管理器打开; 文件 -> 打开所在目录并高亮选中
+    void onFileRightClicked(const QString &path, const QString &kind);
     // refreshButton: 强制刷新(重新校验目录 / 重载标签 / 重载数据库根) 后更新渲染
     void onRefreshClicked();
     // clearButton: 清空 包含/排除/只有 三个容器的标签列表
@@ -95,6 +97,10 @@ private:
     void pushServerQueue(); // s_server_->getTaskQueue() -> syncWindow.serverQueue
     void pushServerList();  // s_client_->getServers()  -> syncWindow.serverList
     void setStatusLabel(const char *name, const QString &text); // 写入 gray 状态标签
+    // 进入目录浏览（列一层 + 刷新 FileContainer）
+    void enterDir(const QString &path);
+    // 原双击行为：目录用资源管理器打开 文件用 explorer /select 定位
+    void openInExplorer(const QString &path);
     void pushUiText();      // language_ -> Main.qml window.uiText 字典(供 QML 文案绑定)
     void pushTheme();       // config_.theme_ -> window.uiColor/themeNames + 应用调色板
     void pushLanguageList(); // loadLanguageList 结果 -> window.languageNames + 选中当前语言
