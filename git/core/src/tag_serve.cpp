@@ -665,18 +665,11 @@ bool TagServe::syncFileToDBNoLock(const std::filesystem::path &file_path_utf8)
     }
 
     std::error_code ec;
-    auto ftime = std::filesystem::last_write_time(file_path_utf8, ec);
-    auto size = std::filesystem::is_directory(file_path_utf8) ? 0 : std::filesystem::file_size(file_path_utf8, ec);
-
-    if (ec)
+    if (!std::filesystem::exists(file_path_utf8, ec))
     {
-        error_string_ = "[warning] Failed to read file metadata: " + ec.message();
+        error_string_ = "[warning] File does not exist: " + file_path_utf8.u8string();
         return false;
     }
-
-    auto file_now = std::filesystem::file_time_type::clock::now();
-    auto sys_time = std::chrono::system_clock::now() + std::chrono::duration_cast<std::chrono::system_clock::duration>(ftime - file_now);
-    auto file_time = std::chrono::duration_cast<std::chrono::seconds>(sys_time.time_since_epoch()).count();
     auto tags = tag_file_.extractTags(file_path_utf8);
     std::string rel_path;
     std::string best_root_str;
@@ -696,31 +689,12 @@ bool TagServe::syncFileToDBNoLock(const std::filesystem::path &file_path_utf8)
         }
     }
 
-    int64_t sidecar_mtime = 0;
-    if (tag_file_.getDefaultMode() == TagFileManager::StoreMode::Sidecar)
-    {
-        auto sidecar_path = TagFileManager::buildSidecarPath(file_path_utf8);
-        if (std::filesystem::exists(sidecar_path))
-        {
-            auto sc_time = std::filesystem::last_write_time(sidecar_path, ec);
-            if (!ec)
-            {
-                auto sc_now = std::filesystem::file_time_type::clock::now();
-                auto sc_sys_time = std::chrono::system_clock::now() + std::chrono::duration_cast<std::chrono::system_clock::duration>(sc_time - sc_now);
-                sidecar_mtime = std::chrono::duration_cast<std::chrono::seconds>(sc_sys_time.time_since_epoch()).count();
-            }
-        }
-    }
 
     table::FileInfo info;
     info.path_ = file_path_utf8.generic_u8string();
     info.rel_path_ = rel_path;
-    info.file_mtime_ = file_time;
-    info.file_size_ = static_cast<int64_t>(size);
-    info.sidecar_mtime_ = sidecar_mtime;
     info.tags_ = tags;
     info.file_version_ = 1;
-    info.last_refresh_time_ = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
     if (!db_.updateFile(info))
     {
