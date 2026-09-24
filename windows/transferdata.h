@@ -33,6 +33,22 @@ public:
     // 将路径拿到后端判断是否在沙盒内 如果在取该目录下文件数据填充 path_tags_
     bool getDirFile(const std::string &path);
 
+    // 目录浏览（一层）的一行：子目录 / 文件 / "返回上层"入口
+    struct BrowseEntry
+    {
+        std::string path_;              // 绝对路径 UTF-8（"返回上层"入口为父目录路径）
+        std::string name_;              // 显示名（目录带结尾 '/' "返回上层"入口为 ".."）
+        bool is_dir_ = false;           // 是否目录
+        bool is_parent_ = false;        // 是否"返回上层"入口
+        std::vector<std::string> tags_; // 标签（来自数据库 未入库的文件为空）
+    };
+
+    // 列出一层：直接子项(先目录后文件 各自按名排序) + 不在授权根时首行"返回上层"入口
+    // 成功后读 browse_entries_ / browse_current_dir_
+    bool browseDir(const std::string &path);
+    // 该路径是否等于某个授权根目录
+    bool isRootPath(const std::string &path) const;
+
     // 将目录提交给后端处理 更新 path_list_
     bool addDir(const std::string &path);
     bool removeDir(const std::string &path);
@@ -68,6 +84,9 @@ public:
     std::unordered_map<std::string, std::vector<std::string>> path_tags_;
     // path_tags_ 的显示顺序(filename 模式改名时原位顶替 保证 UI 行顺序稳定)
     std::vector<std::string> file_order_;
+    // 目录浏览状态（browse_current_dir_ 为空 = 当前不在目录浏览模式）
+    std::vector<BrowseEntry> browse_entries_;
+    std::string browse_current_dir_;
 
 private:
     void refreshDirList();     // 从 DirectoryConfigManager 刷新 path_list_
