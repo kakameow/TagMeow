@@ -63,6 +63,10 @@ bool FileDatabase::initSchema()
         sqlite3_finalize(stmt);
     }
 
+    // 索引补齐（幂等）：tags(file_id) 缺失时 按 file_id 删除与外键级联都会退化成全表扫 tags
+    // 老库（user_version 2/3）在下面各分支里补建；新库建表语句里已包含该索引
+    sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_tag_file ON tags(file_id);", nullptr, nullptr, nullptr);
+
     // 版本 0 首次创建
     if (version == 0)
     {
@@ -89,6 +93,7 @@ bool FileDatabase::initSchema()
                 FOREIGN KEY (file_id) REFERENCES files(file_id) ON DELETE CASCADE
             );
             CREATE INDEX idx_tag ON tags(tag);
+            CREATE INDEX idx_tag_file ON tags(file_id);
         )";
 
         if (sqlite3_exec(db_, create_files, nullptr, nullptr, nullptr) != SQLITE_OK || sqlite3_exec(db_, create_tags, nullptr, nullptr, nullptr) != SQLITE_OK)
@@ -177,6 +182,7 @@ bool FileDatabase::initSchema()
                         FOREIGN KEY (file_id) REFERENCES files(file_id) ON DELETE CASCADE
                     );
                     CREATE INDEX idx_tag ON tags(tag);
+                    CREATE INDEX idx_tag_file ON tags(file_id);
                 )";
                 if (sqlite3_exec(db_, create_tags, nullptr, nullptr, nullptr) != SQLITE_OK)
                 {
@@ -194,6 +200,13 @@ bool FileDatabase::initSchema()
 
     // 版本 2 当前 schema 无需迁移
     if (version == 2)
+    {
+        error_string_.clear();
+        return true;
+    }
+
+    // 版本 3 当前 schema 无需迁移（新建库写的就是 3；此前会落到"未知版本"分支误报失败）
+    if (version == 3)
     {
         error_string_.clear();
         return true;
@@ -346,6 +359,234 @@ bool FileDatabase::updateDirectory(const std::filesystem::path &path_utf8, std::
     }
 
     error_string_.clear();
+    return true;
+}
+
+bool FileDatabase::clearAll()
+{
+    if (!db_)
+    {
+        error_string_ = "[warning] Database not opened";
+        return false;
+    }
+
+    if (sqlite3_exec(db_, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr) != SQLITE_OK)
+    {
+        error_string_ = sqlite3_errmsg(db_);
+        return false;
+    }
+
+    // 先删关联表 不依赖外键级联
+    if (sqlite3_exec(db_, "DELETE FROM tags;", nullptr, nullptr, nullptr) != SQLITE_OK ||
+        sqlite3_exec(db_, "DELETE FROM files;", nullptr, nullptr, nullptr) != SQLITE_OK)
+    {
+        error_string_ = sqlite3_errmsg(db_);
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+    }
+
+    if (sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, nullptr) != SQLITE_OK)
+    {
+        error_string_ = sqlite3_errmsg(db_);
+        return false;
+    }
+
+    error_string_.clear();
+    return true;
+}
+
+bool FileDatabase::insertDirectory(const std::filesystem::path &path_utf8, std::function<std::vector<std::string>(const std::filesystem::path &)> tag_extractor)
+{
+    if (!db_)
+    {
+        error_string_ = "[warning] Database not opened";
+        return false;
+    }
+    if (!std::filesystem::exists(path_utf8) || !std::filesystem::is_directory(path_utf8))
+    {
+        error_string_ = "[warning] Directory does not exist or not a directory";
+        return false;
+    }
+
+    sqlite3_stmt *ins_file = nullptr;
+    sqlite3_stmt *ins_tag = nullptr;
+    const char *ins_file_sql =
+        "INSERT OR REPLACE INTO files (path, rel_path, file_mtime, file_size, sidecar_mtime, file_version, last_refresh_time) "
+        "VALUES (?, ?, ?, ?, 0, 1, ?);";
+    const char *ins_tag_sql = "INSERT OR REPLACE INTO tags (tag, file_id) VALUES (?, ?);";
+
+    if (sqlite3_prepare_v2(db_, ins_file_sql, -1, &ins_file, nullptr) != SQLITE_OK || sqlite3_prepare_v2(db_, ins_tag_sql, -1, &ins_tag, nullptr) != SQLITE_OK)
+    {
+        error_string_ = sqlite3_errmsg(db_);
+        if (ins_file != nullptr)
+        {
+            sqlite3_finalize(ins_file);
+        }
+        if (ins_tag != nullptr)
+        {
+            sqlite3_finalize(ins_tag);
+        }
+        return false;
+    }
+
+    if (sqlite3_exec(db_, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr) != SQLITE_OK)
+    {
+        error_string_ = sqlite3_errmsg(db_);
+        sqlite3_finalize(ins_file);
+        sqlite3_finalize(ins_tag);
+        return false;
+    }
+
+    const auto file_clock_now = std::filesystem::file_time_type::clock::now();
+    const auto system_clock_now = std::chrono::system_clock::now();
+    const int64_t refresh_time = std::chrono::duration_cast<std::chrono::seconds>(system_clock_now.time_since_epoch()).count();
+
+    std::string prefix = path_utf8.generic_u8string();
+    if (!prefix.empty() && prefix.back() != '/')
+    {
+        prefix += '/';
+    }
+
+    int iter_skip_count = 0;
+    std::string iter_skip_files;
+    int skipped_count = 0;
+    std::string skipped_files;
+
+    std::error_code ec_iter;
+    std::filesystem::recursive_directory_iterator iter(path_utf8, ec_iter);
+    std::filesystem::recursive_directory_iterator end_iter;
+
+    for (; iter != end_iter; iter++)
+    {
+        if (ec_iter)
+        {
+            iter_skip_count++;
+            if (iter_skip_files.size() < 256)
+            {
+                iter_skip_files += "[error: " + ec_iter.message() + "]";
+            }
+            ec_iter.clear();
+            continue;
+        }
+
+        const std::filesystem::directory_entry &entry = *iter;
+        const std::filesystem::path &entry_path = entry.path();
+
+        std::error_code ec_type;
+        const bool entry_is_directory = entry.is_directory(ec_type);
+        if (ec_type)
+        {
+            iter_skip_count++;
+            continue;
+        }
+
+        if (entry_is_directory && entry_path.filename() == ".tag")
+        {
+            iter.disable_recursion_pending();
+            continue;
+        }
+
+        std::error_code ec_meta;
+        const auto file_write_time = std::filesystem::last_write_time(entry_path, ec_meta);
+        int64_t file_size = 0;
+        if (!entry_is_directory)
+        {
+            file_size = static_cast<int64_t>(std::filesystem::file_size(entry_path, ec_meta));
+        }
+        if (ec_meta)
+        {
+            skipped_count++;
+            if (skipped_files.size() < 256)
+            {
+                if (!skipped_files.empty())
+                {
+                    skipped_files += ", ";
+                }
+                skipped_files += entry_path.filename().u8string();
+            }
+            continue;
+        }
+
+        const std::string path_str = entry_path.generic_u8string();
+        std::string rel_path;
+        if (path_str.size() > prefix.size() && path_str.compare(0, prefix.size(), prefix) == 0)
+        {
+            rel_path = path_str.substr(prefix.size());
+        }
+        else
+        {
+            std::error_code ec_rel;
+            rel_path = std::filesystem::relative(entry_path, path_utf8, ec_rel).generic_u8string();
+        }
+
+        const auto sys_time = system_clock_now + std::chrono::duration_cast<std::chrono::system_clock::duration>(file_write_time - file_clock_now);
+        const int64_t file_time = std::chrono::duration_cast<std::chrono::seconds>(sys_time.time_since_epoch()).count();
+
+        const std::vector<std::string> tags = tag_extractor(entry_path);
+
+        sqlite3_reset(ins_file);
+        sqlite3_clear_bindings(ins_file);
+        sqlite3_bind_text(ins_file, 1, path_str.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(ins_file, 2, rel_path.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(ins_file, 3, file_time);
+        sqlite3_bind_int64(ins_file, 4, file_size);
+        sqlite3_bind_int64(ins_file, 5, refresh_time);
+
+        if (sqlite3_step(ins_file) != SQLITE_DONE)
+        {
+            error_string_ = sqlite3_errmsg(db_);
+            sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+            sqlite3_finalize(ins_file);
+            sqlite3_finalize(ins_tag);
+            return false;
+        }
+
+        const int file_id = static_cast<int>(sqlite3_last_insert_rowid(db_));
+
+        for (const auto &tag : tags)
+        {
+            if (tag.empty())
+            {
+                continue;
+            }
+
+            sqlite3_reset(ins_tag);
+            sqlite3_clear_bindings(ins_tag);
+            sqlite3_bind_text(ins_tag, 1, tag.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(ins_tag, 2, file_id);
+
+            if (sqlite3_step(ins_tag) != SQLITE_DONE)
+            {
+                error_string_ = sqlite3_errmsg(db_);
+                sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+                sqlite3_finalize(ins_file);
+                sqlite3_finalize(ins_tag);
+                return false;
+            }
+        }
+    }
+
+    if (sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, nullptr) != SQLITE_OK)
+    {
+        error_string_ = sqlite3_errmsg(db_);
+        sqlite3_finalize(ins_file);
+        sqlite3_finalize(ins_tag);
+        return false;
+    }
+
+    sqlite3_finalize(ins_file);
+    sqlite3_finalize(ins_tag);
+
+    if (skipped_count > 0 || iter_skip_count > 0)
+    {
+        error_string_ = "[tip] inserted directory, but " + std::to_string(iter_skip_count) + " entry(ies) were skipped: " + iter_skip_files;
+        error_string_ += "\n[tip] " + std::to_string(skipped_count) + " file(s) were skipped due to read errors: " + skipped_files;
+    }
+    else
+    {
+        error_string_.clear();
+    }
+
     return true;
 }
 

@@ -65,6 +65,10 @@ public:
     bool initSchema();
     // 将单个目录内所有文件信息更新同步到数据库
     bool updateDirectory(const std::filesystem::path &path_utf8, std::function<std::vector<std::string>(const std::filesystem::path &)> tag_extractor);
+    // 清空全部文件/标签记录 数据库只作磁盘的缓存 旧数据不需要保留
+    bool clearAll();
+    // 按磁盘内容把目录写入数据库：只插入 不做存在性检查/去重/清理
+    bool insertDirectory(const std::filesystem::path &path_utf8, std::function<std::vector<std::string>(const std::filesystem::path &)> tag_extractor);
     // 更新单个文件 由上层在文件修改后调用
     bool updateFile(const table::FileInfo &info);
     // 从数据库移除文件记录

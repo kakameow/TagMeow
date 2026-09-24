@@ -25,7 +25,8 @@ bool TagServe::addRoot(std::filesystem::path root_path_utf8)
         return tag_file_.extractTags(p);
     };
 
-    if (!db_.updateDirectory(root_path_utf8, extractor))
+    // 新根只追加写入 不清库（数据库只作磁盘缓存）
+    if (!db_.insertDirectory(root_path_utf8, extractor))
     {
         error_string_ = "Failed to update database for root: " + db_.getLastError();
         return false;
@@ -62,32 +63,26 @@ bool TagServe::reLoadRoot(std::vector<std::filesystem::path> root_list_utf8)
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    for (const auto &old_root : root_list_)
-    {
-        if (!db_.removeDirectory(old_root))
-        {
-            error_string_ = "Failed to remove old root data: " + db_.getLastError();
-            return false;
-        }
-    }
-
     root_list_ = std::move(root_list_utf8);
     auto extractor = [this](const std::filesystem::path &p)
     {
         return tag_file_.extractTags(p);
     };
 
+    if (!db_.clearAll())
+    {
+        error_string_ = "Failed to clear database: " + db_.getLastError();
+        return false;
+    }
+
     size_t err = 0;
     for (const auto &dir : root_list_)
     {
-        if (!db_.updateDirectory(dir, extractor))
+        if (!db_.insertDirectory(dir, extractor))
         {
             err++;
         }
     }
-
-    db_.clearRepeat();
-    db_.cleanupInvalid();
 
     if (err > 0)
     {
@@ -623,13 +618,11 @@ bool TagServe::updateRoots()
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    for (const auto &old_root : root_list_)
+    // 数据库只作缓存：直接清空记录后按磁盘重扫（不再逐个 removeDirectory）
+    if (!db_.clearAll())
     {
-        if (!db_.removeDirectory(old_root))
-        {
-            error_string_ = "Failed to remove old root data: " + db_.getLastError();
-            return false;
-        }
+        error_string_ = "Failed to clear database: " + db_.getLastError();
+        return false;
     }
 
     auto extractor = [this](const std::filesystem::path &p)
@@ -640,14 +633,11 @@ bool TagServe::updateRoots()
     size_t err = 0;
     for (const auto &dir : root_list_)
     {
-        if (!db_.updateDirectory(dir, extractor))
+        if (!db_.insertDirectory(dir, extractor))
         {
             err++;
         }
     }
-
-    db_.clearRepeat();
-    db_.cleanupInvalid();
 
     if (err > 0)
     {
@@ -742,7 +732,7 @@ bool TagServe::syncFileToDBNoLock(const std::filesystem::path &file_path_utf8)
     return true;
 }
 
-// 内部无锁版本: 用当前 root_list_ 重建数据库索引(updateDirectory 会先删同前缀旧行再重扫)
+// 内部无锁版本: 用当前 root_list_ 重建数据库索引(先清空记录 再按磁盘重扫)
 bool TagServe::rebuildRootsNoLock()
 {
     auto extractor = [this](const std::filesystem::path &p)
@@ -750,17 +740,20 @@ bool TagServe::rebuildRootsNoLock()
         return tag_file_.extractTags(p);
     };
 
+    if (!db_.clearAll())
+    {
+        error_string_ = "Failed to clear database: " + db_.getLastError();
+        return false;
+    }
+
     size_t err = 0;
     for (const auto &dir : root_list_)
     {
-        if (!db_.updateDirectory(dir, extractor))
+        if (!db_.insertDirectory(dir, extractor))
         {
             err++;
         }
     }
-
-    db_.clearRepeat();
-    db_.cleanupInvalid();
 
     if (err > 0)
     {
