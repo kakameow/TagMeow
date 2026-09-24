@@ -71,6 +71,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -162,7 +163,9 @@ public class MainActivity extends AppCompatActivity {
     private static final int THUMB_LIMIT = 300;
 
     // 缩略图缓存上限（KB）：reload() 会重画整个列表 缓存住就不用反复解码
-    private static final int THUMB_CACHE_KB = 8 * 1024;
+    // 缩略图缓存：解码后统一缩到 THUMB_SIZE（96×96×4B ≈ 36KB）
+    // 12MB 能装下 THUMB_LIMIT 张还留余量 —— 装不下的话每次重画都要全部重新解码
+    private static final int THUMB_CACHE_KB = 12 * 1024;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
 
@@ -265,6 +268,15 @@ public class MainActivity extends AppCompatActivity {
                     return bitmap.getByteCount() / 1024;
                 }
             };
+
+    // 缩略图代次：renderFiles 每跑一次 +1 上一轮没跑完的任务自动作废
+    private int thumb_generation = 0;
+
+    // 正在解码的缩略图 key（主线程排队 工作线程收尾 所以用并发集合）
+    private final Set<String> thumb_inflight = ConcurrentHashMap.newKeySet();
+
+    // 浏览页上次重画时的数据指纹：一样就跳过重画
+    private String browse_stamp = "";
 
     private SharedPreferences prefs;
 
@@ -792,9 +804,18 @@ public class MainActivity extends AppCompatActivity {
                     current_files.addAll(entries);
                 }
 
-                renderDirectories();
-                renderTagLibrary();
-                renderFiles(search_mode ? current_files : entries);
+                // 数据没变就不重画：切出去再切回这个页面时 最费的就是这三行
+                // （重建每一个文件行 还要重新排 THUMB_LIMIT 个缩略图任务）
+                String stamp = browseStampOf(search_mode, target, access, types, colors, file_count,
+                        search_mode ? current_files : entries);
+
+                if (!stamp.equals(browse_stamp) || files_list.getChildCount() == 0) {
+                    browse_stamp = stamp;
+
+                    renderDirectories();
+                    renderTagLibrary();
+                    renderFiles(search_mode ? current_files : entries);
+                }
 
                 // 编辑器子界面开着的时候 也要跟着最新标签库刷新
                 // 否则刚添加 / 删除的类型不会出现在列表里
@@ -819,9 +840,35 @@ public class MainActivity extends AppCompatActivity {
         return Lang.f("settings.status_line", root_count, file_count, name(current.getDefaultMode()));
     }
 
+    // 浏览页的数据指纹：内容没变就跳过重画
+    // 语言也在指纹里：换语言之后每一行的文案都变了 必须重画
+    private static String browseStampOf(boolean search, FileRef directory, Map<String, Boolean> access, Map<String, List<String>> types, Map<String, String> colors, long file_count, List<FileDatabase.FileInfo> files) {
+
+        StringBuilder builder = new StringBuilder(128);
+
+        builder.append(Lang.current()).append('|').append(search).append('|').append(file_count).append('|')
+                .append(directory == null ? "-" : directory.key()).append('|')
+                .append(access.hashCode()).append('|').append(types.hashCode()).append('|')
+                .append(colors.hashCode()).append('|').append(files.size()).append('|');
+
+        for (FileDatabase.FileInfo info : files) {
+            builder.append(info.file_ref.getRelativePath()).append(':')
+                    .append(info.is_directory ? 'd' : 'f').append(':')
+                    .append(info.file_mtime).append(':')
+                    .append(info.file_size).append(':')
+                    .append(info.tags == null ? 0 : info.tags.hashCode()).append(';');
+        }
+
+        return builder.toString();
+    }
+
     // 渲染：文件列表
 
     private void renderFiles(List<FileDatabase.FileInfo> files) {
+        // 新一代：上一轮排队还没跑的缩略图任务到这里就作废
+        thumb_generation++;
+        final int generation = thumb_generation;
+
         files_list.removeAllViews();
 
         if (search_mode) {
@@ -869,7 +916,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (wantsThumbnail(info, thumbBudget)) {
                 thumbBudget--;
-                loadThumbnail(icon, info);
+                loadThumbnail(icon, info, generation);
             }
 
             name.setText(info.file_ref.isRoot() ? "(root)" : info.file_ref.getName());
@@ -913,7 +960,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // 缩略图在后台取：失败（格式不支持 / 太大 / 没权限）就保持矢量图不动
-    private void loadThumbnail(final ImageView icon, final FileDatabase.FileInfo info) {
+    private void loadThumbnail(final ImageView icon, final FileDatabase.FileInfo info, final int generation) {
         final String key = info.file_ref.getRootId() + ":" + info.file_ref.getRelativePath()
                 + ":" + info.file_mtime;
 
@@ -924,28 +971,65 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        // 同一张图这轮已经在解了：不重复排队（一张图可能在列表里出现多次）
+        if (!thumb_inflight.add(key)) {
+            return;
+        }
+
         thumb_worker.execute(() -> {
-            StorageAccess current = storage;
+            try {
+                // 又重画过一轮了：这个任务作废 直接丢掉 别占着线程池
+                // 少了这一步 来回切页面时上一轮的任务会一直堆在队列里 越切越慢
+                if (generation != thumb_generation) {
+                    return;
+                }
 
-            if (current == null) {
-                return;
+                StorageAccess current = storage;
+
+                if (current == null) {
+                    return;
+                }
+
+                String locator = current.locatorOf(info.file_ref);
+
+                if (locator == null || locator.isEmpty()) {
+                    return;
+                }
+
+                Bitmap bitmap = loadThumbnailBitmap(locator);
+
+                if (bitmap == null) {
+                    return;
+                }
+
+                thumb_cache.put(key, bitmap);
+                runOnUiThread(() -> showThumbnail(icon, bitmap));
+            } finally {
+                thumb_inflight.remove(key);
             }
-
-            String locator = current.locatorOf(info.file_ref);
-
-            if (locator == null || locator.isEmpty()) {
-                return;
-            }
-
-            Bitmap bitmap = loadThumbnailBitmap(locator);
-
-            if (bitmap == null) {
-                return;
-            }
-
-            thumb_cache.put(key, bitmap);
-            runOnUiThread(() -> showThumbnail(icon, bitmap));
         });
+    }
+
+    // 把解码结果精确缩到 THUMB_SIZE：缓存里每张大小一致 才装得下整页的缩略图
+    private static Bitmap scaleToThumb(Bitmap source) {
+        int width = source.getWidth();
+        int height = source.getHeight();
+
+        if (width <= THUMB_SIZE && height <= THUMB_SIZE) {
+            return source;
+        }
+
+        float ratio = Math.min((float) THUMB_SIZE / width, (float) THUMB_SIZE / height);
+        int target_width = Math.max(1, Math.round(width * ratio));
+        int target_height = Math.max(1, Math.round(height * ratio));
+
+        Bitmap scaled = Bitmap.createScaledBitmap(source, target_width, target_height, true);
+
+        if (scaled != source) {
+            source.recycle();
+        }
+
+        return scaled;
     }
 
     // 缩略图只有一个来源了：绝对路径（所有文件访问模式）
@@ -968,11 +1052,21 @@ public class MainActivity extends AppCompatActivity {
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight, THUMB_SIZE);
 
+        Bitmap decoded;
+
         try {
-            return BitmapFactory.decodeFile(path, options);
+            decoded = BitmapFactory.decodeFile(path, options);
         } catch (RuntimeException error) {
             return null;
         }
+
+        if (decoded == null) {
+            return null;
+        }
+
+        // inSampleSize 只能按 2 的幂缩 结果最大可能是目标的 2 倍
+        // 这里补一次精确缩放：缓存里每张都稳定在 THUMB_SIZE 上下 缓存才装得下
+        return scaleToThumb(decoded);
     }
 
     private static int sampleSizeFor(int width, int height, int target) {
@@ -2918,7 +3012,7 @@ public class MainActivity extends AppCompatActivity {
         bindFileIcon(icon, info, dp(10));
 
         if (wantsThumbnail(info, 1)) {
-            loadThumbnail(icon, info);
+            loadThumbnail(icon, info, thumb_generation);
         }
 
         ((TextView) file_tag_overlay.findViewById(R.id.fileTagName))
