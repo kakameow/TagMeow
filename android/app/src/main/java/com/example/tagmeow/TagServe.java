@@ -76,7 +76,8 @@ public final class TagServe {
 
             FileRef root = new FileRef(directory.getId(), "");
 
-            if (!file_database.updateDirectory(root, extractor())) {
+            // 新根只追加写入 不清库（数据库只作磁盘缓存）
+            if (!file_database.insertDirectory(root, extractor())) {
                 // 扫描失败时回滚目录配置 保持配置与数据库一致
                 directory_manager.removeDirectory(tree_uri);
                 error_string = "Failed to update database for root: " + file_database.getLastError();
@@ -135,16 +136,15 @@ public final class TagServe {
     // 根据 DirectoryConfigManager 当前配置 重新加载所有有效 root
     public boolean reLoadRoot() {
         synchronized (lock) {
-            // 旧的（含已经失效的）root 记录全部先清掉
-            for (DirectoryConfigManager.Directory directory : directory_manager.getDirList()) {
-                file_database.removeDirectory(new FileRef(directory.getId(), ""));
-            }
-
             directory_manager.clearInvalidPath();
 
+            // 数据库只作缓存：直接清空记录 再按磁盘重扫重建（不再逐个 removeDirectory）
+            if (!file_database.clearAll()) {
+                error_string = "Failed to clear database: " + file_database.getLastError();
+                return false;
+            }
+
             int failed = scanRoots();
-            file_database.clearRepeat();
-            file_database.cleanupInvalid();
 
             if (failed > 0) {
                 error_string = "[warning] " + failed + " root(s) failed to update";
@@ -589,13 +589,17 @@ public final class TagServe {
     }
 
     // 刷新全部受管理目录
-    // DirectoryConfigManager -> FileDatabase.updateDirectory() -> TagFileManager.extractTags()
+    // DirectoryConfigManager -> FileDatabase.insertDirectory() -> TagFileManager.extractTags()
     // 返回 false 时 error_string 里有警告信息
     public boolean refreshAll() {
         synchronized (lock) {
+            // 数据库只作缓存：先清空 再按磁盘重扫重建
+            if (!file_database.clearAll()) {
+                error_string = "Failed to clear database: " + file_database.getLastError();
+                return false;
+            }
+
             int failed = scanRoots();
-            file_database.clearRepeat();
-            file_database.cleanupInvalid();
 
             if (failed > 0) {
                 error_string = "[warning] " + failed + " root(s) failed to update";
@@ -622,7 +626,13 @@ public final class TagServe {
 
             FileRef root = new FileRef(directory.getId(), "");
 
-            if (!file_database.updateDirectory(root, extractor())) {
+            // 单个 root 的刷新：先把它自己的记录删掉 再按磁盘重扫写入
+            if (!file_database.removeDirectory(root)) {
+                error_string = "Failed to remove directory from database: " + file_database.getLastError();
+                return false;
+            }
+
+            if (!file_database.insertDirectory(root, extractor())) {
                 error_string = "Failed to update database for root: " + file_database.getLastError();
                 return false;
             }
@@ -680,7 +690,7 @@ public final class TagServe {
             storage.addRoot(directory.getId(), locatorOf(directory.getUri()));
 
             FileRef root = new FileRef(directory.getId(), "");
-            if (!file_database.updateDirectory(root, extractor())) {
+            if (!file_database.insertDirectory(root, extractor())) {
                 failed++;
             }
         }

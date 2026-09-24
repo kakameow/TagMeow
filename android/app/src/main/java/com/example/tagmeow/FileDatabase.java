@@ -24,26 +24,25 @@ import java.util.TreeSet;
 // 只修改数据库 不修改真实磁盘文件
 // 自己调用时保证线程安全
 
-// 原版表结构
 // struct FileInfo
 // {
 //     int file_id_;                   // 自增主键
 //     std::string path_;              // 绝对路径 UTF-8
 //     std::string rel_path_;          // 相对路径 UTF-8
-//     int64_t file_mtime_;            // 文件修改时间
-//     int64_t file_size_;             // 文件大小
-//     int64_t sidecar_mtime_;         // 侧车文件修改时间
 //     std::vector<std::string> tags_; // 标签列表
 //     int file_version_;              // 乐观锁版本
-//     int64_t last_refresh_time_;     // 最后刷新时间
 // };
+// mtime / size / sidecar_mtime / last_refresh_time 不再入库：
+// 数据库只作磁盘的缓存 这些随时会变的值按需现取（查询出结果时由 readFileInfo 读一次磁盘）
 
 public final class FileDatabase {
 
     // 数据库结构版本
     // - v3：原版表结构 + root_id + original_uri
     // - v4：增加 is_dir（文件浏览器需要区分目录与文件）
-    private static final int DB_VERSION = 4;
+    // - v5：砍掉 mtime / size / sidecar_mtime / last_refresh_time（数据库只作磁盘的缓存）
+    //       老库不迁移 升级时直接重建（重建后重扫一次索引就回来了）
+    private static final int DB_VERSION = 5;
 
     // 文件索引记录
     public static final class FileInfo {
@@ -56,18 +55,14 @@ public final class FileDatabase {
         public String original_uri;
         // 是否为目录 文件浏览器需要用它区分图标与行为
         public boolean is_directory;
-        // 文件修改时间
+        // 文件修改时间：不落库 查询时按磁盘现取（界面显示大小 / 缩略图缓存键要用）
         public long file_mtime;
-        // 文件大小
+        // 文件大小：不落库 同上
         public long file_size;
-        // Sidecar 修改时间
-        public long sidecar_mtime;
         // 文件标签列表
         public List<String> tags = new ArrayList<>();
         // 乐观锁版本
         public long file_version;
-        // 最后刷新时间
-        public long last_refresh_time;
 
         @Override
         public String toString() {
@@ -123,9 +118,19 @@ public final class FileDatabase {
 
         @Override
         public void onUpgrade(SQLiteDatabase db, int old_version, int new_version) {
-            if (old_version < 4) {
-                addColumnIfMissing(db, "files", "is_dir", "INTEGER DEFAULT 0");
-            }
+            // 老库直接重建：数据库只是磁盘的缓存 重建之后重扫一次就有内容
+            // （字段砍掉之后 以前那条逐版本加列的迁移链没有意义了）
+            dropSchema(db);
+            createSchema(db);
+        }
+
+        @Override
+        public void onOpen(SQLiteDatabase db) {
+            super.onOpen(db);
+
+            // 索引补齐（幂等）：老库没建过 tags(file_id) 就在这里补上
+            // 新库的建表语句里已经有了 这句对它是空操作
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_tag_file ON tags(file_id);");
         }
 
         @Override
@@ -133,14 +138,6 @@ public final class FileDatabase {
             // 降级时结构不保证兼容 直接重建
             dropSchema(db);
             createSchema(db);
-        }
-
-        private static void addColumnIfMissing(SQLiteDatabase db, String table, String column, String definition) {
-            try {
-                db.execSQL("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition + ";");
-            } catch (RuntimeException error) {
-                // 列已经存在时忽略
-            }
         }
 
         private static void dropSchema(SQLiteDatabase db) {
@@ -157,11 +154,7 @@ public final class FileDatabase {
                             + "root_id TEXT,"
                             + "original_uri TEXT,"
                             + "is_dir INTEGER DEFAULT 0,"
-                            + "file_mtime INTEGER,"
-                            + "file_size INTEGER,"
-                            + "sidecar_mtime INTEGER,"
-                            + "file_version INTEGER DEFAULT 1,"
-                            + "last_refresh_time INTEGER"
+                            + "file_version INTEGER DEFAULT 1"
                             + ");");
 
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_path ON files(path);");
@@ -176,6 +169,9 @@ public final class FileDatabase {
                             + ");");
 
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_tag ON tags(tag);");
+            // 按 file_id 关联/删除也要走索引：缺它时 listDirectory / searchByTags 的
+            // LEFT JOIN tags 以及删文件时的级联都会退化成全表扫 tags
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_tag_file ON tags(file_id);");
         }
     }
 
@@ -185,11 +181,7 @@ public final class FileDatabase {
             "f.rel_path",
             "f.root_id",
             "f.original_uri",
-            "f.file_mtime",
-            "f.file_size",
-            "f.sidecar_mtime",
             "f.file_version",
-            "f.last_refresh_time",
             "f.is_dir",
     };
 
@@ -269,7 +261,35 @@ public final class FileDatabase {
     }
 
     // 遍历整个 root 并同步数据库 FileDatabase 自己负责遍历 标签通过 TagExtractor 获取
-    public boolean updateDirectory(FileRef root, TagExtractor extractor) {
+    // 清空全部文件/标签记录：数据库只作磁盘的缓存 旧数据不需要保留
+    // 与 core 的 FileDatabase::clearAll 对应（先删关联表 不依赖外键级联）
+    public boolean clearAll() {
+        SQLiteDatabase database = db();
+        if (database == null) {
+            error_string = "[warning] Database not opened";
+            return false;
+        }
+
+        database.beginTransaction();
+        try {
+            database.delete("tags", null, null);
+            database.delete("files", null, null);
+            database.setTransactionSuccessful();
+        } catch (RuntimeException error) {
+            error_string = "[warning] " + error.getMessage();
+            return false;
+        } finally {
+            database.endTransaction();
+        }
+
+        error_string = "";
+        return true;
+    }
+
+    // 按磁盘内容把目录写入数据库：只插入 不做存在性检查 / 去重 / 清理 / 乐观锁
+    // 刷新流程是「先 clearAll 再按磁盘重扫重建」 所以这里不需要查旧行
+    // 与 core 的 FileDatabase::insertDirectory 对应
+    public boolean insertDirectory(FileRef root, TagExtractor extractor) {
 
         Objects.requireNonNull(root);
         Objects.requireNonNull(extractor);
@@ -292,16 +312,14 @@ public final class FileDatabase {
             skipped_dirs = collect(root, found, true);
         } catch (IOException error) {
             // root 本身读不了（授权被回收 / 目录被删）必须失败
-            // 以前这里照样提交空事务并返回 true，于是「添加成功 + 索引一条都没有」
             error_string = "[warning] " + error.getMessage();
             return false;
         }
 
         database.beginTransaction();
         try {
-            deleteRowsUnder(database, root);
-
             int skipped = 0;
+
             for (FileRef ref : found) {
                 FileInfo info = buildInfo(ref, extractor);
                 if (info == null) {
@@ -309,7 +327,7 @@ public final class FileDatabase {
                     continue;
                 }
 
-                if (!updateFileRow(database, info)) {
+                if (!insertFileRow(database, info)) {
                     return false;
                 }
             }
@@ -317,7 +335,7 @@ public final class FileDatabase {
             database.setTransactionSuccessful();
 
             if (skipped > 0 || skipped_dirs > 0) {
-                error_string = "[tip] Updated directory, but " + skipped
+                error_string = "[tip] Inserted directory, but " + skipped
                         + " file(s) and " + skipped_dirs
                         + " subdirector(y/ies) could not be read";
             } else {
@@ -328,6 +346,56 @@ public final class FileDatabase {
             return false;
         } finally {
             database.endTransaction();
+        }
+
+        return true;
+    }
+
+    // 只写不查的一行：不查旧 file_id / 版本号 也不先删标签
+    private boolean insertFileRow(SQLiteDatabase database, FileInfo info) {
+
+        ContentValues values = new ContentValues();
+        values.put("path", info.file_ref.key());
+        values.put("rel_path", info.file_ref.getRelativePath());
+        values.put("root_id", info.file_ref.getRootId());
+        values.put("original_uri", info.original_uri);
+        values.put("is_dir", info.is_directory ? 1 : 0);
+        values.put("file_version", info.file_version <= 0 ? 1L : info.file_version);
+
+        long file_id = database.insertWithOnConflict(
+                "files",
+                null,
+                values,
+                SQLiteDatabase.CONFLICT_REPLACE);
+
+        if (file_id < 0) {
+            error_string = "[warning] Failed to insert file record: " + info.file_ref;
+            return false;
+        }
+
+        if (info.tags == null) {
+            return true;
+        }
+
+        for (String tag : info.tags) {
+            if (tag == null || tag.isEmpty()) {
+                continue;
+            }
+
+            ContentValues tag_values = new ContentValues();
+            tag_values.put("tag", tag);
+            tag_values.put("file_id", file_id);
+
+            long row_id = database.insertWithOnConflict(
+                    "tags",
+                    null,
+                    tag_values,
+                    SQLiteDatabase.CONFLICT_REPLACE);
+
+            if (row_id < 0) {
+                error_string = "[warning] Failed to insert tag: " + tag;
+                return false;
+            }
         }
 
         return true;
@@ -834,29 +902,13 @@ public final class FileDatabase {
         info.file_ref = ref;
         info.original_uri = storage.locatorOf(ref);
         info.is_directory = directory;
+        // mtime / size 只给界面用 不入库
         info.file_mtime = storage.lastModified(ref);
         info.file_size = directory ? 0L : storage.size(ref);
         info.file_version = 1;
-        info.last_refresh_time = System.currentTimeMillis();
         info.tags = new ArrayList<>(safeList(extractor.extract(ref)));
-        info.sidecar_mtime = sidecarMtimeOf(ref);
 
         return info;
-    }
-
-    // 计算侧车文件修改时间 优先使用写入目标（无标签路径） 其次使用带标签路径
-    private long sidecarMtimeOf(FileRef ref) {
-        FileRef clean = TagFileManager.buildCleanSidecarPath(ref);
-        if (storage.exists(clean)) {
-            return storage.lastModified(clean);
-        }
-
-        FileRef raw = TagFileManager.buildSidecarPath(ref);
-        if (!raw.equals(clean) && storage.exists(raw)) {
-            return storage.lastModified(raw);
-        }
-
-        return 0L;
     }
 
     // 写入或更新一行 返回 false 表示乐观锁冲突或数据库错误
@@ -879,7 +931,6 @@ public final class FileDatabase {
             return false;
         }
 
-        long now = System.currentTimeMillis();
         long file_version = info.file_version <= 0 ? 1L : info.file_version;
 
         if (existing_id == 0L) {
@@ -889,11 +940,7 @@ public final class FileDatabase {
             values.put("root_id", info.file_ref.getRootId());
             values.put("original_uri", info.original_uri);
             values.put("is_dir", info.is_directory ? 1 : 0);
-            values.put("file_mtime", info.file_mtime);
-            values.put("file_size", info.file_size);
-            values.put("sidecar_mtime", info.sidecar_mtime);
             values.put("file_version", file_version);
-            values.put("last_refresh_time", now);
 
             long id = database.insert("files", null, values);
             if (id < 0) {
@@ -908,11 +955,7 @@ public final class FileDatabase {
             values.put("root_id", info.file_ref.getRootId());
             values.put("original_uri", info.original_uri);
             values.put("is_dir", info.is_directory ? 1 : 0);
-            values.put("file_mtime", info.file_mtime);
-            values.put("file_size", info.file_size);
-            values.put("sidecar_mtime", info.sidecar_mtime);
             values.put("file_version", existing_version + 1);
-            values.put("last_refresh_time", now);
 
             int changed = database.update(
                     "files",
@@ -955,22 +998,7 @@ public final class FileDatabase {
         return true;
     }
 
-    // 删除 root 或子目录下的所有记录
-    private void deleteRowsUnder(SQLiteDatabase database, FileRef root) {
-
-        if (root.getRelativePath().isEmpty()) {
-            database.delete("files", "root_id = ?", new String[]{root.getRootId()});
-            return;
-        }
-
-        String prefix = root.getRelativePath() + "/";
-        database.delete(
-                "files",
-                "root_id = ? AND (rel_path = ? OR substr(rel_path, 1, length(?)) = ?)",
-                new String[]{root.getRootId(), root.getRelativePath(), prefix, prefix});
-    }
-
-    private static FileInfo readFileInfo(Cursor cursor) {
+    private FileInfo readFileInfo(Cursor cursor) {
         FileInfo info = new FileInfo();
 
         info.file_id = cursor.getLong(0);
@@ -980,12 +1008,18 @@ public final class FileDatabase {
 
         info.file_ref = new FileRef(root_id, rel_path);
         info.original_uri = cursor.isNull(3) ? null : cursor.getString(3);
-        info.file_mtime = cursor.isNull(4) ? 0L : cursor.getLong(4);
-        info.file_size = cursor.isNull(5) ? 0L : cursor.getLong(5);
-        info.sidecar_mtime = cursor.isNull(6) ? 0L : cursor.getLong(6);
-        info.file_version = cursor.isNull(7) ? 0L : cursor.getLong(7);
-        info.last_refresh_time = cursor.isNull(8) ? 0L : cursor.getLong(8);
-        info.is_directory = !cursor.isNull(9) && cursor.getInt(9) != 0;
+        info.file_version = cursor.isNull(4) ? 0L : cursor.getLong(4);
+        info.is_directory = !cursor.isNull(5) && cursor.getInt(5) != 0;
+
+        // mtime / size 不在库里：查出来的每一行都按磁盘现取一次
+        // （只有列表 / 搜索 / 单条查询会走到这里 扫描入库用的是 buildInfo）
+        if (info.file_ref != null) {
+            info.file_mtime = storage.lastModified(info.file_ref);
+
+            if (!info.is_directory) {
+                info.file_size = storage.size(info.file_ref);
+            }
+        }
 
         return info;
     }
