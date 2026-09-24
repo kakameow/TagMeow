@@ -25,7 +25,8 @@ bool TagServe::addRoot(std::filesystem::path root_path_utf8)
         return tag_file_.extractTags(p);
     };
 
-    if (!db_.updateDirectory(root_path_utf8, extractor))
+    // 新根只追加写入 不清库（数据库只作磁盘缓存）
+    if (!db_.insertDirectory(root_path_utf8, extractor))
     {
         error_string_ = "Failed to update database for root: " + db_.getLastError();
         return false;
@@ -62,32 +63,26 @@ bool TagServe::reLoadRoot(std::vector<std::filesystem::path> root_list_utf8)
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    for (const auto &old_root : root_list_)
-    {
-        if (!db_.removeDirectory(old_root))
-        {
-            error_string_ = "Failed to remove old root data: " + db_.getLastError();
-            return false;
-        }
-    }
-
     root_list_ = std::move(root_list_utf8);
     auto extractor = [this](const std::filesystem::path &p)
     {
         return tag_file_.extractTags(p);
     };
 
+    if (!db_.clearAll())
+    {
+        error_string_ = "Failed to clear database: " + db_.getLastError();
+        return false;
+    }
+
     size_t err = 0;
     for (const auto &dir : root_list_)
     {
-        if (!db_.updateDirectory(dir, extractor))
+        if (!db_.insertDirectory(dir, extractor))
         {
             err++;
         }
     }
-
-    db_.clearRepeat();
-    db_.cleanupInvalid();
 
     if (err > 0)
     {
@@ -623,13 +618,11 @@ bool TagServe::updateRoots()
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    for (const auto &old_root : root_list_)
+    // 数据库只作缓存：直接清空记录后按磁盘重扫（不再逐个 removeDirectory）
+    if (!db_.clearAll())
     {
-        if (!db_.removeDirectory(old_root))
-        {
-            error_string_ = "Failed to remove old root data: " + db_.getLastError();
-            return false;
-        }
+        error_string_ = "Failed to clear database: " + db_.getLastError();
+        return false;
     }
 
     auto extractor = [this](const std::filesystem::path &p)
@@ -640,14 +633,11 @@ bool TagServe::updateRoots()
     size_t err = 0;
     for (const auto &dir : root_list_)
     {
-        if (!db_.updateDirectory(dir, extractor))
+        if (!db_.insertDirectory(dir, extractor))
         {
             err++;
         }
     }
-
-    db_.clearRepeat();
-    db_.cleanupInvalid();
 
     if (err > 0)
     {
@@ -675,18 +665,11 @@ bool TagServe::syncFileToDBNoLock(const std::filesystem::path &file_path_utf8)
     }
 
     std::error_code ec;
-    auto ftime = std::filesystem::last_write_time(file_path_utf8, ec);
-    auto size = std::filesystem::is_directory(file_path_utf8) ? 0 : std::filesystem::file_size(file_path_utf8, ec);
-
-    if (ec)
+    if (!std::filesystem::exists(file_path_utf8, ec))
     {
-        error_string_ = "[warning] Failed to read file metadata: " + ec.message();
+        error_string_ = "[warning] File does not exist: " + file_path_utf8.u8string();
         return false;
     }
-
-    auto file_now = std::filesystem::file_time_type::clock::now();
-    auto sys_time = std::chrono::system_clock::now() + std::chrono::duration_cast<std::chrono::system_clock::duration>(ftime - file_now);
-    auto file_time = std::chrono::duration_cast<std::chrono::seconds>(sys_time.time_since_epoch()).count();
     auto tags = tag_file_.extractTags(file_path_utf8);
     std::string rel_path;
     std::string best_root_str;
@@ -706,31 +689,12 @@ bool TagServe::syncFileToDBNoLock(const std::filesystem::path &file_path_utf8)
         }
     }
 
-    int64_t sidecar_mtime = 0;
-    if (tag_file_.getDefaultMode() == TagFileManager::StoreMode::Sidecar)
-    {
-        auto sidecar_path = TagFileManager::buildSidecarPath(file_path_utf8);
-        if (std::filesystem::exists(sidecar_path))
-        {
-            auto sc_time = std::filesystem::last_write_time(sidecar_path, ec);
-            if (!ec)
-            {
-                auto sc_now = std::filesystem::file_time_type::clock::now();
-                auto sc_sys_time = std::chrono::system_clock::now() + std::chrono::duration_cast<std::chrono::system_clock::duration>(sc_time - sc_now);
-                sidecar_mtime = std::chrono::duration_cast<std::chrono::seconds>(sc_sys_time.time_since_epoch()).count();
-            }
-        }
-    }
 
     table::FileInfo info;
     info.path_ = file_path_utf8.generic_u8string();
     info.rel_path_ = rel_path;
-    info.file_mtime_ = file_time;
-    info.file_size_ = static_cast<int64_t>(size);
-    info.sidecar_mtime_ = sidecar_mtime;
     info.tags_ = tags;
     info.file_version_ = 1;
-    info.last_refresh_time_ = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
     if (!db_.updateFile(info))
     {
@@ -742,7 +706,7 @@ bool TagServe::syncFileToDBNoLock(const std::filesystem::path &file_path_utf8)
     return true;
 }
 
-// 内部无锁版本: 用当前 root_list_ 重建数据库索引(updateDirectory 会先删同前缀旧行再重扫)
+// 内部无锁版本: 用当前 root_list_ 重建数据库索引(先清空记录 再按磁盘重扫)
 bool TagServe::rebuildRootsNoLock()
 {
     auto extractor = [this](const std::filesystem::path &p)
@@ -750,17 +714,20 @@ bool TagServe::rebuildRootsNoLock()
         return tag_file_.extractTags(p);
     };
 
+    if (!db_.clearAll())
+    {
+        error_string_ = "Failed to clear database: " + db_.getLastError();
+        return false;
+    }
+
     size_t err = 0;
     for (const auto &dir : root_list_)
     {
-        if (!db_.updateDirectory(dir, extractor))
+        if (!db_.insertDirectory(dir, extractor))
         {
             err++;
         }
     }
-
-    db_.clearRepeat();
-    db_.cleanupInvalid();
 
     if (err > 0)
     {
