@@ -1,11 +1,11 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 
-#include "module_1/directory_manager.h"
-#include "module_1/language_manager.h"
-#include "module_2/tag_serve.h"
-#include "module_3/sync_server.h"
-#include "module_3/sync_client.h"
+#include "directory_manager.h"
+#include "language_manager.h"
+#include "tag_serve.h"
+#include "sync_server.h"
+#include "sync_client.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -830,9 +830,6 @@ int main(int argc, char const *argv[])
                             std::cout << "file_id_: " << file_info.file_id_ << std::endl;
                             std::cout << "path_: " << file_info.path_ << std::endl;
                             std::cout << "rel_path_: " << file_info.rel_path_ << std::endl;
-                            std::cout << "file_mtime_: " << file_info.file_mtime_ << std::endl;
-                            std::cout << "file_size_: " << file_info.file_size_ << std::endl;
-                            std::cout << "sidecar_mtime_: " << file_info.sidecar_mtime_ << std::endl;
 
                             std::cout << "tags: ";
                             for (auto tag : file_info.tags_)
@@ -842,7 +839,6 @@ int main(int argc, char const *argv[])
                             std::cout << "\n";
 
                             std::cout << "file_version_: " << file_info.file_version_ << std::endl;
-                            std::cout << "last_refresh_time_: " << file_info.last_refresh_time_ << std::endl;
                         }
                         else
                         {
@@ -1105,7 +1101,7 @@ int main(int argc, char const *argv[])
                 }
                 else
                 {
-                    //std::cout << s_client.getLastError() << std::endl;
+                    std::cout << s_client.getLastError() << std::endl;
                 }
             };
 
