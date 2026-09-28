@@ -2,8 +2,11 @@
 #define BRIDGE_H
 
 #include <QObject>
+#include <QEvent>
 #include <QVariantList>
 #include <memory>
+#include <string>
+#include <unordered_map>
 
 #include "directory_manager.h"
 #include "language_manager.h"
@@ -12,6 +15,7 @@
 #include "sync_client.h"
 #include "transferdata.h"
 #include "config_loader.h"
+#include "log.h"
 
 // 前端桥接：接收 QML 信号 -> 调用 TransferData 处理 -> 按返回值刷新 Main.qml 控件
 class Bridge : public QObject
@@ -89,6 +93,10 @@ private slots:
     void onServerTaskDone(const QString &name, int fileCount, qulonglong byteCount);
     void onClientTaskDone(const QString &name, int fileCount, qulonglong byteCount);
 
+protected:
+    // 截获鼠标/键盘输入：不消费事件 事件处理完后收集各类 error_string_ 写入日志
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     void pushFileList(); // path_tags_ -> FileContainer.fileList
     void pushDirList();  // path_list_  -> DirContainer.dirList
@@ -97,6 +105,8 @@ private:
     void pushServerQueue(); // s_server_->getTaskQueue() -> syncWindow.serverQueue
     void pushServerList();  // s_client_->getServers()  -> syncWindow.serverList
     void setStatusLabel(const char *name, const QString &text); // 写入 gray 状态标签
+    // 最近一次操作结果（"[tip] ..." / "[error] ..." 英文说明）
+    std::string getLastError() const;
     // 进入目录浏览（列一层 + 刷新 FileContainer）
     void enterDir(const QString &path);
     // 原双击行为：目录用资源管理器打开 文件用 explorer /select 定位
@@ -127,6 +137,15 @@ private:
     QObject *includeContainer_ = nullptr;
     QObject *excludeContainer_ = nullptr;
     QObject *onlyContainer_ = nullptr;
+
+    // 最近一次操作结果（"[tip] ..." / "[warning] ..." / "[error] ..." 英文说明）
+    mutable std::string error_string_;
+    // 日志对象（Bridge 自己持有 生命周期与 Bridge 一致）
+    Log log_;
+    // 收集各类的 error_string_ 写入日志（一条记录：[时间] 类名: error_string_）
+    void collectLogMessages();
+    // 各类上次已写入日志的消息（相同消息不重复写）
+    std::unordered_map<std::string, std::string> last_logged_;
 };
 
 #endif // BRIDGE_H

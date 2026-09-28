@@ -37,6 +37,8 @@ qt_add_executable(TagMeow
     main.cpp
     bridge.cpp
     bridge.h
+    log.cpp
+    log.h
     config_loader.cpp
     config_loader.h
     app.rc
@@ -101,6 +103,7 @@ qt_add_qml_module(TagMeow
         QML_FILES control/FileContainer.qml
         SOURCES transferdata.h transferdata.cpp
         QML_FILES control/PictureTextFieldButton.qml
+        SOURCES log.h log.cpp
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.

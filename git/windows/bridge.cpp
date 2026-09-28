@@ -1,5 +1,9 @@
 #include "bridge.h"
 
+#include "log.h"
+
+#include <QTimer>
+
 #include <set>
 #include <QDebug>
 #include <QQmlProperty>
@@ -20,7 +24,7 @@ Bridge::Bridge(QObject *parent) : QObject(parent), config_(), dm_("./config/path
 {
     if (!language_.loadLanguage(config_.default_language_))
     {
-        qWarning() << "[language] loadLanguage failed:" << QString::fromStdString(language_.getLastError());
+        error_string_ = "[warning] language load failed: " + language_.getLastError();
     }
 
     // SyncServer/SyncClient 工作线程回调 -> 主线程状态栏
@@ -32,6 +36,62 @@ Bridge::Bridge(QObject *parent) : QObject(parent), config_(), dm_("./config/path
 }
 
 Bridge::~Bridge() = default;
+
+std::string Bridge::getLastError() const
+{
+    return error_string_;
+}
+
+// 日志：截获鼠标/键盘输入 不消费事件 处理完后（下一轮事件循环）收集各类 error_string_
+// 记录格式：[时间] 类名: error_string_
+bool Bridge::eventFilter(QObject *watched, QEvent *event)
+{
+    Q_UNUSED(watched);
+
+    if (event != nullptr && (event->type() == QEvent::MouseButtonRelease || event->type() == QEvent::KeyRelease))
+    {
+        QTimer::singleShot(0, this, [this]() { collectLogMessages(); });
+    }
+    return false;
+}
+
+void Bridge::collectLogMessages()
+{
+    const auto logOne = [this](const std::string &class_name, const std::string &message)
+    {
+        if (message.empty())
+        {
+            return; // 空消息跳过
+        }
+
+        auto it = last_logged_.find(class_name);
+        if (it != last_logged_.end() && it->second == message)
+        {
+            return; // 与上次相同 不重复写
+        }
+
+        last_logged_[class_name] = message;
+        log_.write(class_name, message);
+    };
+
+    logOne("Bridge", error_string_);
+    logOne("ConfigLoader", config_.error_string_);
+    logOne("DirectoryConfigManager", dm_.getLastError());
+    logOne("LanguageManager", language_.getLastError());
+    logOne("TagServe", ts_.getLastError());
+    logOne("FileDatabase", ts_.getDBError());
+    logOne("TagLibrary", ts_.getTagError());
+    logOne("TagFileManager", ts_.getFileError());
+
+    if (s_server_)
+    {
+        logOne("SyncServer", s_server_->getLastError());
+    }
+    if (s_client_)
+    {
+        logOne("SyncClient", s_client_->getLastError());
+    }
+}
 
 QObject *Bridge::findObject(const char *name) const
 {
@@ -83,7 +143,7 @@ void Bridge::pushFileList()
         }
 
         QQmlProperty(fileContainer_, "fileList").write(list);
-        qInfo() << "[refresh] FileContainer browse" << QString::fromStdString(current) << "rows:" << list.size();
+        error_string_ = "[tip] FileContainer browse listing: " + current + " rows " + std::to_string(list.size());
         return;
     }
 
@@ -114,7 +174,7 @@ void Bridge::pushFileList()
     }
 
     QQmlProperty(fileContainer_, "fileList").write(list);
-    qInfo() << "[refresh] FileContainer fileList:" << list.size();
+    error_string_ = "[tip] FileContainer search result rows: " + std::to_string(list.size());
 }
 
 void Bridge::pushDirList()
@@ -192,12 +252,12 @@ void Bridge::doSearch()
     td_.setSearchTags(include_, exclude_, only_);
     if (td_.getSearch())
     {
-        qInfo() << "[search] ok files:" << td_.path_tags_.size();
+        error_string_ = "[tip] search ok, files: " + std::to_string(td_.path_tags_.size());
         pushFileList();
     }
     else
     {
-        qWarning() << "[search] failed";
+        error_string_ = "[error] search failed";
     }
 }
 
@@ -210,14 +270,14 @@ void Bridge::onFileTagAdded(const QString &path, const QString &tag)
 {
     if (td_.addTagToFile(path.toStdString(), tag.toStdString()))
     {
-        qInfo() << "[fileTagAdded] ok" << path << tag;
+        error_string_ = "[tip] file tag added: " + path.toStdString() + " + " + tag.toStdString();
         // 数据库同步(含 filename 模式改名)由 TagServe 完成; 这里原地重绘
         // (refreshFileTags 已把新路径顶替旧路径 -> 行顺序保持不变)
         pushFileList();
     }
     else
     {
-        qWarning() << "[fileTagAdded] failed" << path << tag;
+        error_string_ = "[error] add file tag failed: " + path.toStdString() + " + " + tag.toStdString();
     }
 }
 
@@ -225,12 +285,12 @@ void Bridge::onFileTagRemoved(const QString &path, const QString &tag)
 {
     if (td_.removeTagToFile(path.toStdString(), tag.toStdString()))
     {
-        qInfo() << "[fileTagRemoved] ok" << path << tag;
+        error_string_ = "[tip] file tag removed: " + path.toStdString() + " - " + tag.toStdString();
         pushFileList();
     }
     else
     {
-        qWarning() << "[fileTagRemoved] failed" << path << tag;
+        error_string_ = "[error] remove file tag failed: " + path.toStdString() + " - " + tag.toStdString();
     }
 }
 
@@ -242,12 +302,12 @@ void Bridge::onFileTagChanged(const QString &path, const QString &oldTag, const 
         const QString cur = QString::fromStdString(ts_.getLastFilePath().generic_u8string());
         if (td_.addTagToFile(cur.toStdString(), newTag.toStdString()))
         {
-            qInfo() << "[fileTagChanged] ok" << path << "->" << cur;
+            error_string_ = "[tip] file tag changed: " + path.toStdString() + " -> " + cur.toStdString();
             pushFileList();
             return;
         }
     }
-    qWarning() << "[fileTagChanged] failed" << path;
+    error_string_ = "[error] change file tag failed: " + path.toStdString();
 }
 
 void Bridge::onAddDirClicked()
@@ -255,12 +315,12 @@ void Bridge::onAddDirClicked()
     const QString path = textOf("dirInput");
     if (td_.addDir(path.toStdString()))
     {
-        qInfo() << "[addDir] ok" << path;
+        error_string_ = "[tip] directory added: " + path.toStdString();
         pushDirList();
     }
     else
     {
-        qWarning() << "[addDir] failed" << path;
+        error_string_ = "[error] add directory failed: " + path.toStdString();
     }
 }
 
@@ -269,12 +329,12 @@ void Bridge::onRemoveDirClicked()
     const QString path = textOf("dirInput");
     if (td_.removeDir(path.toStdString()))
     {
-        qInfo() << "[removeDir] ok" << path;
+        error_string_ = "[tip] directory removed: " + path.toStdString();
         pushDirList();
     }
     else
     {
-        qWarning() << "[removeDir] failed" << path;
+        error_string_ = "[error] remove directory failed: " + path.toStdString();
     }
 }
 
@@ -284,12 +344,12 @@ void Bridge::onAddTagClicked()
     const QString tag = textOf("tagInput");
     if (td_.addTagToList(type.toStdString(), tag.toStdString()))
     {
-        qInfo() << "[addTag] ok" << type << tag;
+        error_string_ = "[tip] tag added to library: " + type.toStdString() + " / " + tag.toStdString();
         pushTagList();
     }
     else
     {
-        qWarning() << "[addTag] failed" << type << tag;
+        error_string_ = "[error] add tag failed: " + type.toStdString() + " / " + tag.toStdString();
     }
 }
 
@@ -299,12 +359,12 @@ void Bridge::onAddTypeClicked()
     const QString color = textOf("colorInput");
     if (td_.addTypeToList(type.toStdString(), color.toStdString()))
     {
-        qInfo() << "[addType] ok" << type << color;
+        error_string_ = "[tip] type added: " + type.toStdString() + " " + color.toStdString();
         pushTagList();
     }
     else
     {
-        qWarning() << "[addType] failed" << type;
+        error_string_ = "[error] add type failed: " + type.toStdString();
     }
 }
 
@@ -317,7 +377,7 @@ void Bridge::onClearClicked()
         if (container)
         {
             QQmlProperty(container, "tagList").write(QVariantList());
-            qInfo() << "[clear] 已清空" << name;
+            error_string_ = "[tip] cleared: " + std::string(name);
         }
     }
 }
@@ -327,12 +387,12 @@ void Bridge::onRemoveTagClicked()
     const QString tag = textOf("tagInput");
     if (td_.removeTag(tag.toStdString()))
     {
-        qInfo() << "[removeTag] ok" << tag;
+        error_string_ = "[tip] tag removed from library: " + tag.toStdString();
         pushTagList();
     }
     else
     {
-        qWarning() << "[removeTag] failed" << tag;
+        error_string_ = "[error] remove tag failed: " + tag.toStdString();
     }
 }
 
@@ -341,12 +401,12 @@ void Bridge::onRemoveTypeClicked()
     const QString type = textOf("typeInput");
     if (td_.removeType(type.toStdString()))
     {
-        qInfo() << "[removeType] ok" << type;
+        error_string_ = "[tip] type removed: " + type.toStdString();
         pushTagList();
     }
     else
     {
-        qWarning() << "[removeType] failed" << type;
+        error_string_ = "[error] remove type failed: " + type.toStdString();
     }
 }
 
@@ -357,13 +417,13 @@ void Bridge::onResetTypeColorClicked()
     const QString color = textOf("colorInput");
     if (td_.setTypeColor(type.toStdString(), color.toStdString()))
     {
-        qInfo() << "[resetTypeColor] ok" << type << color;
+        error_string_ = "[tip] type color updated: " + type.toStdString() + " " + color.toStdString();
         pushTagList();
         pushFileList();
     }
     else
     {
-        qWarning() << "[resetTypeColor] failed" << type << color << ts_.getTagError();
+        error_string_ = "[error] update type color failed: " + type.toStdString() + " " + color.toStdString() + " " + ts_.getTagError();
     }
 }
 
@@ -383,11 +443,11 @@ void Bridge::enterDir(const QString &path)
     const std::string dir = path.toStdString();
     if (!td_.browseDir(dir))
     {
-        qWarning() << "[browse] 无法进入目录(不在授权目录内或不是目录):" << path;
+        error_string_ = "[warning] cannot enter directory (not inside an authorized root or not a directory): " + path.toStdString();
         return;
     }
 
-    qInfo() << "[browse] enter" << path << "rows:" << td_.browse_entries_.size();
+    error_string_ = "[tip] browse enter: " + path.toStdString() + " rows " + std::to_string(td_.browse_entries_.size());
     pushFileList();
 }
 
@@ -398,7 +458,7 @@ void Bridge::onLibraryTypeClicked(const QString &type)
     {
         QQmlProperty(input, "text").write(type);
     }
-    qInfo() << "[library] 类型行点击:" << type;
+    error_string_ = "[tip] library type row clicked: " + type.toStdString();
 }
 
 void Bridge::openInExplorer(const QString &path)
@@ -406,7 +466,7 @@ void Bridge::openInExplorer(const QString &path)
     const QFileInfo info(path);
     if (!info.exists())
     {
-        qWarning() << "[open] 路径不存在:" << path;
+        error_string_ = "[warning] path does not exist: " + path.toStdString();
         return;
     }
 
@@ -414,11 +474,11 @@ void Bridge::openInExplorer(const QString &path)
     {
         if (QDesktopServices::openUrl(QUrl::fromLocalFile(info.absoluteFilePath())))
         {
-            qInfo() << "[open] 目录 ok" << info.absoluteFilePath();
+            error_string_ = "[tip] opened directory: " + info.absoluteFilePath().toStdString();
         }
         else
         {
-            qWarning() << "[open] 打开目录失败:" << info.absoluteFilePath();
+            error_string_ = "[error] open directory failed: " + info.absoluteFilePath().toStdString();
         }
         return;
     }
@@ -428,20 +488,20 @@ void Bridge::openInExplorer(const QString &path)
     args << "/select," << QDir::toNativeSeparators(info.absoluteFilePath());
     if (QProcess::startDetached(QStringLiteral("explorer"), args))
     {
-        qInfo() << "[open] 定位文件 ok" << info.absoluteFilePath();
+        error_string_ = "[tip] selected file in explorer: " + info.absoluteFilePath().toStdString();
     }
     else
     {
-        qWarning() << "[open] 定位文件失败:" << info.absoluteFilePath();
+        error_string_ = "[error] select file in explorer failed: " + info.absoluteFilePath().toStdString();
     }
 #else
     if (QDesktopServices::openUrl(QUrl::fromLocalFile(info.absolutePath())))
     {
-        qInfo() << "[open] 所在目录 ok" << info.absolutePath();
+        error_string_ = "[tip] opened containing directory: " + info.absolutePath().toStdString();
     }
     else
     {
-        qWarning() << "[open] 打开所在目录失败:" << info.absolutePath();
+        error_string_ = "[error] open containing directory failed: " + info.absolutePath().toStdString();
     }
 #endif
 }
@@ -453,7 +513,7 @@ void Bridge::onFileDoubleClicked(const QString &path, const QString &kind)
     {
         if (path.isEmpty())
         {
-            qWarning() << "[browse] 返回上层失败: 路径为空";
+            error_string_ = "[warning] go to parent failed: empty path";
             return;
         }
         enterDir(path);
@@ -469,12 +529,12 @@ void Bridge::onFileDoubleClicked(const QString &path, const QString &kind)
     const QFileInfo info(path);
     if (!info.exists())
     {
-        qWarning() << "[open] 文件不存在:" << path;
+        error_string_ = "[warning] file does not exist: " + path.toStdString();
         return;
     }
     if (!QDesktopServices::openUrl(QUrl::fromLocalFile(info.absoluteFilePath())))
     {
-        qWarning() << "[open] 打开文件失败:" << info.absoluteFilePath();
+        error_string_ = "[error] open file failed: " + info.absoluteFilePath().toStdString();
     }
 }
 
@@ -494,19 +554,19 @@ void Bridge::onFileRightClicked(const QString &path, const QString &kind)
 // 前端刷新：DirContainer / LibraryTag（FileContainer 不刷新）
 void Bridge::onRefreshClicked()
 {
-    qInfo() << "[refresh] 开始强制刷新...";
+    error_string_ = "[tip] force refresh started";
 
     dm_.clearInvalidPath();
     dm_.saveToFile();
 
     if (!ts_.reLoadTag("./config/tag.json"))
     {
-        qWarning() << "[refresh] reLoadTag failed:" << ts_.getTagError();
+        error_string_ = "[error] refresh failed: reload tag library: " + ts_.getTagError();
     }
 
     if (!ts_.reLoadRoot(dm_.getValidDirList()))
     {
-        qWarning() << "[refresh] reLoadRoot failed:" << ts_.getDBError();
+        error_string_ = "[error] refresh failed: reload database roots: " + ts_.getDBError();
     }
 
     td_.updataDirList();
@@ -514,7 +574,7 @@ void Bridge::onRefreshClicked()
     pushDirList();
     pushTagList();
 
-    qInfo() << "[refresh] 完成";
+    error_string_ = "[tip] force refresh done";
 }
 
 void Bridge::pushConfig()
@@ -568,7 +628,7 @@ void Bridge::onFontSizeChanged()
     }
     if (size < 6 || size > 48)
     {
-        qWarning() << "[fontSize] 越界:" << size;
+        error_string_ = "[warning] font size out of range: " + std::to_string(size);
         return;
     }
     config_.font_size_ = size;
@@ -577,7 +637,7 @@ void Bridge::onFontSizeChanged()
     {
         QQmlProperty(root_, "fontSize").write(size); // 各控件 font.pixelSize: window.fontSize 绑定即时级联
     }
-    qInfo() << "[fontSize] 已应用:" << size;
+    error_string_ = "[tip] font size applied: " + std::to_string(size);
 }
 
 // 主题: 修改即生效 -> 写 config_ 保存 -> pushTheme 刷新 uiColor 与全局调色板
@@ -590,7 +650,7 @@ void Bridge::onThemeChanged(int index)
     config_.theme_ = index;
     config_.saveConfig();
     pushTheme();
-    qInfo() << "[theme] 已应用:" << index;
+    error_string_ = "[tip] theme applied: " + std::to_string(index);
 }
 
 // setWindow 确认: 读取控件 -> 保存 config.json -> 退出程序(语言/模式等重启后生效)
@@ -623,16 +683,14 @@ void Bridge::onSaveConfigClicked()
 
     if (config_.saveConfig())
     {
-        qInfo() << "[saveConfig] ok: language=" << config_.default_language_.c_str()
-                << "wait=" << config_.server_waiting_time_.count()
-                << "download=" << config_.download_path_.string().c_str();
+        error_string_ = "[tip] config saved: language " + config_.default_language_ + " wait " + std::to_string(config_.server_waiting_time_.count()) + " download " + config_.download_path_.string();
     }
     else
     {
-        qWarning() << "[saveConfig] failed:" << config_.error_string_.c_str();
+        error_string_ = "[error] save config failed: " + config_.error_string_;
     }
 
-    qInfo() << "[app] 保存配置完成, 退出程序(部分配置重启后生效)";
+    error_string_ = "[tip] config saved, application will quit (some settings apply after restart)";
     QCoreApplication::quit();
 }
 
@@ -645,7 +703,7 @@ void Bridge::onConvertModeConfirmed()
     {
         config_.tag_mode_ = to;
         config_.saveConfig();
-        qInfo() << "[convertmode] ok ->" << (to == TagFileManager::StoreMode::Filename ? "Filename" : "Sidecar");
+        error_string_ = "[tip] convert mode done -> " + std::string(to == TagFileManager::StoreMode::Filename ? "Filename" : "Sidecar");
         // 数据库重建索引已由 TagServe::convertMode 内部完成(转换会改写文件名)
         pushConfig(); // setWindow 的 TagMode 只读项同步新模式
         doSearch();   // 路径可能已变化 -> 按当前搜索条件刷新文件列表
@@ -654,7 +712,7 @@ void Bridge::onConvertModeConfirmed()
     }
     else
     {
-        qWarning() << "[convertmode] failed:" << ts_.getLastError().c_str() << "/" << ts_.getFileError().c_str();
+        error_string_ = "[error] convert mode failed: " + ts_.getLastError() + " / " + ts_.getFileError();
     }
 }
 
@@ -664,17 +722,17 @@ void Bridge::onExportFileChosen(const QString &url)
     const QString path = QUrl(url).toLocalFile();
     if (path.isEmpty())
     {
-        qWarning() << "[export] 无效路径:" << url;
+        error_string_ = "[warning] export failed: invalid path: " + url.toStdString();
         return;
     }
 
     if (td_.exportTagList(path.toStdString()))
     {
-        qInfo() << "[export] ok ->" << path;
+        error_string_ = "[tip] export done -> " + path.toStdString();
     }
     else
     {
-        qWarning() << "[export] failed ->" << path;
+        error_string_ = "[error] export failed -> " + path.toStdString();
     }
 }
 
@@ -684,19 +742,19 @@ void Bridge::onImportFileChosen(const QString &url)
     const QString path = QUrl(url).toLocalFile();
     if (path.isEmpty())
     {
-        qWarning() << "[import] 无效路径:" << url;
+        error_string_ = "[warning] import failed: invalid path: " + url.toStdString();
         return;
     }
 
     if (td_.importTagList(path.toStdString()))
     {
-        qInfo() << "[import] ok ->" << path;
+        error_string_ = "[tip] import done -> " + path.toStdString();
         pushTagList();  // 标签库变化
         pushFileList(); // 标签颜色可能变化 -> 文件行重绘
     }
     else
     {
-        qWarning() << "[import] failed ->" << path << ts_.getTagError().c_str();
+        error_string_ = "[error] import failed -> " + path.toStdString() + " " + ts_.getTagError();
     }
 }
 
@@ -933,7 +991,7 @@ void Bridge::pushTheme()
     pal.setColor(QPalette::ToolTipText, QColor(pick("textMain", "#1a202c")));
     QGuiApplication::setPalette(pal);
 
-    qInfo() << "[theme] pushTheme 索引:" << idx;
+    error_string_ = "[tip] theme pushed, index: " + std::to_string(idx);
 }
 
 void Bridge::pushLanguageList()
@@ -970,7 +1028,7 @@ void Bridge::pushServerQueue()
     QObject *w = findObject("syncWindow");
     if (!w)
     {
-        qWarning() << "[sync] syncWindow not found, serverQueue 未推送";
+        error_string_ = "[warning] syncWindow not found: server queue not pushed";
         return;
     }
     QVariantList list;
@@ -1005,12 +1063,12 @@ void Bridge::onServerStartClicked()
     });
     if (ok)
     {
-        qInfo() << "[server] start ok name =" << QString::fromStdString(name);
+        error_string_ = "[tip] server started, name: " + name;
         setStatusLabel("serverStatusLabel", uiText("status.server.start", "服务器已启动 (%1)").arg(QString::fromStdString(name)));
     }
     else
     {
-        qWarning() << "[server] start failed:" << ec.message().c_str();
+        error_string_ = "[error] server start failed: " + ec.message();
         setStatusLabel("serverStatusLabel", uiText("status.server.startFail", "启动失败: %1").arg(QString::fromStdString(ec.message())));
     }
 }
@@ -1021,12 +1079,12 @@ void Bridge::onServerStopClicked()
     s_server_->stop(ec);
     if (!ec)
     {
-        qInfo() << "[server] stop ok";
+        error_string_ = "[tip] server stopped";
         setStatusLabel("serverStatusLabel", uiText("status.server.stop", "服务器已停止"));
     }
     else
     {
-        qWarning() << "[server] stop failed:" << ec.message().c_str();
+        error_string_ = "[error] server stop failed: " + ec.message();
         setStatusLabel("serverStatusLabel", uiText("status.server.stopFail", "停止失败: %1").arg(QString::fromStdString(ec.message())));
     }
 }
@@ -1045,14 +1103,14 @@ void Bridge::onServerAddDirClicked()
     const auto abs = std::filesystem::absolute(p, ec);
     if (ec || !std::filesystem::is_directory(abs, ec) || ec)
     {
-        qWarning() << "[server] add failed(无效目录):" << dir;
+        error_string_ = "[warning] server enqueue failed: invalid directory: " + dir.toStdString();
         setStatusLabel("serverStatusLabel", uiText("status.server.invalidDir", "无效目录: %1").arg(dir));
         return;
     }
 
     const auto norm = abs.lexically_normal();
     s_server_->enqueueDirectory(norm);
-    qInfo() << "[server] add" << QString::fromStdString(norm.generic_u8string());
+    error_string_ = "[tip] server enqueued: " + norm.generic_u8string();
     setStatusLabel("serverStatusLabel", uiText("status.server.enqueued", "已入队: %1").arg(QString::fromStdString(norm.generic_u8string())));
     pushServerQueue();
 }
@@ -1063,18 +1121,18 @@ void Bridge::onServerDisconnectClicked()
     s_server_->disconnect(ec);
     if (!ec)
     {
-        qInfo() << "[server] disconnect ok";
+        error_string_ = "[tip] server disconnected";
         setStatusLabel("serverStatusLabel", uiText("status.server.disconnected", "已断开连接设备"));
     }
     else
     {
-        qWarning() << "[server] disconnect failed:" << ec.message().c_str();
+        error_string_ = "[error] server disconnect failed: " + ec.message();
     }
 }
 
 void Bridge::onServerTipArrived(const QString &msg)
 {
-    qInfo() << msg;
+    error_string_ = "[tip] " + msg.toStdString();
     setStatusLabel("serverStatusLabel", msg);
 }
 
@@ -1083,7 +1141,7 @@ void Bridge::pushServerList()
     QObject *w = findObject("syncWindow");
     if (!w)
     {
-        qWarning() << "[sync] syncWindow not found, serverList 未推送";
+        error_string_ = "[warning] syncWindow not found: server list not pushed";
         return;
     }
     QVariantList list;
@@ -1103,7 +1161,7 @@ void Bridge::onClientScanClicked()
     setStatusLabel("clientStatusLabel", uiText("status.client.scanning", "正在扫描局域网..."));
     const auto servers = s_client_->scanServers();
     pushServerList();
-    qInfo() << "[client] scan done servers:" << servers.size();
+    error_string_ = "[tip] client scan done, servers: " + std::to_string(servers.size());
     setStatusLabel("clientStatusLabel", uiText("status.client.scanDone", "扫描完成 %1 台设备").arg(static_cast<int>(servers.size())));
 }
 
@@ -1114,12 +1172,12 @@ void Bridge::onClientDownloadClicked()
     const auto servers = s_client_->getServers();
     if (index < 0 || static_cast<size_t>(index) >= servers.size())
     {
-        qWarning() << "[client] download failed: 未选中有效设备 index =" << index;
+        error_string_ = "[warning] client download failed: no valid device selected, index " + std::to_string(index);
         setStatusLabel("clientStatusLabel", uiText("status.client.noSelect", "请先扫描并选中一台设备"));
         return;
     }
     const size_t idx = static_cast<size_t>(index);
-    qInfo() << "[client] download start index =" << index << "server =" << servers[idx].name_.c_str();
+    error_string_ = "[tip] client download started, index " + std::to_string(index) + " server " + servers[idx].name_;
     setStatusLabel("clientStatusLabel", uiText("status.client.downloading", "正在下载 %1 ...").arg(QString::fromStdString(servers[idx].name_)));
     s_client_->startDownload(idx, [this](bool success, std::error_code e)
     {
@@ -1147,20 +1205,20 @@ void Bridge::onClientDownloadClicked()
 void Bridge::onClientClearClicked()
 {
     s_client_->clearDownloadRecords();
-    qInfo() << "[client] clear records";
+    error_string_ = "[tip] client download records cleared";
     setStatusLabel("clientStatusLabel", uiText("status.client.cleared", "已清除下载记录"));
 }
 
 void Bridge::onClientDisconnectClicked()
 {
     s_client_->disconnect();
-    qInfo() << "[client] disconnect";
+    error_string_ = "[tip] client disconnected";
     setStatusLabel("clientStatusLabel", uiText("status.client.disconnected", "已断开连接"));
 }
 
 void Bridge::onClientTipArrived(const QString &msg)
 {
-    qInfo() << msg;
+    error_string_ = "[tip] " + msg.toStdString();
     setStatusLabel("clientStatusLabel", msg);
 }
 
@@ -1171,7 +1229,7 @@ void Bridge::onServerTaskDone(const QString &name, int fileCount, qulonglong byt
                             .arg(name)
                             .arg(fileCount)
                             .arg(formatBytes(byteCount));
-    qInfo() << msg;
+    error_string_ = "[tip] " + msg.toStdString();
     setStatusLabel("serverStatusLabel", msg);
 }
 
@@ -1181,7 +1239,7 @@ void Bridge::onClientTaskDone(const QString &name, int fileCount, qulonglong byt
                             .arg(name)
                             .arg(fileCount)
                             .arg(formatBytes(byteCount));
-    qInfo() << msg;
+    error_string_ = "[tip] " + msg.toStdString();
     setStatusLabel("clientStatusLabel", msg);
 }
 
@@ -1198,7 +1256,7 @@ void Bridge::onSyncWindowOpened()
             emit syncServerTaskDone(QString::fromStdString(report.name_), static_cast<int>(report.file_count_),
                                     static_cast<qulonglong>(report.byte_count_));
         });
-        qInfo() << "[sync] SyncServer 已创建(首次打开同步窗口)";
+        error_string_ = "[tip] SyncServer created (first open of the sync window)";
     }
     if (!s_client_)
     {
@@ -1209,7 +1267,7 @@ void Bridge::onSyncWindowOpened()
             emit syncClientTaskDone(QString::fromStdString(report.name_), static_cast<int>(report.file_count_),
                                     static_cast<qulonglong>(report.byte_count_));
         });
-        qInfo() << "[sync] SyncClient 已创建(首次打开同步窗口)";
+        error_string_ = "[tip] SyncClient created (first open of the sync window)";
         // 客户端状态栏默认提示：下载记录缓存只增不减 需要重下时由用户手动清理
         setStatusLabel("clientStatusLabel", uiText("status.client.cacheHint", "（如果没有失败重下的需要 请点击 [清除下载记录缓存]）"));
     }
@@ -1218,6 +1276,8 @@ void Bridge::onSyncWindowOpened()
 void Bridge::bindTo(QObject *root)
 {
     root_ = root;
+    // 输入流截获：鼠标/键盘事件处理完后收集各类 error_string_ 写日志
+    qApp->installEventFilter(this);
     fileContainer_ = findObject("fileContainer");
     dirContainer_ = findObject("dirContainer");
     libraryTag_ = findObject("libraryTag");
@@ -1225,22 +1285,7 @@ void Bridge::bindTo(QObject *root)
     excludeContainer_ = findObject("excludeContainer");
     onlyContainer_ = findObject("onlyContainer");
 
-    qInfo() << "[bridge] controls found:"
-            << (fileContainer_ ? "fileContainer" : "-")
-            << (dirContainer_ ? "dirContainer" : "-")
-            << (libraryTag_ ? "libraryTag" : "-")
-            << (includeContainer_ ? "include" : "-")
-            << (excludeContainer_ ? "exclude" : "-")
-            << (onlyContainer_ ? "only" : "-")
-            << (findObject("searchButton") ? "searchButton" : "-")
-            << (findObject("addDirBtn") ? "addDirBtn" : "-")
-            << (findObject("addTagBtn") ? "addTagBtn" : "-")
-            << (findObject("addTypeBtn") ? "addTypeBtn" : "-")
-            << (findObject("removeTagBtn") ? "removeTagBtn" : "-")
-            << (findObject("removeTypeBtn") ? "removeTypeBtn" : "-")
-            << (findObject("removeDirBtn") ? "removeDirBtn" : "-")
-            << (findObject("resetTypeColor") ? "resetTypeColor" : "-")
-            << (findObject("pathInput") ? "pathInput" : "-");
+    error_string_ = "[tip] bridge controls bound: fileContainer " + std::string(fileContainer_ ? "ok" : "-") + " dirContainer " + std::string(dirContainer_ ? "ok" : "-") + " libraryTag " + std::string(libraryTag_ ? "ok" : "-") + " searchButton " + std::string(findObject("searchButton") ? "ok" : "-");
 
     // 搜索按钮
     if (QObject *btn = findObject("searchButton"))
