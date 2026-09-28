@@ -505,13 +505,26 @@ bool FileDatabase::removeDirectory(const std::filesystem::path &dir_path_utf8)
         return false;
     }
 
-    std::string prefix = dir_path_utf8.generic_u8string();
+    std::string dir_str = dir_path_utf8.generic_u8string();
+    while (dir_str.size() > 1 && dir_str.back() == '/')
+    {
+        dir_str.pop_back();
+    }
+
+    if (dir_str.size() < 2 || dir_str.back() == ':')
+    {
+        error_string_ = "[warning] Refuse to remove database entries of unsafe path: " + dir_str;
+        return false;
+    }
+
+    std::string prefix = dir_str;
     if (!prefix.empty() && prefix.back() != '/')
     {
         prefix += '/';
     }
 
-    const char *sql = "DELETE FROM files WHERE substr(path, 1, length(?)) = ?;";
+    const char *sql =
+        "DELETE FROM files WHERE lower(substr(path, 1, length(?))) = lower(?) OR lower(path) = lower(?);";
     sqlite3_stmt *stmt = nullptr;
 
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK)
@@ -522,6 +535,7 @@ bool FileDatabase::removeDirectory(const std::filesystem::path &dir_path_utf8)
 
     sqlite3_bind_text(stmt, 1, prefix.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, prefix.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, dir_str.c_str(), -1, SQLITE_STATIC);
     if (sqlite3_step(stmt) != SQLITE_DONE)
     {
         error_string_ = sqlite3_errmsg(db_);
@@ -530,7 +544,9 @@ bool FileDatabase::removeDirectory(const std::filesystem::path &dir_path_utf8)
     }
 
     sqlite3_finalize(stmt);
-    error_string_.clear();
+
+    const int removed = sqlite3_changes(db_);
+    error_string_ = "[tip] removed " + std::to_string(removed) + " database entry(ies) of " + dir_str;
     return true;
 }
 

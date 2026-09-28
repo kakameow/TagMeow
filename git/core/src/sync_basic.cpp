@@ -16,7 +16,7 @@ std::error_code lastSocketError()
 #endif
 }
 
-// SO_RCVTIMEO 到期类错误（超时无数据）判定：Windows 为 WSAETIMEDOUT，POSIX 为 EAGAIN/EWOULDBLOCK
+// SO_RCVTIMEO 到期类错误（超时无数据）判定：Windows 为 WSAETIMEDOUT POSIX 为 EAGAIN/EWOULDBLOCK
 bool isQuietTimeout(const std::error_code &ec)
 {
     if (!ec)
@@ -153,7 +153,7 @@ std::vector<ServerInfo> BroadcastReceiver::scan(std::error_code &ec, std::size_t
             {
                 break;
             }
-            // 单个报文超长被截断：跳过继续收，不中断整个扫描
+            // 单个报文超长被截断：跳过继续收 不中断整个扫描
             if (recv_ec == asio::error::message_size)
             {
                 continue;
@@ -215,8 +215,8 @@ bool BroadcastReceiver::parseUDPMessage(const std::string &data, UDPMessage &out
     }
 }
 
-// Windows 上 SO_RCVTIMEO 到期返回 WSAETIMEDOUT(10060)；
-// Linux 上 recvfrom 超时返回 EAGAIN/EWOULDBLOCK（部分平台返回 ETIMEDOUT）。
+// Windows 上 SO_RCVTIMEO 到期返回 WSAETIMEDOUT(10060)
+// Linux 上 recvfrom 超时返回 EAGAIN/EWOULDBLOCK（部分平台返回 ETIMEDOUT）
 bool BroadcastReceiver::isReceiveQuietEnd(const std::error_code &ec)
 {
     if (!ec)

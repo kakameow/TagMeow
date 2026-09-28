@@ -1,5 +1,36 @@
 #include "tag_serve.h"
 
+#include <algorithm>
+#include <cctype>
+
+namespace
+{
+    // 与 DirectoryConfigManager::formatPath 同一套规则（绝对化 + 正斜杠 + 去尾斜杠）Windows 下再统一小写
+    // 删目录时用它匹配根列表 否则 "C:\hui\x" / "C:/hui/x/" / 盘符大小写 这类写法一变就匹配不上
+    std::string normalizePathKey(const std::filesystem::path &path)
+    {
+        std::error_code ec;
+        auto abs_path = std::filesystem::absolute(path, ec);
+        std::string str = (ec ? path : abs_path).lexically_normal().u8string();
+        for (char &c : str)
+        {
+            if (c == '\\')
+            {
+                c = '/';
+            }
+        }
+        while (str.size() > 1 && str.back() == '/')
+        {
+            str.pop_back();
+        }
+#ifdef _WIN32
+        std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c)
+                       { return static_cast<char>(std::tolower(c)); });
+#endif
+        return str;
+    }
+}
+
 TagServe::TagServe(const std::vector<std::filesystem::path> &root_list_utf8, TagFileManager::StoreMode default_mode, std::filesystem::path tag_path_utf8, std::filesystem::path db_path_utf8)
     : root_list_(root_list_utf8), tag_file_(default_mode), tag_list_(tag_path_utf8), db_(db_path_utf8)
 {
@@ -41,21 +72,29 @@ bool TagServe::removeRoot(std::filesystem::path root_path_utf8)
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    auto it = std::find(root_list_.begin(), root_list_.end(), root_path_utf8);
+    const std::string target_key = normalizePathKey(root_path_utf8);
+    auto it = std::find_if(root_list_.begin(), root_list_.end(), [&target_key](const std::filesystem::path &root){ return normalizePathKey(root) == target_key; });
+    const bool db_ok = db_.removeDirectory(std::filesystem::u8path(target_key));
+    const std::string db_msg = db_.getLastError();
+
+    if (it != root_list_.end())
+    {
+        root_list_.erase(it);
+    }
+
+    if (!db_ok)
+    {
+        error_string_ = "Failed to remove directory from database: " + db_msg;
+        return false;
+    }
+
     if (it == root_list_.end())
     {
-        error_string_ = "[warning] Root not found: " + root_path_utf8.u8string();
-        return false;
+        error_string_ = db_msg + " [warning] Root not found in root list: " + root_path_utf8.u8string();
+        return true;
     }
 
-    if (!db_.removeDirectory(root_path_utf8))
-    {
-        error_string_ = "Failed to remove directory from database: " + db_.getLastError();
-        return false;
-    }
-
-    root_list_.erase(it);
-    error_string_.clear();
+    error_string_ = db_msg;
     return true;
 }
 
