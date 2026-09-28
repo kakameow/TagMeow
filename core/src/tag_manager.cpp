@@ -862,7 +862,7 @@ std::vector<std::string> TagFileManager::extractTags(const std::filesystem::path
 
 // 默认模式读取: 当前模式读不到标签时回退另一模式(兜底)
 // 场景: Filename 模式读取时文件尚未写入标签块但存在 sidecar; 或 Sidecar 模式读取时
-//       文件是历史 Filename 命名(名字里带标签)。显式传 mode 的重载保持严格不兜底。
+//       文件是历史 Filename 命名(名字里带标签)显式传 mode 的重载保持严格不兜底
 std::vector<std::string> TagFileManager::extractTags(const std::filesystem::path &file_path_utf8) const
 {
     std::vector<std::string> tags = extractTags(file_path_utf8, default_mode_);

@@ -407,7 +407,7 @@ bool SyncServer::sendDirectory(const std::filesystem::path &dir, std::error_code
             return false;
         }
 
-        // 计算相对父目录（UTF-8，'/' 分隔）：以入队目录自身名字为首段
+        // 计算相对父目录（UTF-8 '/' 分隔）：以入队目录自身名字为首段
         // 避免多个入队目录下同名文件在客户端相互覆盖（根目录文件 = 入队目录名）
         std::string parent_dir = dir.filename().u8string();
         {
