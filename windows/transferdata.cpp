@@ -323,7 +323,8 @@ bool TransferData::addDir(const std::string &path)
         ts_->addRoot(dm_->getLastValidDir()); // 用规范化后的有效路径同步数据库索引
     }
     refreshDirList();
-    return true;
+
+    return dm_->saveToFile();
 }
 
 bool TransferData::removeDir(const std::string &path)
@@ -342,7 +343,8 @@ bool TransferData::removeDir(const std::string &path)
         ts_->removeRoot(p);
     }
     refreshDirList();
-    return true;
+
+    return dm_->saveToFile();
 }
 
 bool TransferData::addTagToList(const std::string &type, const std::string &tag)

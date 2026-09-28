@@ -661,6 +661,7 @@ ApplicationWindow {
                 // 实时显示下方文件列表的文件数量
                 dataText: fileContainer.fileCount
                 fontSize: window.fontSize
+                itemWidth: 36
             }
 
             DataDisplayLabel {
@@ -672,6 +673,7 @@ ApplicationWindow {
                 // 实时显示下方标签库的标签总数
                 dataText: libraryTag.totalTagCount
                 fontSize: window.fontSize
+                itemWidth: 32
             }
         }
 
