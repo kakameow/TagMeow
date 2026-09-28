@@ -290,8 +290,8 @@ bool SyncClient::syncConnect(const ServerInfo &server, std::error_code &ec)
 
     auto conn = std::make_unique<TcpConnection>(std::move(sock));
     std::error_code to_ec;
-    // 发送超时 30s 有界；接收超时 500ms 作为轮询粒度：
-    // 空闲（服务器空队列等待）由 readInterruptible 继续等待 不报错；interrupt() 可在 ≤500ms 内打断
+    // 发送超时 30s 有界 接收超时 500ms 作为轮询粒度：
+    // 空闲（服务器空队列等待）由 readInterruptible 继续等待 不报错 interrupt() 可在 ≤500ms 内打断
     conn->setTimeouts(30000, 500, to_ec);
     conn_ = std::move(conn);
     return true;
@@ -653,7 +653,7 @@ bool SyncClient::connectWithTimeout(asio::ip::tcp::socket &sock, const asio::ip:
         else
         {
 #ifdef _WIN32
-            // Windows 上 select 失败不设置 errno，需用 WSAGetLastError
+            // Windows 上 select 失败不设置 errno 需用 WSAGetLastError
             ec = std::error_code(WSAGetLastError(), std::system_category());
 #else
             ec = std::error_code(errno, std::generic_category());
@@ -662,7 +662,7 @@ bool SyncClient::connectWithTimeout(asio::ip::tcp::socket &sock, const asio::ip:
         return false;
     }
 
-    // 连接结果：select 可写不代表成功，需读 SO_ERROR
+    // 连接结果：select 可写不代表成功 需读 SO_ERROR
     int so_error = 0;
 #ifdef _WIN32
     int opt_len = sizeof(so_error);
@@ -674,7 +674,7 @@ bool SyncClient::connectWithTimeout(asio::ip::tcp::socket &sock, const asio::ip:
     if (so_error != 0)
     {
 #ifdef _WIN32
-        // Windows 的 SO_ERROR 返回 WSA 错误码（100xx），需用系统错误类别
+        // Windows 的 SO_ERROR 返回 WSA 错误码（100xx）需用系统错误类别
         ec = std::error_code(so_error, std::system_category());
 #else
         ec = std::error_code(so_error, std::generic_category());
