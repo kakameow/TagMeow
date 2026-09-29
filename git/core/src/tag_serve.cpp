@@ -88,6 +88,14 @@ bool TagServe::removeRoot(std::filesystem::path root_path_utf8)
         return false;
     }
 
+    // 库是"当前根集合"的镜像：删掉一个根后按剩下的根重建
+    // 否则库里可能只剩本次会话添加过的目录 删掉它之后搜索会整体返回空（要再添加一个目录才恢复）
+    if (!rebuildRootsNoLock())
+    {
+        error_string_ = "Failed to rebuild database for remaining roots: " + db_.getLastError();
+        return false;
+    }
+
     if (it == root_list_.end())
     {
         error_string_ = db_msg + " [warning] Root not found in root list: " + root_path_utf8.u8string();
