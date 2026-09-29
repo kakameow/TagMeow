@@ -84,7 +84,7 @@ public final class TagServe {
                 return false;
             }
 
-            // 配置必须真的落盘：以前这里忽略返回值，配置写失败也算成功，
+            // 配置必须真的落盘：以前这里忽略返回值 配置写失败也算成功
             // 结果重启（或下一次 reload）之后目录就凭空消失了
             if (!directory_manager.saveToFile()) {
                 file_database.removeDirectory(root);
@@ -100,6 +100,9 @@ public final class TagServe {
     }
 
     // 删除指定管理根目录
+    //
+    // 顺序：先改配置并落盘 落盘成功之后再删库
+    // 数据库只是磁盘的缓存 配置才是准的 反过来的话落盘失败就成了半状态（内存删了 文件还在）
     public boolean removeRoot(Uri tree_uri) {
         Objects.requireNonNull(tree_uri);
 
@@ -108,27 +111,39 @@ public final class TagServe {
             DirectoryConfigManager.Directory directory = directory_manager.getDirectory(root_id);
 
             if (directory == null) {
-                error_string = "[warning] Root not found: " + tree_uri;
-                return false;
-            }
+                // 配置里已经没有它了 但库里可能还留着记录：照样清一遍再报未找到
+                boolean cleaned = file_database.removeDirectory(new FileRef(root_id, ""));
+                String detail = cleaned ? " " + file_database.getLastError() : "";
 
-            FileRef root = new FileRef(directory.getId(), "");
-
-            if (!file_database.removeDirectory(root)) {
-                error_string = "Failed to remove directory from database: " + file_database.getLastError();
+                error_string = "[warning] Root not found: " + tree_uri + detail;
                 return false;
             }
 
             directory_manager.removeDirectory(root_id);
 
             if (!directory_manager.saveToFile()) {
+                // 回滚：配置没落盘 目录仍应留在管理列表里（不留半状态）
+                directory_manager.addDirectory(directory.getUri());
+
                 error_string = "Failed to save directory config: " + directory_manager.getLastError();
                 return false;
             }
 
+            FileRef root = new FileRef(directory.getId(), "");
+            boolean cleaned = file_database.removeDirectory(root);
+            String detail = file_database.getLastError();
+
             storage.removeRoot(root_id);
 
-            error_string = "";
+            if (!cleaned) {
+                // 库没清干净只是残留：下次刷新或下次启动的 purgeForeignRoots 会自动清掉
+                // 配置已经落盘 这个根是真的删掉了 所以照样算成功
+                error_string = "[warning] removed the root from config, but its database entries are still there: "
+                        + detail;
+                return true;
+            }
+
+            error_string = detail;
             return true;
         }
     }
@@ -573,7 +588,7 @@ public final class TagServe {
     }
 
     // 清掉不在当前配置里的索引行（启动 / 切换存储方式时调用）
-    // 保留「授权丢了」的目录的行：它们还在配置里，重新授权之后还能用
+    // 保留「授权丢了」的目录的行：它们还在配置里 重新授权之后还能用
     public boolean purgeForeignRoots() {
         synchronized (lock) {
             List<String> keep = new ArrayList<>();

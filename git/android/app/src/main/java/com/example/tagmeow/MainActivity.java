@@ -200,7 +200,7 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    // ---- 同步页（同步标签页）状态 ----
+    //  同步页（同步标签页）状态 
 
     // 同步页里的控件
     private TextView tv_sync_status;
@@ -501,6 +501,11 @@ public class MainActivity extends AppCompatActivity {
         // 界面只认具体语言代码
         language_code = Lang.current();
 
+        // 日志：<外部存储>/TagMeow/log.txt（默认下载目录的同级）
+        // 这里尽早打开：启动阶段出的问题也要留下记录
+        AppLog.init(appLogFile());
+        AppLog.write("MainActivity", "app start | log: " + AppLog.path());
+
         bindViews();
         buildNav();
 
@@ -567,6 +572,7 @@ public class MainActivity extends AppCompatActivity {
         // 只有真的退出应用才释放套接字与工作线程（等价 Windows 端的进程退出）
         if (isFinishing()) {
             SyncEngine.closeAll();
+            AppLog.close();
         }
     }
 
@@ -797,6 +803,9 @@ public class MainActivity extends AppCompatActivity {
                 tv_stat_tags.setText(Lang.get("stat.tags_prefix") + tagCount);
                 status_text = info;
                 renderSettings();
+
+                // 每次重画顺手把各个类的错误信息收进日志（同一条消息只写一次）
+                collectLogMessages();
 
                 if (!search_mode) {
                     current_directory = target;
@@ -2045,6 +2054,9 @@ public class MainActivity extends AppCompatActivity {
                 toast(Lang.get("storage.perm_denied"));
             }
         }
+
+        // 回到前台就把各个类的错误信息收一遍（等价 Windows 端每次输入事件后收一次）
+        collectLogMessages();
 
         // 从系统分享面板回来：问一下要不要把刚生成的压缩包删掉（删除 = 清空压缩包目录）
         File pending_zip = pending_export_zip;
@@ -3329,7 +3341,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ---------- 分享端 ----------
+    // 分享端 
 
     private void showSyncShareOverlay() {
         openSyncShareOverlay(null);
@@ -3649,7 +3661,7 @@ public class MainActivity extends AppCompatActivity {
         return String.format(Locale.getDefault(), "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0));
     }
 
-    // ---------- 下载端 ----------
+    //  下载端 
 
     private void showSyncDownloadOverlay() {
         openSyncDownloadOverlay();
@@ -4377,7 +4389,53 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    // ---------- 其他方式分享（系统分享面板） ----------
+    // 日志
+    // 日志文件：默认下载目录的同级（<外部存储>/TagMeow/log.txt）
+    // 没有「所有文件访问」权限时退回应用自己的目录（Android/data/<包名>/files/log.txt）
+    private File appLogFile() {
+        File shared_dir = new File(Environment.getExternalStorageDirectory(), "TagMeow");
+        File shared = new File(shared_dir, "log.txt");
+
+        if (hasAllFilesAccess() && (shared_dir.isDirectory() || shared_dir.mkdirs())) {
+            return shared;
+        }
+
+        File external = getExternalFilesDir(null);
+
+        return external != null ? new File(external, "log.txt") : new File(getFilesDir(), "log.txt");
+    }
+
+    // 把各个类的 lastError 收一遍写进日志（对应 Windows 端 Bridge::collectLogMessages）
+    // 每个类同一条消息只会写一次 所以每步操作后都收一遍也不会刷屏
+    private void collectLogMessages() {
+        TagServe current = serve;
+
+        AppLog.write("MainActivity", status_text);
+        AppLog.write("AppLog", AppLog.getLastError());
+        AppLog.write("Lang", Lang.lastError());
+
+        if (storage != null) {
+            AppLog.write("StorageAccess", storage.getLastError());
+        }
+
+        if (current != null) {
+            AppLog.write("TagServe", current.getLastError());
+            AppLog.write("FileDatabase", current.getFileDatabase().getLastError());
+            AppLog.write("TagLibrary", current.getTagLibrary().getLastError());
+            AppLog.write("TagFileManager", current.getTagFileManager().getLastError());
+            AppLog.write("DirectoryConfigManager", current.getDirectoryConfigManager().getLastError());
+        }
+
+        if (SyncEngine.hasServer()) {
+            AppLog.write("SyncServer", SyncEngine.server().getLastError());
+        }
+
+        if (SyncEngine.hasClient()) {
+            AppLog.write("SyncClient", SyncEngine.client().getLastError());
+        }
+    }
+
+    // 其他方式分享（系统分享面板）
 
     // 压缩包存放目录：程序内部目录，分享完可以一键全部删掉
     // getExternalFilesDir 拿不到（外置存储没挂载）就退回应用私有目录，两条路都在 FileProvider 覆盖范围内
@@ -4618,6 +4676,10 @@ public class MainActivity extends AppCompatActivity {
     private void toast(final String message) {
         // 提示也写一份到 logcat：出问题时能直接看到失败原因
         Log.d(TAG, message);
+
+        // 提示同时落日志文件（对应 Windows 端把每次操作的结果收进日志）
+        AppLog.write("MainActivity", message);
+        collectLogMessages();
 
         runOnUiThread(() -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show());
     }

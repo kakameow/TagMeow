@@ -491,6 +491,7 @@ public final class FileDatabase {
     }
 
     // 只删除指定 root 下的数据库记录
+    // error_string 里带上删掉的条数：数据库只作磁盘的缓存 删了多少要能对上
     public boolean removeDirectory(FileRef root) {
         Objects.requireNonNull(root);
 
@@ -500,15 +501,26 @@ public final class FileDatabase {
             return false;
         }
 
+        // 护栏：root_id 不正常的一律拒绝
+        // 一次误调用（空 id / 单字符 / 根路径）就可能把整张 files 表清空
+        String root_id = root.getRootId();
+
+        if (root_id.isEmpty() || root_id.length() < 2 || "/".equals(root_id)) {
+            error_string = "[warning] Refuse to remove database entries of unsafe root: " + root_id;
+            return false;
+        }
+
+        int removed = 0;
+
         try {
             if (root.getRelativePath().isEmpty()) {
-                database.delete("files", "root_id = ?", new String[]{root.getRootId()});
+                removed = database.delete("files", "root_id = ?", new String[]{root_id});
             } else {
-                database.delete(
+                removed = database.delete(
                         "files",
                         "root_id = ? AND (rel_path = ? OR substr(rel_path, 1, length(?)) = ?)",
                         new String[]{
-                                root.getRootId(),
+                                root_id,
                                 root.getRelativePath(),
                                 root.getRelativePath() + "/",
                                 root.getRelativePath() + "/",
@@ -519,7 +531,7 @@ public final class FileDatabase {
             return false;
         }
 
-        error_string = "";
+        error_string = "[tip] removed " + removed + " database entry(ies) of " + root_id;
         return true;
     }
 
@@ -527,8 +539,8 @@ public final class FileDatabase {
     // index.db 是两种存储方式共用的：
     // - SAF 模式的 root_id 是 tree document id（比如 primary:临时）
     // - 「所有文件访问」模式的 root_id 是绝对路径（比如 /storage/emulated/0/下载）
-    // 切模式 / 删目录之后，不在当前配置里的 root 的行会一直留在库里：
-    // 首页「文件 N」虚高（实测两种模式 + 已删目录加起来 125），搜索还会串模式
+    // 切模式 / 删目录之后 不在当前配置里的 root 的行会一直留在库里：
+    // 首页「文件 N」虚高（实测两种模式 + 已删目录加起来 125） 搜索还会串模式
     // keep_root_ids：当前配置里所有目录的 id（有效的和「授权丢了」的都要留）
     public boolean purgeForeignRoots(List<String> keep_root_ids) {
         SQLiteDatabase database = db();
@@ -540,7 +552,7 @@ public final class FileDatabase {
         try {
             if (keep_root_ids == null || keep_root_ids.isEmpty()) {
                 // 配置里一个目录都没有：整张表都是残留
-                // （调用方在清空后会按需重扫，所以不会出现索引凭空为空）
+                // （调用方在清空后会按需重扫 所以不会出现索引凭空为空）
                 database.delete("files", null, null);
             } else {
                 StringBuilder placeholders = new StringBuilder();
@@ -855,7 +867,7 @@ public final class FileDatabase {
 
     // 递归收集 root 下的所有条目 返回读不出来的子目录个数
     // root 层读不出来直接抛给调用方（整次扫描失败）
-    // 子目录读不出来只跳过：有的 provider 下 Android/data 这类目录本来就列不出来，
+    // 子目录读不出来只跳过：有的 provider 下 Android/data 这类目录本来就列不出来
     // 不能因为一个子目录让整个 root 加不进来
     private int collect(FileRef directory, List<FileRef> out, boolean root_level) throws IOException {
 
