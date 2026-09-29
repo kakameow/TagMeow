@@ -76,7 +76,7 @@ TagMeow 是一个轻量的**本地文件标签管理器**，主要用途是通�
 ```text
 TagMeow/
 ├── core/      # 核心库（标签 / 数据库 / 目录 / 局域网同步）
-├── cli/       # 命令行测试入口（test.cpp）
+├── test.cpp   # 命令行测试入口（test.cpp）
 ├── android/   # Android 工程（Android Studio）
 └── windows/   # Qt Quick GUI（CMake；运行目录需 language/ 语言文件）
 ```
