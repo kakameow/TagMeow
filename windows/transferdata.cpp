@@ -318,9 +318,12 @@ bool TransferData::addDir(const std::string &path)
     {
         return false;
     }
-    if (ts_)
+    // 用规范化后的有效路径同步数据库索引
+    // 失败必须向上报：库里已有同路径时 insertDirectory 会整批回滚 静默返回就是"假成功"
+    if (ts_ && !ts_->addRoot(dm_->getLastValidDir()))
     {
-        ts_->addRoot(dm_->getLastValidDir()); // 用规范化后的有效路径同步数据库索引
+        dm_->removeDirectory(p); // 回滚：库没写进去 目录也不留在管理列表里
+        return false;
     }
     refreshDirList();
 
@@ -338,9 +341,11 @@ bool TransferData::removeDir(const std::string &path)
     {
         return false;
     }
-    if (ts_)
+    // 删库失败必须向上报（TagServe::removeRoot 内部会按剩余根重建库）
+    if (ts_ && !ts_->removeRoot(p))
     {
-        ts_->removeRoot(p);
+        dm_->addDirectory(p); // 回滚：库没删掉 目录仍应留在管理列表里
+        return false;
     }
     refreshDirList();
 
