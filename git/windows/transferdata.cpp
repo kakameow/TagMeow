@@ -322,6 +322,7 @@ bool TransferData::addDir(const std::string &path)
     // 失败必须向上报：库里已有同路径时 insertDirectory 会整批回滚 静默返回就是"假成功"
     if (ts_ && !ts_->addRoot(dm_->getLastValidDir()))
     {
+        dm_->removeDirectory(p); // 回滚：库没写进去 目录也不留在管理列表里
         return false;
     }
     refreshDirList();
@@ -343,6 +344,7 @@ bool TransferData::removeDir(const std::string &path)
     // 删库失败必须向上报（TagServe::removeRoot 内部会按剩余根重建库）
     if (ts_ && !ts_->removeRoot(p))
     {
+        dm_->addDirectory(p); // 回滚：库没删掉 目录仍应留在管理列表里
         return false;
     }
     refreshDirList();
