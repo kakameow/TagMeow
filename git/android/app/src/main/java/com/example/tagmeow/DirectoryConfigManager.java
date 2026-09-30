@@ -116,22 +116,24 @@ public class DirectoryConfigManager {
         this.config_file = Objects.requireNonNull(config_file);
         this.validator = validator;
 
-        if (!loadFromFile()) {
-            File parent = config_file.getParentFile();
-            if (parent != null && !parent.exists()) {
-                if (!parent.mkdirs()) {
-                    error_string = "[warning] Cannot create config directory: " + parent;
-                }
-            }
+        if (loadFromFile()) {
+            return;
+        }
 
-            try {
-                if (!config_file.exists()) {
-                    Files.write(config_file.toPath(), new byte[0]);
-                    error_string = "[warning] File not found";
-                }
-            } catch (IOException error) {
-                error_string = "[warning] Failed to create config file: " + error.getMessage();
-            }
+        // 加载失败(文件不存在 / 内容坏了)时把配置补成一份合法的空配置
+        File parent = config_file.getParentFile();
+
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            error_string = "[warning] Cannot create config directory: " + parent;
+            return;
+        }
+
+        boolean existed = config_file.isFile();
+
+        if (saveToFile()) {
+            error_string = existed
+                    ? "[tip] config file is broken, rewrote it as empty"
+                    : "[tip] config file not found, created it";
         }
     }
 
@@ -148,6 +150,14 @@ public class DirectoryConfigManager {
         } catch (IOException error) {
             error_string = "[warning] Cannot open config file: " + config_file;
             return false;
+        }
+
+        // 空文件当成「还没有目录」而不是错误
+        if (text.trim().isEmpty()) {
+            directories.clear();
+            last_valid_directory = null;
+            error_string = "[tip] JSON is empty";
+            return true;
         }
 
         JSONObject config;

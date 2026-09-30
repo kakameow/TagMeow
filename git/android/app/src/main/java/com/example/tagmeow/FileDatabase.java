@@ -198,6 +198,11 @@ public final class FileDatabase {
     // 最后一次错误信息
     private String error_string = "";
 
+    // 上一次 insertDirectory 跳过的文件数 / 子目录数（读不了的）
+    // 上层要拿它来判断"目录加进来了 但有东西没读上" 不能一句"添加成功"糊过去
+    private int last_skipped_files = 0;
+    private int last_skipped_dirs = 0;
+
     public FileDatabase(Context context, File db_file, StorageAccess storage) {
 
         this.context = Objects.requireNonNull(context);
@@ -320,6 +325,8 @@ public final class FileDatabase {
         try {
             int skipped = 0;
 
+            int file_total = 0;
+
             for (FileRef ref : found) {
                 FileInfo info = buildInfo(ref, extractor);
                 if (info == null) {
@@ -330,9 +337,25 @@ public final class FileDatabase {
                 if (!insertFileRow(database, info)) {
                     return false;
                 }
+
+                if (!info.is_directory) {
+                    file_total++;
+                }
+            }
+
+            if (file_total == 0 && (skipped > 0 || skipped_dirs > 0)) {
+                last_skipped_files = skipped;
+                last_skipped_dirs = skipped_dirs;
+                error_string = "[warning] nothing could be read from this directory: "
+                        + skipped_dirs + " unreadable subdirector(y/ies)";
+
+                return false;
             }
 
             database.setTransactionSuccessful();
+
+            last_skipped_files = skipped;
+            last_skipped_dirs = skipped_dirs;
 
             if (skipped > 0 || skipped_dirs > 0) {
                 error_string = "[tip] Inserted directory, but " + skipped
@@ -535,13 +558,6 @@ public final class FileDatabase {
         return true;
     }
 
-    // 清掉不属于当前配置的索引行
-    // index.db 是两种存储方式共用的：
-    // - SAF 模式的 root_id 是 tree document id（比如 primary:临时）
-    // - 「所有文件访问」模式的 root_id 是绝对路径（比如 /storage/emulated/0/下载）
-    // 切模式 / 删目录之后 不在当前配置里的 root 的行会一直留在库里：
-    // 首页「文件 N」虚高（实测两种模式 + 已删目录加起来 125） 搜索还会串模式
-    // keep_root_ids：当前配置里所有目录的 id（有效的和「授权丢了」的都要留）
     public boolean purgeForeignRoots(List<String> keep_root_ids) {
         SQLiteDatabase database = db();
         if (database == null) {
@@ -551,8 +567,6 @@ public final class FileDatabase {
 
         try {
             if (keep_root_ids == null || keep_root_ids.isEmpty()) {
-                // 配置里一个目录都没有：整张表都是残留
-                // （调用方在清空后会按需重扫 所以不会出现索引凭空为空）
                 database.delete("files", null, null);
             } else {
                 StringBuilder placeholders = new StringBuilder();
@@ -861,14 +875,19 @@ public final class FileDatabase {
     }
 
     // 返回最后一次错误
+    // 上一次 insertDirectory 跳过了多少
+    public synchronized int getLastSkippedFiles() {
+        return last_skipped_files;
+    }
+
+    public synchronized int getLastSkippedDirs() {
+        return last_skipped_dirs;
+    }
+
     public String getLastError() {
         return error_string;
     }
 
-    // 递归收集 root 下的所有条目 返回读不出来的子目录个数
-    // root 层读不出来直接抛给调用方（整次扫描失败）
-    // 子目录读不出来只跳过：有的 provider 下 Android/data 这类目录本来就列不出来
-    // 不能因为一个子目录让整个 root 加不进来
     private int collect(FileRef directory, List<FileRef> out, boolean root_level) throws IOException {
 
         List<FileRef> children;
