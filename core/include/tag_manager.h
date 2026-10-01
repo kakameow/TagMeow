@@ -128,6 +128,9 @@ private:
     static bool readSidecar(const std::filesystem::path &sidecar_path_utf8, std::vector<std::string> &tags);
     // 将标签列表写入侧车文件
     static bool writeSidecar(const std::filesystem::path &sidecar_path_utf8, const std::vector<std::string> &tags);
+    // 删除 sidecar 文件 并在 .tag 目录变空时一并删除该目录（目录非空时 remove 会失败 属正常情况）
+    // 与 writeSidecar 一样是静态的（静态的 writeTagsToFile 要调用它）失败信息由调用方补
+    static bool removeSidecar(const std::filesystem::path &sidecar_path_utf8);
     // 将标签按指定模式写入文件
     static bool writeTagsToFile(const std::filesystem::path &file_path, const std::vector<std::string> &tags, StoreMode mode);
 };

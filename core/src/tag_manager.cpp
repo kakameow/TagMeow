@@ -824,15 +824,11 @@ bool TagFileManager::removeModeTags(const std::filesystem::path &file_path_utf8,
     else
     {
         std::filesystem::path sidecar_path = buildCleanSidecarPath(file_path_utf8);
-        std::error_code ec;
-        if (std::filesystem::exists(sidecar_path, ec))
+
+        if (!removeSidecar(sidecar_path))
         {
-            std::filesystem::remove(sidecar_path, ec);
-            if (ec)
-            {
-                error_string_ = "[warning] Failed to remove sidecar file: " + ec.message();
-                return false;
-            }
+            error_string_ = "[warning] Failed to remove sidecar file: " + sidecar_path.u8string();
+            return false;
         }
     }
 
@@ -1078,6 +1074,32 @@ bool TagFileManager::writeSidecar(const std::filesystem::path &sidecar_path_utf8
     return true;
 }
 
+bool TagFileManager::removeSidecar(const std::filesystem::path &sidecar_path_utf8)
+{
+    std::error_code ec;
+
+    if (std::filesystem::exists(sidecar_path_utf8, ec))
+    {
+        std::filesystem::remove(sidecar_path_utf8, ec);
+
+        if (ec)
+        {
+            // 静态方法碰不到 error_string_ 具体错误信息由调用方补
+            return false;
+        }
+    }
+
+    const std::filesystem::path sidecar_dir = sidecar_path_utf8.parent_path();
+
+    if (!sidecar_dir.empty() && std::filesystem::exists(sidecar_dir, ec))
+    {
+        std::error_code remove_ec;
+        std::filesystem::remove(sidecar_dir, remove_ec); // 目录非空会失败 属正常情况
+    }
+
+    return true;
+}
+
 bool TagFileManager::writeTagsToFile(const std::filesystem::path &file_path, const std::vector<std::string> &tags, StoreMode mode)
 {
 
@@ -1090,6 +1112,13 @@ bool TagFileManager::writeTagsToFile(const std::filesystem::path &file_path, con
     if (std::filesystem::is_directory(file_path) || mode == StoreMode::Sidecar)
     {
         std::filesystem::path sidecar_path = buildCleanSidecarPath(file_path);
+
+        // 标签为空时不写空壳 sidecar：删掉已有记录（同时清掉空的 .tag 目录）
+        if (tags.empty())
+        {
+            return removeSidecar(sidecar_path);
+        }
+
         if (!writeSidecar(sidecar_path, tags))
         {
             return false;

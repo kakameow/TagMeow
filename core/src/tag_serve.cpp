@@ -24,8 +24,7 @@ namespace
             str.pop_back();
         }
 #ifdef _WIN32
-        std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c)
-                       { return static_cast<char>(std::tolower(c)); });
+        std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
 #endif
         return str;
     }
@@ -507,12 +506,18 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
     // 第一阶段 对所有文件执行 keep_old=true 只写入新格式不删除旧格式
     size_t file_failed_first = 0;
     size_t root_missing_count = 0;
+    std::string error_file_path;
+    std::string error_root_path;
 
     for (const auto &root : root_list_)
     {
         if (!std::filesystem::exists(root) || !std::filesystem::is_directory(root))
         {
             root_missing_count++;
+            if (root_missing_count <= 10)
+            {
+                error_root_path += " the top " + std::to_string(root_missing_count) + " error paths(max = 10): " + root.u8string() + " (" + tag_file_.getLastError() + ")\n";
+            }
             continue;
         }
 
@@ -536,9 +541,9 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
                 if (!tag_file_.convertMode(iter->path(), from_mode, to_mode, true))
                 {
                     file_failed_first++;
-                    if (file_failed_first == 1)
+                    if (file_failed_first <= 10)
                     {
-                        error_string_ = "First failure in first pass: " + iter->path().u8string() + " (" + tag_file_.getLastError() + ")";
+                        error_file_path += " the top " + std::to_string(file_failed_first) + " error paths(max = 10): " + iter->path().u8string() + " (" + tag_file_.getLastError() + ")\n";
                     }
                 }
             }
@@ -549,12 +554,12 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
     {
         if (file_failed_first > 0)
         {
-            error_string_ = "[warning] " + std::to_string(file_failed_first) + " file(s) failed to write new format. " + error_string_;
+            error_string_ = "[warning] " + std::to_string(file_failed_first) + " file(s) failed to write new format. " + error_file_path;
             return false;
         }
         if (root_missing_count > 0)
         {
-            error_string_ = "[warning] " + std::to_string(root_missing_count) + " root(s) missing, but other roots processed.";
+            error_string_ = "[warning] " + std::to_string(root_missing_count) + " root(s) missing, but other roots processed." + error_root_path;
         }
         else
         {
@@ -567,12 +572,14 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
 
     if (file_failed_first > 0)
     {
-        error_string_ = "[warning] " + std::to_string(file_failed_first) + " file(s) failed in first pass (keep_old=true), aborting second pass.";
+        error_string_ = "[warning] " + std::to_string(file_failed_first) + " file(s) failed in first pass (keep_old=true), aborting second pass." + error_file_path;
         return false;
     }
 
     // 第二阶段 对所有文件执行 keep_old=false 删除旧格式
     size_t file_failed_second = 0;
+    std::string error_file_path_second;
+
     for (const auto &root : root_list_)
     {
         if (!std::filesystem::exists(root) || !std::filesystem::is_directory(root))
@@ -600,9 +607,9 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
                 if (!tag_file_.removeModeTags(iter->path(), from_mode))
                 {
                     file_failed_second++;
-                    if (file_failed_second == 1)
+                    if (file_failed_second <= 10)
                     {
-                        error_string_ = "First failure in second pass: " + iter->path().u8string() + " (" + tag_file_.getLastError() + ")";
+                        error_file_path_second += " the top " + std::to_string(file_failed_second) + " error paths(max = 10): " + iter->path().u8string() + " (" + tag_file_.getLastError() + ")\n";
                     }
                 }
             }
@@ -611,7 +618,7 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
 
     if (file_failed_second > 0)
     {
-        error_string_ = "[warning] " + std::to_string(file_failed_second) + " file(s) failed in second pass (keep_old=false). " + "New data written, but some old data may remain.";
+        error_string_ = "[warning] " + std::to_string(file_failed_second) + " file(s) failed in second pass (keep_old=false). " + "New data written, but some old data may remain." + error_file_path_second;
         return false;
     }
 
