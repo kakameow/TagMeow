@@ -56,21 +56,27 @@ public final class TagLibrary {
     public TagLibrary(File config_file) {
         this.config_file = Objects.requireNonNull(config_file);
 
-        if (!loadTagsFromFile(config_file)) {
-            File parent = config_file.getParentFile();
-            if (parent != null && !parent.exists()) {
-                parent.mkdirs();
-            }
+        if (loadTagsFromFile(config_file)) {
+            return;
+        }
 
-            try {
-                if (!config_file.exists()) {
-                    Files.write(config_file.toPath(), new byte[0]);
-                }
-            } catch (IOException error) {
-                // 保留原始错误信息
-            }
+        // 加载失败（文件不存在 / 内容坏了）时补一份合法的空标签库
+        //
+        // 以前这里写一个 0 字节的空文件 于是「文件存在但解析不了」变成常态：
+        // 每次启动都报一次 报的还是 "File not found" 这种误导人的话
+        File parent = config_file.getParentFile();
 
-            error_string = "[warning] File not found";
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            error_string = "[warning] Cannot create config directory: " + parent;
+            return;
+        }
+
+        boolean existed = config_file.isFile();
+
+        if (saveTagsToFile()) {
+            error_string = existed
+                    ? "[tip] tag library file is broken, rewrote it as empty"
+                    : "[tip] tag library file not found, created it";
         }
     }
 
@@ -97,6 +103,14 @@ public final class TagLibrary {
     // 从 JSON 文本整体替换当前标签库
     public boolean loadFromJson(String json_text) {
         Objects.requireNonNull(json_text);
+
+        // 空文件当成「空标签库」而不是错误
+        if (json_text.trim().isEmpty()) {
+            type_tags.clear();
+            type_colors.clear();
+            error_string = "[tip] JSON is empty";
+            return true;
+        }
 
         Library parsed = parseJson(json_text);
 

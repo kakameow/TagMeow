@@ -310,6 +310,12 @@ public class MainActivity extends AppCompatActivity {
     // API < 30 用运行时读写权限代替「所有文件访问」
     private ActivityResultLauncher<String[]> all_files_permission_picker;
 
+    // 权限对话框只留一个：连点按钮会叠出一摞一模一样的对话框
+    private AlertDialog permission_dialog;
+
+    // 启动后的权限自检只提示一次 不反复弹
+    private boolean all_files_prompted = false;
+
     private View[] tab_views;
 
     private LinearLayout[] nav_items;
@@ -506,6 +512,9 @@ public class MainActivity extends AppCompatActivity {
         AppLog.init(appLogFile());
         AppLog.write("MainActivity", "app start | log: " + AppLog.path());
 
+        // 崩溃记录
+        installCrashHandler();
+
         bindViews();
         buildNav();
 
@@ -550,6 +559,9 @@ public class MainActivity extends AppCompatActivity {
                 });
 
         initEngine();
+
+        // 权限检查
+        requestAllFilesAccessIfNeeded();
     }
 
     @Override
@@ -1746,6 +1758,30 @@ public class MainActivity extends AppCompatActivity {
         renderDirBrowser();
     }
 
+    private static boolean isProtectedStorageDir(File dir) {
+        if (dir == null) {
+            return false;
+        }
+
+        String path = dir.getAbsolutePath().replace('\\', '/');
+
+        return path.contains("/Android/data") || path.contains("/Android/obb");
+    }
+
+    private void showDirBrowserEmpty(String lang_key) {
+        if (dir_browser_empty == null) {
+            return;
+        }
+
+        TextView label = dir_browser_empty.findViewById(R.id.tvDirBrowserEmpty);
+
+        if (label != null) {
+            label.setText(Lang.get(lang_key));
+        }
+
+        dir_browser_empty.setVisibility(View.VISIBLE);
+    }
+
     private void renderDirBrowser() {
         if (dir_browser_list == null || dir_browser_path == null) {
             return;
@@ -1760,8 +1796,18 @@ public class MainActivity extends AppCompatActivity {
 
         File[] children = dir_browser_path.listFiles();
 
-        if (children == null || children.length == 0) {
-            dir_browser_empty.setVisibility(View.VISIBLE);
+        if (children == null) {
+            // listFiles() 返回 null = 这个目录读不了 分两种情况：
+            // 1. Android/data、Android/obb：系统保护目录 拿到「所有文件访问」也读不了（平台限制）
+            // 2. 其余：没授权 / 目录被删
+            showDirBrowserEmpty(isProtectedStorageDir(dir_browser_path)
+                    ? "dir.browser_protected"
+                    : "dir.browser_denied");
+            return;
+        }
+
+        if (children.length == 0) {
+            showDirBrowserEmpty("dir.browser_empty");
             return;
         }
 
@@ -1776,7 +1822,7 @@ public class MainActivity extends AppCompatActivity {
             return left.getName().compareToIgnoreCase(right.getName());
         });
 
-        // 不过滤任何目录：以 . 开头的隐藏文件夹也要能选（比如 .nomedia 下面存的东西）
+        // 不过滤任何目录
         for (final File child : children) {
             boolean directory = child.isDirectory();
             View row = getLayoutInflater().inflate(R.layout.item_dir_browse, dir_browser_list, false);
@@ -1958,9 +2004,38 @@ public class MainActivity extends AppCompatActivity {
     private void addFilesRoot(final File directory) {
         final String path = StorageAccess.normalizePath(directory.getAbsolutePath());
 
+        // 系统保护目录拦掉
+        if (isProtectedStorageDir(directory)) {
+            toast(Lang.f("dir.add_protected", path));
+            return;
+        }
+
         runAction(Lang.get("dir.action_add"), () -> {
             boolean ok = serve.addRoot(Uri.fromFile(new File(path)));
-            toast(ok ? Lang.get("dir.added") : Lang.get("common.add_failed") + serve.getLastError());
+
+            if (!ok) {
+                int skipped_dirs = serve.getFileDatabase().getLastSkippedDirs();
+
+                if (skipped_dirs > 0) {
+                    // 整个目录读不出东西 剩下的全是系统保护目录
+                    toast(Lang.f("dir.add_failed_protected", skipped_dirs, path));
+                    return;
+                }
+
+                toast(Lang.get("common.add_failed") + serve.getLastError());
+                return;
+            }
+
+            int skipped_files = serve.getFileDatabase().getLastSkippedFiles();
+            int skipped_dirs = serve.getFileDatabase().getLastSkippedDirs();
+
+            if (skipped_files > 0 || skipped_dirs > 0) {
+                toast(Lang.get("dir.added") + Lang.f("dir.added_skipped", skipped_files, skipped_dirs)
+                        + " " + path);
+                return;
+            }
+
+            toast(Lang.get("dir.added"));
         });
     }
 
@@ -1992,12 +2067,68 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showAllFilesPermissionDialog() {
-        new AlertDialog.Builder(this)
+        // 连点「添加目录」会叠出一摞一模一样的对话框 这里只留一个
+        if (permission_dialog != null && permission_dialog.isShowing()) {
+            return;
+        }
+
+        permission_dialog = new AlertDialog.Builder(this)
                 .setTitle(Lang.get("storage.perm_title"))
                 .setMessage(Lang.get("storage.perm_body"))
                 .setPositiveButton(Lang.get("storage.perm_go"), (dialog, which) -> openAllFilesSettings())
                 .setNegativeButton(Lang.get("common.cancel"), null)
-                .show();
+                .create();
+
+        permission_dialog.setCanceledOnTouchOutside(false);
+        permission_dialog.show();
+    }
+
+    // 未捕获异常写进日志文件
+    private void installCrashHandler() {
+        final Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
+
+        Thread.setDefaultUncaughtExceptionHandler((thread, error) -> {
+            try {
+                AppLog.write("CRASH", "thread=" + thread.getName() + " " + error);
+
+                for (StackTraceElement line : error.getStackTrace()) {
+                    AppLog.write("CRASH", "    at " + line);
+                }
+
+                Throwable cause = error.getCause();
+
+                while (cause != null) {
+                    AppLog.write("CRASH", "caused by " + cause);
+                    cause = cause.getCause();
+                }
+
+                AppLog.close();
+            } catch (Throwable ignored) {
+                // 崩溃处理里再抛就真没救了
+            }
+
+            if (previous != null) {
+                previous.uncaughtException(thread, error);
+            }
+        });
+    }
+
+    // 启动自检：没有「所有文件访问」就直接说清楚 并给出设置入口
+    private void requestAllFilesAccessIfNeeded() {
+        if (hasAllFilesAccess()) {
+            AppLog.write("MainActivity", "all files access: granted | log: " + AppLog.path());
+            return;
+        }
+
+        AppLog.write("MainActivity", "all files access: MISSING | log: " + AppLog.path());
+
+        if (all_files_prompted) {
+            return;
+        }
+
+        all_files_prompted = true;
+        toast(Lang.get("storage.perm_denied"));
+        showAllFilesPermissionDialog();
     }
 
     private void openAllFilesSettings() {
@@ -2024,17 +2155,22 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 设置页里的存储方式：只剩一种 不能再切
-    // 点进去只是说明现在为什么只有这一种
+    // 权限提示开关入口
     private void showStorageModeInfo() {
+        if (!hasAllFilesAccess()) {
+            toast(Lang.get("storage.perm_denied"));
+            showAllFilesPermissionDialog();
+            return;
+        }
+
         new AlertDialog.Builder(this)
                 .setTitle(Lang.get("settings.storage_mode"))
-                .setMessage(storageModeLabel())
+                .setMessage(storageModeLabel() + "\n\n" + Lang.get("storage.perm_body"))
                 .setPositiveButton(Lang.get("common.ok"), null)
                 .show();
     }
 
-    // 权限刚拿到之后重建引擎（目录配置、索引、扫描全跟着来）
+    // 权限刚拿到之后重建引擎
     private void restartEngine() {
         initEngine();
         renderSettings();
@@ -2055,7 +2191,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 回到前台就把各个类的错误信息收一遍（等价 Windows 端每次输入事件后收一次）
+        // 回到前台就把各个类的错误信息收一遍
         collectLogMessages();
 
         // 从系统分享面板回来：问一下要不要把刚生成的压缩包删掉（删除 = 清空压缩包目录）

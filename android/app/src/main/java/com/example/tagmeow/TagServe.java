@@ -84,8 +84,7 @@ public final class TagServe {
                 return false;
             }
 
-            // 配置必须真的落盘：以前这里忽略返回值 配置写失败也算成功
-            // 结果重启（或下一次 reload）之后目录就凭空消失了
+            // 配置真实落盘
             if (!directory_manager.saveToFile()) {
                 file_database.removeDirectory(root);
                 directory_manager.removeDirectory(directory.getId());
@@ -94,7 +93,7 @@ public final class TagServe {
                 return false;
             }
 
-            error_string = "";
+            error_string = file_database.getLastError();
             return true;
         }
     }
