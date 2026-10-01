@@ -224,8 +224,8 @@ public final class TagFileManager {
         } else {
             FileRef sidecar_path = buildCleanSidecarPath(file);
 
-            if (storage.exists(sidecar_path) && !storage.delete(sidecar_path)) {
-                error_string = "[warning] Failed to remove sidecar file";
+            if (!removeSidecar(sidecar_path)) {
+                error_string = "[warning] Failed to remove sidecar file: " + sidecar_path;
                 return false;
             }
 
@@ -363,7 +363,18 @@ public final class TagFileManager {
         }
 
         if (storage.isDirectory(file) || mode == StoreMode.SIDECAR) {
-            if (!writeSidecar(buildCleanSidecarPath(file), tags)) {
+            FileRef sidecar_path = buildCleanSidecarPath(file);
+
+            if (tags == null || tags.isEmpty()) {
+                if (!removeSidecar(sidecar_path)) {
+                    return false;
+                }
+
+                last_written_path = file;
+                return true;
+            }
+
+            if (!writeSidecar(sidecar_path, tags)) {
                 return false;
             }
 
@@ -452,6 +463,29 @@ public final class TagFileManager {
         }
 
         return null;
+    }
+
+    // 删掉侧车文件 并在 .tag 目录变空时把该目录一并删掉
+    private boolean removeSidecar(FileRef sidecar_path) {
+        if (storage.exists(sidecar_path) && !storage.delete(sidecar_path)) {
+            return false;
+        }
+
+        FileRef sidecar_dir = sidecar_path.getParent();
+
+        if (sidecar_dir == null || !storage.exists(sidecar_dir)) {
+            return true;
+        }
+
+        try {
+            if (storage.listChildren(sidecar_dir).isEmpty()) {
+                storage.delete(sidecar_dir);
+            }
+        } catch (IOException error) {
+            // 列不出来就不动目录 侧车本身已经删掉了
+        }
+
+        return true;
     }
 
     // 写入侧车文件
