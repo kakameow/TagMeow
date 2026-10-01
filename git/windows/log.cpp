@@ -1,6 +1,7 @@
 #include "log.h"
 
 #include <chrono>
+#include <iostream>
 #include <ctime>
 #include <iomanip>
 #include <sstream>
@@ -9,7 +10,7 @@ Log::Log(const std::filesystem::path log_path)
 {
     if (!loadLog(log_path))
     {
-        //
+        std::cerr << "[warning] failed to open log file: " << log_path.u8string() << std::endl;
         return;
     }
 
@@ -19,6 +20,10 @@ Log::Log(const std::filesystem::path log_path)
     {
         clearLog();
     }
+
+    std::string str = "start | log path:" + log_path.string();
+
+    write("Log",str);
 }
 
 Log::~Log()
@@ -36,7 +41,7 @@ bool Log::loadLog(const std::filesystem::path& log_path)
         std::filesystem::create_directories(parent, ec);
         if (ec)
         {
-            //
+            std::cerr << "[warning] failed to create log directory: " << ec.message() << std::endl;
             return false;
         }
     }
@@ -44,7 +49,7 @@ bool Log::loadLog(const std::filesystem::path& log_path)
     l_ofs_.open(log_path, std::ios::out | std::ios::app);
     if (!l_ofs_.is_open())
     {
-        //
+        std::cerr << "[warning] failed to open log file: " << log_path.u8string() << std::endl;
         return false;
     }
 
