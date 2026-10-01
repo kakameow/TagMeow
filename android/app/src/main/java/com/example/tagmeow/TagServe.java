@@ -39,6 +39,8 @@ public final class TagServe {
     private final Object lock = new Object();
     // 最后一次业务错误
     private String error_string = "";
+    // 上一次 collectRegularFiles 里有几个根不存在
+    private int last_missing_roots = 0;
 
     public TagServe(Context context, File dir_config_file, File tag_lib_file, File db_file, StorageAccess storage, StoreMode default_mode) {
 
@@ -468,13 +470,19 @@ public final class TagServe {
             List<FileRef> files = collectRegularFiles();
             int failed_first = 0;
             String first_error = "";
+            int missing_roots = last_missing_roots;
+            String root_warning = missing_roots > 0
+                    ? "[warning] " + missing_roots + " root(s) missing, but other roots processed."
+                    : "";
 
             for (FileRef file : files) {
                 if (!tag_file_manager.convertMode(file, from, to, true)) {
                     failed_first++;
-                    if (failed_first == 1) {
-                        first_error = "First failure in first pass: " + file
-                                + " (" + tag_file_manager.getLastError() + ")";
+
+                    // 最多记 10 条失败路径
+                    if (failed_first <= 10) {
+                        first_error += " the top " + failed_first + " error paths(max = 10): " + file
+                                + " (" + tag_file_manager.getLastError() + ")\n";
                     }
                 }
             }
@@ -487,7 +495,9 @@ public final class TagServe {
                 }
 
                 tag_file_manager.setDefaultMode(to);
-                error_string = "";
+
+                // 有根不存在时的错误信息
+                error_string = root_warning;
                 return true;
             }
 
@@ -505,9 +515,11 @@ public final class TagServe {
             for (FileRef file : files) {
                 if (!tag_file_manager.removeModeTags(file, from)) {
                     failed_second++;
-                    if (failed_second == 1) {
-                        second_error = "First failure in second pass: " + file
-                                + " (" + tag_file_manager.getLastError() + ")";
+
+                    // 同样最多记 10 条
+                    if (failed_second <= 10) {
+                        second_error += " the top " + failed_second + " error paths(max = 10): " + file
+                                + " (" + tag_file_manager.getLastError() + ")\n";
                     }
                 }
             }
@@ -715,6 +727,7 @@ public final class TagServe {
     // 收集全部有效 root 下的普通文件 跳过 .tag 目录
     private List<FileRef> collectRegularFiles() {
         List<FileRef> files = new ArrayList<>();
+        last_missing_roots = 0;
 
         for (DirectoryConfigManager.Directory directory : directory_manager.getValidDirList()) {
             storage.addRoot(directory.getId(), locatorOf(directory.getUri()));
@@ -722,6 +735,9 @@ public final class TagServe {
             FileRef root = new FileRef(directory.getId(), "");
 
             if (!storage.exists(root) || !storage.isDirectory(root)) {
+                // 记下来：模式转换时要把"有几个根不存在"报上去（core 的 convertMode 也报）
+                last_missing_roots++;
+
                 continue;
             }
 
