@@ -755,8 +755,20 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private FileDatabase.SearchOptions currentSearchOptions() {
+        FileDatabase.SearchOptions options = new FileDatabase.SearchOptions();
+
+        options.include.addAll(include_tags);
+        options.exclude.addAll(exclude_tags);
+        options.only.addAll(only_tags);
+
+        return options;
+    }
+
     // 在 worker 上取快照 然后回主线程重画
     private void reload() {
+        final FileDatabase.SearchOptions search_options = currentSearchOptions();
+
         worker.execute(() -> {
             TagServe current = serve;
 
@@ -796,9 +808,15 @@ public class MainActivity extends AppCompatActivity {
             }
 
             final FileRef target = directory;
-            final List<FileDatabase.FileInfo> entries = (target == null || search_mode)
-                    ? new ArrayList<>()
-                    : current.listDirectory(target);
+            final List<FileDatabase.FileInfo> entries;
+
+            if (search_mode) {
+                entries = new ArrayList<>(current.searchByTags(search_options));
+            } else {
+                entries = target == null
+                        ? new ArrayList<FileDatabase.FileInfo>()
+                        : current.listDirectory(target);
+            }
 
             final String info = buildStatusText(current, file_count, roots.size());
 
@@ -816,17 +834,16 @@ public class MainActivity extends AppCompatActivity {
                 status_text = info;
                 renderSettings();
 
-                // 每次重画顺手把各个类的错误信息收进日志（同一条消息只写一次）
                 collectLogMessages();
 
                 if (!search_mode) {
                     current_directory = target;
-                    current_files.clear();
-                    current_files.addAll(entries);
                 }
 
-                // 数据没变就不重画：切出去再切回这个页面时 最费的就是这三行
-                // （重建每一个文件行 还要重新排 THUMB_LIMIT 个缩略图任务）
+                current_files.clear();
+                current_files.addAll(entries);
+
+                // 数据没变就不重画
                 String stamp = browseStampOf(search_mode, target, access, types, colors, file_count,
                         search_mode ? current_files : entries);
 
@@ -1591,8 +1608,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        // 已选标签自适应换行
+        FlowLayout flow = new FlowLayout(this, dp(6), dp(4));
+        flow.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        container.addView(flow);
+
         for (String tag : tags) {
-            container.addView(buildChip(tag, colorOfTag(tag), true, () -> {
+            flow.addView(buildChip(tag, colorOfTag(tag), true, () -> {
                 Set<String> current = group == 1 ? exclude_tags : (group == 2 ? only_tags : include_tags);
                 current.remove(tag);
                 renderFilterGroups();
@@ -1634,6 +1657,12 @@ public class MainActivity extends AppCompatActivity {
             card.findViewById(R.id.typeHead).setOnClickListener(v -> tagRow.setVisibility(
                     tagRow.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE));
 
+            // 标签自适应换行
+            FlowLayout flow = new FlowLayout(this, dp(6), dp(4));
+            flow.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            tagRow.addView(flow);
+
             for (final String tag : tags) {
                 final boolean picked = mode == 0 ? file_tag_working.contains(tag) : isFilterTag(tag);
 
@@ -1653,7 +1682,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                 });
 
-                tagRow.addView(chip);
+                flow.addView(chip);
             }
 
             container.addView(card);
@@ -3189,8 +3218,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        // 文件当前标签自适应换行
+        FlowLayout flow = new FlowLayout(this, dp(6), dp(4));
+        flow.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        file_tag_current.addView(flow);
+
         for (final String tag : new ArrayList<>(file_tag_working)) {
-            file_tag_current.addView(buildChip(tag, colorOfTag(tag), true, () -> {
+            flow.addView(buildChip(tag, colorOfTag(tag), true, () -> {
                 file_tag_working.remove(tag);
                 renderFileTagCurrent();
                 renderLibraryInto(file_tag_library, 0);
