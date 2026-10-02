@@ -20,7 +20,7 @@ struct ConfigLoader
     // 保存配置(文件/目录不存在时自动创建) 成功返回 true
     bool saveConfig(std::filesystem::path path_utf8 = "./config/config.json");
 
-    std::string version_ = "1.1.3";
+    std::string version_ = "1.1.5";
     std::string default_language_ = "zh-cn";
     TagFileManager::StoreMode tag_mode_ = TagFileManager::StoreMode::Sidecar;
     std::chrono::minutes server_waiting_time_ = std::chrono::minutes(5);
