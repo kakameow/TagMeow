@@ -755,8 +755,19 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // 在 worker 上取快照 然后回主线程重画
+    private FileDatabase.SearchOptions currentSearchOptions() {
+        FileDatabase.SearchOptions options = new FileDatabase.SearchOptions();
+
+        options.include.addAll(include_tags);
+        options.exclude.addAll(exclude_tags);
+        options.only.addAll(only_tags);
+
+        return options;
+    }
+
     private void reload() {
+        final FileDatabase.SearchOptions search_options = currentSearchOptions();
+
         worker.execute(() -> {
             TagServe current = serve;
 
@@ -764,8 +775,8 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // 展示用：有效的和「授权丢了」的都要列出来
-            // 否则目录从列表里凭空消失 用户既看不到也没法重新授权
+            // 展示用：有效的和「授权丢了」
+            // 否则目录从列表里凭空消失 
             final List<DirectoryConfigManager.Directory> roots =
                     current.getDirectoryConfigManager().getDirList();
             final Map<String, Boolean> access = new LinkedHashMap<>();
@@ -796,9 +807,15 @@ public class MainActivity extends AppCompatActivity {
             }
 
             final FileRef target = directory;
-            final List<FileDatabase.FileInfo> entries = (target == null || search_mode)
-                    ? new ArrayList<>()
-                    : current.listDirectory(target);
+            final List<FileDatabase.FileInfo> entries;
+
+            if (search_mode) {
+                entries = new ArrayList<>(current.searchByTags(search_options));
+            } else {
+                entries = target == null
+                        ? new ArrayList<FileDatabase.FileInfo>()
+                        : current.listDirectory(target);
+            }
 
             final String info = buildStatusText(current, file_count, roots.size());
 
@@ -816,17 +833,16 @@ public class MainActivity extends AppCompatActivity {
                 status_text = info;
                 renderSettings();
 
-                // 每次重画顺手把各个类的错误信息收进日志（同一条消息只写一次）
                 collectLogMessages();
 
                 if (!search_mode) {
                     current_directory = target;
-                    current_files.clear();
-                    current_files.addAll(entries);
                 }
 
-                // 数据没变就不重画：切出去再切回这个页面时 最费的就是这三行
-                // （重建每一个文件行 还要重新排 THUMB_LIMIT 个缩略图任务）
+                current_files.clear();
+                current_files.addAll(entries);
+
+                // 数据没变就不重画
                 String stamp = browseStampOf(search_mode, target, access, types, colors, file_count,
                         search_mode ? current_files : entries);
 
@@ -1551,6 +1567,7 @@ public class MainActivity extends AppCompatActivity {
 
         renderFilterGroups();
         renderLibraryInto(search_tag_library, 1);
+        renderSearchChips();
     }
 
     private void renderFilterGroups() {
@@ -1597,6 +1614,7 @@ public class MainActivity extends AppCompatActivity {
                 current.remove(tag);
                 renderFilterGroups();
                 renderLibraryInto(search_tag_library, 1);
+                renderSearchChips();
             }));
         }
     }
