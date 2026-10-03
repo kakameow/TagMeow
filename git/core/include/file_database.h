@@ -47,6 +47,8 @@ public:
         std::vector<std::string> only_;
         // 至少包含其中一个
         std::vector<std::string> include_;
+        // 只在这些目录(含子目录)内搜索；为空(空指针/空目录)表示全部目录
+        std::vector<std::filesystem::path> dirs_;
     };
 
     explicit FileDatabase(const std::filesystem::path &db_path_utf8 = "./config/index.db");

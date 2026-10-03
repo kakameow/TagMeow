@@ -140,9 +140,101 @@ bool TagServe::reLoadRoot(std::vector<std::filesystem::path> root_list_utf8)
     return true;
 }
 
-bool TagServe::reLoadRoot(std::filesystem::path root_list_utf8)
+// 单目录刷新：只重扫这一个目录(含子目录) 不动其它根的记录 也不改根列表
+// 先删这个目录的旧记录再按磁盘重扫插入 -> 磁盘上删掉/改名的文件不会残留在库里
+bool TagServe::reLoadRoot(std::filesystem::path dir_path_utf8)
 {
-    return reLoadRoot(std::vector<std::filesystem::path>{root_list_utf8});
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::error_code ec;
+    const std::filesystem::path absolute_path = std::filesystem::absolute(dir_path_utf8, ec);
+
+    if (ec)
+    {
+        error_string_ = "[warning] Failed to normalize directory path: " + ec.message();
+        return false;
+    }
+
+    // 与库里存的写法对齐 正斜杠 + 去尾斜杠
+    std::string dir_str = absolute_path.lexically_normal().generic_u8string();
+
+    while (dir_str.size() > 1 && dir_str.back() == '/')
+    {
+        dir_str.pop_back();
+    }
+
+    const std::filesystem::path dir_path = std::filesystem::u8path(dir_str);
+
+    if (!std::filesystem::is_directory(dir_path, ec) || ec)
+    {
+        error_string_ = "[warning] Directory does not exist or not a directory: " + dir_str;
+        return false;
+    }
+
+    auto extractor = [this](const std::filesystem::path &p)
+    {
+        return tag_file_.extractTags(p);
+    };
+
+    if (!db_.removeDirectory(dir_path))
+    {
+        error_string_ = "Failed to remove directory from database: " + db_.getLastError();
+        return false;
+    }
+
+    if (!db_.insertDirectory(dir_path, extractor))
+    {
+        error_string_ = "Failed to insert directory into database: " + db_.getLastError();
+        return false;
+    }
+
+    const std::string dir_key = normalizePathKey(dir_path);
+    bool is_root = false;
+
+    for (const auto &root : root_list_)
+    {
+        if (normalizePathKey(root) == dir_key)
+        {
+            is_root = true;
+            break;
+        }
+    }
+
+    if (!is_root)
+    {
+        table::FileInfo info;
+        info.path_ = dir_str;
+        info.rel_path_ = dir_path.filename().u8string();
+        info.tags_ = extractor(dir_path);
+        info.file_version_ = 1;
+
+        for (const auto &root : root_list_)
+        {
+            std::string root_str = root.lexically_normal().generic_u8string();
+
+            while (root_str.size() > 1 && root_str.back() == '/')
+            {
+                root_str.pop_back();
+            }
+
+            const std::string prefix = root_str + '/';
+
+            if (dir_str.size() > prefix.size() && dir_str.compare(0, prefix.size(), prefix) == 0)
+            {
+                info.rel_path_ = dir_str.substr(prefix.size());
+                break;
+            }
+        }
+
+        if (!db_.updateFile(info))
+        {
+            error_string_ = "Failed to update directory row: " + db_.getLastError();
+            return false;
+        }
+    }
+
+    error_string_ = db_.getLastError(); // insertDirectory 的 "[tip] N entry(ies) were skipped" 之类的提示
+    return true;
 }
 
 bool TagServe::reLoadDB(std::filesystem::path db_path_utf8)
