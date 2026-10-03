@@ -433,7 +433,11 @@ public final class TagServe {
         }
 
         boolean same_file = TagFileManager.removeFilenameTagsPath(written)
-                .equals(TagFileManager.removeFilenameTagsPath(requested));
+                .equals(TagFileManager.removeFilenameTagsPath(requested))
+                // 整名作用域的文件（{[test]}.mp4）没有能用的身份键
+                // 去掉作用域之后剩下的是 .mp4 这种没意义的名字 材料化补时间戳改名之后新旧名字也对不上
+                // 这种情况只能认「最后一次写入」：它就发生在这之前 而且是把原路径改没的那次
+                || TagFileManager.isWholeNameTagBlock(requested.getName());
 
         return same_file ? written : requested;
     }
