@@ -782,19 +782,34 @@ bool TagFileManager::convertMode(const std::filesystem::path &file_path_utf8, St
         error_string_.clear();
         return true;
     }
-    else
+
+    std::vector<std::string> tags = extractTags(file_path_utf8, from_mode);
+
+    // 目标模式是 Filename 时 把文件名里已有的标签并进来（去重）
+    // 否则 Sidecar -> Filename「保留旧数据」会把原文件名里残留的标签丢掉
+    if (to_mode == StoreMode::Filename)
     {
-        std::vector<std::string> tags = extractTags(file_path_utf8, from_mode);
-        if (!writeTagsToFile(file_path_utf8, tags, to_mode))
+        for (const std::string &tag : parseFromFilename(file_path_utf8))
         {
-            error_string_ = "[warning] write failed";
-            return false;
+            if (std::find(tags.begin(), tags.end(), tag) == tags.end())
+            {
+                tags.push_back(tag);
+            }
         }
     }
 
+    if (!writeTagsToFile(file_path_utf8, tags, to_mode))
+    {
+        error_string_ = "[warning] write failed";
+        return false;
+    }
+
+    // 写入可能改了文件名（Filename 模式）-> 删旧格式要用改名之后的路径
+    const std::filesystem::path written_path = (to_mode == StoreMode::Filename && !tags.empty()) ? buildTaggedPath(file_path_utf8, tags) : file_path_utf8;
+
     if (!keep_old)
     {
-        if (!removeModeTags(file_path_utf8, from_mode))
+        if (!removeModeTags(written_path, from_mode))
         {
             error_string_ = "[warning] remove old tags failed";
             return false;
@@ -810,24 +825,41 @@ bool TagFileManager::removeModeTags(const std::filesystem::path &file_path_utf8,
     if (mode == StoreMode::Filename)
     {
         std::filesystem::path new_path = removeFilenameTagsPath(file_path_utf8);
+
         if (new_path != file_path_utf8)
         {
             std::error_code ec;
             std::filesystem::rename(file_path_utf8, new_path, ec);
+
             if (ec)
             {
                 error_string_ = "[warning] Failed to rename file when removing filename tags: " + ec.message();
+                return false;
+            }
+
+            // 名字变了 侧车跟着搬
+            if (!moveSidecar(file_path_utf8, new_path))
+            {
+                error_string_ = "[warning] Failed to move sidecar file: " + buildSidecarPath(new_path).u8string();
                 return false;
             }
         }
     }
     else
     {
-        std::filesystem::path sidecar_path = buildCleanSidecarPath(file_path_utf8);
+        // 侧车按真实文件名定位（与读取端一致）；名字刚被改过时旧数据可能还在"无标签名"的位置 兜底一起清
+        const std::filesystem::path sidecar_path = buildSidecarPath(file_path_utf8);
+        const std::filesystem::path clean_sidecar_path = buildCleanSidecarPath(file_path_utf8);
 
         if (!removeSidecar(sidecar_path))
         {
             error_string_ = "[warning] Failed to remove sidecar file: " + sidecar_path.u8string();
+            return false;
+        }
+
+        if (clean_sidecar_path != sidecar_path && !removeSidecar(clean_sidecar_path))
+        {
+            error_string_ = "[warning] Failed to remove sidecar file: " + clean_sidecar_path.u8string();
             return false;
         }
     }
@@ -913,7 +945,9 @@ std::vector<std::string> TagFileManager::parseFromFilename(const std::filesystem
     std::vector<std::string> tags;
     std::string filename = file_name.filename().u8string();
 
-    std::regex pattern(R"(\{\[([^\]]+)\]\})");
+    // 读取宽松：名字里任意位置的 {[..]} 都算作用域（可以出现多个）
+    // 但必须是 { + [ + 内容 + ] + } 双重包裹；单层的 {} / [] / {] 之类一律不算标签
+    std::regex pattern(R"(\{\[([^\]\}]*)\]\})");
     std::smatch match;
     std::string::const_iterator search_start(filename.cbegin());
 
@@ -926,7 +960,7 @@ std::vector<std::string> TagFileManager::parseFromFilename(const std::filesystem
         while ((pos = tag_block.find(',', start)) != std::string::npos)
         {
             std::string tag = tag_block.substr(start, pos - start);
-            if (!tag.empty())
+            if (!tag.empty() && std::find(tags.begin(), tags.end(), tag) == tags.end())
             {
                 tags.push_back(tag);
             }
@@ -934,7 +968,7 @@ std::vector<std::string> TagFileManager::parseFromFilename(const std::filesystem
         }
 
         std::string last_tag = tag_block.substr(start);
-        if (!last_tag.empty())
+        if (!last_tag.empty() && std::find(tags.begin(), tags.end(), last_tag) == tags.end())
         {
             tags.push_back(last_tag);
         }
@@ -967,8 +1001,25 @@ std::string TagFileManager::formatFilenameWithTags(const std::string &file_name,
 
 std::string TagFileManager::removeTagsFromFilename(const std::string &file_name)
 {
-    std::regex pattern(R"(\{[^\}]*\})");
-    return std::regex_replace(file_name, pattern, "");
+    if (file_name.empty())
+    {
+        return file_name;
+    }
+
+    // 只剥离"文件尾"的双重包裹标签作用域（与 android 端 6130d93 收紧后的规则一致）：
+    // 单层大括号（10{df}.mp4 的 {df}）和名字中间的 {[..]} 都要原样保留 一个字符都不能动
+    // 连续多个（file{[a]}{[b]}.txt）循环剥干净
+    static const std::regex tail_pattern(R"(\{\[[^\}\]]*\]\}(?=(\.[^.]*)?$))");
+    std::string current = file_name;
+    std::string next = std::regex_replace(current, tail_pattern, "");
+
+    while (next != current)
+    {
+        current = next;
+        next = std::regex_replace(current, tail_pattern, "");
+    }
+
+    return current;
 }
 
 std::filesystem::path TagFileManager::removeFilenameTagsPath(const std::filesystem::path &path)
@@ -1074,6 +1125,49 @@ bool TagFileManager::writeSidecar(const std::filesystem::path &sidecar_path_utf8
     return true;
 }
 
+// 文件名变化时把侧车一起搬过去（.tag/<旧名>.json -> .tag/<新名>.json）
+// 与 writeSidecar 一样是静态的：失败只返回 false 具体信息由调用方补
+bool TagFileManager::moveSidecar(const std::filesystem::path &from_path_utf8, const std::filesystem::path &to_path_utf8)
+{
+    const std::filesystem::path from_sidecar = buildSidecarPath(from_path_utf8);
+    const std::filesystem::path to_sidecar = buildSidecarPath(to_path_utf8);
+
+    if (from_sidecar == to_sidecar)
+    {
+        return true;
+    }
+
+    std::error_code ec;
+
+    if (!std::filesystem::exists(from_sidecar, ec))
+    {
+        return true;
+    }
+
+    const std::filesystem::path to_dir = to_sidecar.parent_path();
+
+    if (!to_dir.empty() && !std::filesystem::exists(to_dir, ec))
+    {
+        std::filesystem::create_directories(to_dir, ec);
+
+        if (ec)
+        {
+            return false;
+        }
+    }
+
+    std::filesystem::rename(from_sidecar, to_sidecar, ec);
+
+    if (ec)
+    {
+        return false;
+    }
+
+    removeSidecar(from_sidecar); // 旧 .tag 目录空了就顺手删掉
+
+    return true;
+}
+
 bool TagFileManager::removeSidecar(const std::filesystem::path &sidecar_path_utf8)
 {
     std::error_code ec;
@@ -1111,7 +1205,8 @@ bool TagFileManager::writeTagsToFile(const std::filesystem::path &file_path, con
 
     if (std::filesystem::is_directory(file_path) || mode == StoreMode::Sidecar)
     {
-        std::filesystem::path sidecar_path = buildCleanSidecarPath(file_path);
+        // 侧车按真实文件名存放（与读取端严格一致）
+        std::filesystem::path sidecar_path = buildSidecarPath(file_path);
 
         // 标签为空时不写空壳 sidecar：删掉已有记录（同时清掉空的 .tag 目录）
         if (tags.empty())
@@ -1128,6 +1223,12 @@ bool TagFileManager::writeTagsToFile(const std::filesystem::path &file_path, con
     }
     else
     {
+        // 标签为空时不动文件名：转换时"源里没标签"是正常情况 不能顺手把名字里原有的内容抹掉
+        if (tags.empty())
+        {
+            return true;
+        }
+
         auto parent = file_path.parent_path();
         std::string stem = file_path.stem().u8string();
         std::string ext = file_path.extension().u8string();
@@ -1147,6 +1248,9 @@ bool TagFileManager::writeTagsToFile(const std::filesystem::path &file_path, con
         {
             return false;
         }
+
+        // 名字变了 侧车跟着搬
+        moveSidecar(file_path, new_path);
 
         return true;
     }
