@@ -610,6 +610,7 @@ int main(int argc, char const *argv[])
         std::cout << "tagmeow root list" << std::endl;
         std::cout << "tagmeow root add <path>" << std::endl;
         std::cout << "tagmeow root remove <path>" << std::endl;
+        std::cout << "tagmeow root refresh <path>" << std::endl;
         std::cout << "tagmeow tag list" << std::endl;
         std::cout << "tagmeow tag addtag <type> <tag1,tag2,...>" << std::endl;
         std::cout << "tagmeow tag addtype <type> [color]" << std::endl;
@@ -711,6 +712,29 @@ int main(int argc, char const *argv[])
                     log.write("DirectoryConfigManager", dir_m.getLastError());
                 }
             }
+            else if (parameter[1] == "refresh")
+            {
+                matched = true;
+                if (dir_m.isPathAllowed(parameter[2]))
+                {
+                    if (tag_m.reLoadRoot(parameter[2]))
+                    {
+                        dir_m.saveToFile();
+                        std::cout << "reloaded:" << parameter[2] << std::endl;
+                    }
+                    else
+                    {
+                        std::cout << tag_m.getLastError() << " / " << tag_m.getDBError() << std::endl;
+                        log.write("TagServe", tag_m.getLastError());
+                        log.write("FileDatabase", tag_m.getDBError());
+                    }
+                }
+                else
+                {
+                    std::cout << dir_m.getLastError() << std::endl;
+                    log.write("DirectoryConfigManager", dir_m.getLastError());
+                }
+            }
             break;
         default:
             break;
@@ -718,11 +742,12 @@ int main(int argc, char const *argv[])
 
         if (!matched)
         {
-            std::cout << "available commands: list / add / remove" << std::endl;
+            std::cout << "available commands: list / add / remove / refresh" << std::endl;
             std::cout << "tagmeow help" << std::endl;
             std::cout << "tagmeow root list" << std::endl;
             std::cout << "tagmeow root add <path>" << std::endl;
             std::cout << "tagmeow root remove <path>" << std::endl;
+            std::cout << "tagmeow root refresh <path>" << std::endl;
         }
 
         break;
