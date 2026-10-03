@@ -512,7 +512,7 @@ public final class TagServe {
             int failed_second = 0;
             String second_error = "";
 
-            for (FileRef file : files) {
+            for (FileRef file : collectRegularFiles()) {
                 if (!tag_file_manager.removeModeTags(file, from)) {
                     failed_second++;
 
