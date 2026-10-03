@@ -1,4 +1,12 @@
 #include <iostream>
+#include <fstream>
+#include <iomanip>
+#include <chrono>
+#include <ctime>
+#include <mutex>
+#include <sstream>
+#include <filesystem>
+
 #include <nlohmann/json.hpp>
 
 #include "core/include/directory_manager.h"
@@ -38,7 +46,6 @@ static std::string ansiToUtf8(const std::string &ansi)
 }
 
 #endif
-
 struct ConfigLoader
 {
     ConfigLoader();
@@ -71,7 +78,6 @@ ConfigLoader::ConfigLoader()
         saveConfig();
     }
 }
-
 struct InputParser
 {
     InputParser();
@@ -82,6 +88,31 @@ struct InputParser
     size_t parseCommand(const std::string &input, std::vector<std::string> &parameters);
 
     std::vector<std::string> commands_;
+};
+class Log {
+public:
+    explicit Log(const std::filesystem::path log_path = "./config/log.txt");
+    ~Log();
+
+    // 禁止拷贝
+    Log(const Log&) = delete;
+    Log& operator=(const Log&) = delete;
+
+    bool loadLog(const std::filesystem::path& log_path);
+
+    // 文件尾追加一条记录
+    void write(const std::string &class_name, const std::string &message);
+
+    // 清空日志
+    void clearLog();
+
+private:
+    // 一条记录的时间前缀 "[YYYY-MM-DD HH:MM:SS]"
+    static std::string timeStamp();
+
+    std::filesystem::path log_path_;
+    std::ofstream l_ofs_;
+    std::mutex mtx_;
 };
 
 ConfigLoader::~ConfigLoader()
@@ -406,6 +437,101 @@ size_t InputParser::parseCommand(const std::string &input, std::vector<std::stri
     return std::string::npos;
 }
 
+Log::Log(const std::filesystem::path log_path)
+{
+    if (!loadLog(log_path))
+    {
+        std::cerr << "[warning] failed to open log file: " << log_path.u8string() << std::endl;
+        return;
+    }
+
+    std::error_code ec;
+    auto size = std::filesystem::file_size(log_path_, ec);
+    if (!ec && size >= 1048576)
+    {
+        clearLog();
+    }
+}
+
+Log::~Log()
+{
+    l_ofs_.close();
+}
+
+bool Log::loadLog(const std::filesystem::path& log_path)
+{
+    std::error_code ec;
+
+    auto parent = log_path.parent_path();
+    if (!parent.empty() && !std::filesystem::exists(parent, ec))
+    {
+        std::filesystem::create_directories(parent, ec);
+        if (ec)
+        {
+            std::cerr << "[warning] failed to create log directory: " << ec.message() << std::endl;
+            return false;
+        }
+    }
+
+    l_ofs_.open(log_path, std::ios::out | std::ios::app);
+    if (!l_ofs_.is_open())
+    {
+        std::cerr << "[warning] failed to open log file: " << log_path.u8string() << std::endl;
+        return false;
+    }
+
+    log_path_ = log_path;
+    return true;
+}
+
+std::string Log::timeStamp()
+{
+    const std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm tm_buf{};
+#ifdef _WIN32
+    localtime_s(&tm_buf, &t);
+#else
+    localtime_r(&t, &tm_buf);
+#endif
+    std::ostringstream oss;
+    oss << "[" << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S") << "]";
+    return oss.str();
+}
+
+
+void Log::write(const std::string &class_name, const std::string &message)
+{
+    if (message.empty())
+    {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(mtx_);
+    if (!l_ofs_.is_open())
+    {
+        return;
+    }
+
+    l_ofs_ << timeStamp() << "(cli) " << class_name << ": " << message << "\n";
+    l_ofs_.flush();
+}
+
+// 清空日志：关闭后以截断方式重开
+void Log::clearLog()
+{
+    std::lock_guard<std::mutex> lock(mtx_);
+
+    if (l_ofs_.is_open())
+    {
+        l_ofs_.close();
+    }
+
+    if (!log_path_.empty())
+    {
+        l_ofs_.open(log_path_, std::ios::out | std::ios::trunc);
+    }
+}
+
 int main(int argc, char const *argv[])
 {
 
@@ -423,12 +549,14 @@ int main(int argc, char const *argv[])
 #endif
 
     ConfigLoader config;
+    Log log("./config/log.txt");
     InputParser command_s;
     DirectoryConfigManager dir_m("./config/path.json");
     TagServe tag_m(dir_m.getValidDirList(), config.tag_mode_, "./config/tag.json", "./config/index.db");
     std::string color = "#FFB6C1";
 
     command_s.commands_.push_back("help");
+    command_s.commands_.push_back("refresh");
     command_s.commands_.push_back("root");
     command_s.commands_.push_back("tag");
     command_s.commands_.push_back("file");
@@ -462,7 +590,7 @@ int main(int argc, char const *argv[])
     if (input.empty())
     {
         std::cout << "tagmeow <command> [parameters...]" << std::endl;
-        std::cout << "available commands: help / root / tag / file / search" << std::endl;
+        std::cout << "available commands: help / refresh /root / tag / file / search" << std::endl;
         return 0;
     }
 
@@ -476,11 +604,13 @@ int main(int argc, char const *argv[])
 
     // help
     case 0:
-        std::cout << "available commands: help / root / tag / file / search" << std::endl;
+        std::cout << "available commands: help / refresh / root / tag / file / search" << std::endl;
         std::cout << "tagmeow help" << std::endl;
+        std::cout << "tagmeow refresh" << std::endl;
         std::cout << "tagmeow root list" << std::endl;
         std::cout << "tagmeow root add <path>" << std::endl;
         std::cout << "tagmeow root remove <path>" << std::endl;
+        std::cout << "tagmeow root refresh <path>" << std::endl;
         std::cout << "tagmeow tag list" << std::endl;
         std::cout << "tagmeow tag addtag <type> <tag1,tag2,...>" << std::endl;
         std::cout << "tagmeow tag addtype <type> [color]" << std::endl;
@@ -495,8 +625,29 @@ int main(int argc, char const *argv[])
         std::cout << "tagmeow search [-i <tag1,tag2,...>] [-e <tag1,tag2,...>] [-o <tag1,tag2,...>]" << std::endl;
         break;
 
-    // root
+    // refresh
     case 1:
+
+        dir_m.clearInvalidPath();
+        dir_m.saveToFile(); 
+
+        if (tag_m.reLoadTag("./config/tag.json") && tag_m.reLoadRoot(dir_m.getValidDirList()))
+        {
+            std::cout << "success" << std::endl;
+        }
+        else
+        {
+            std::cout << tag_m.getTagError() << std::endl;
+            log.write("TagLibrary", tag_m.getTagError());
+            std::cout << tag_m.getLastError() << " / " << tag_m.getDBError() << std::endl;
+            log.write("TagServe", tag_m.getLastError());
+            log.write("FileDatabase", tag_m.getDBError());
+        }
+
+        break;
+
+    // root
+    case 2:
     {
         bool matched = false;
 
@@ -528,11 +679,14 @@ int main(int argc, char const *argv[])
                     else
                     {
                         std::cout << tag_m.getLastError() << " / " << tag_m.getDBError() << std::endl;
+                        log.write("TagServe", tag_m.getLastError());
+                        log.write("FileDatabase", tag_m.getDBError());
                     }
                 }
                 else
                 {
                     std::cout << dir_m.getLastError() << std::endl;
+                    log.write("DirectoryConfigManager", dir_m.getLastError());
                 }
             }
             else if (parameter[1] == "remove")
@@ -548,11 +702,37 @@ int main(int argc, char const *argv[])
                     else
                     {
                         std::cout << tag_m.getLastError() << " / " << tag_m.getDBError() << std::endl;
+                        log.write("TagServe", tag_m.getLastError());
+                        log.write("FileDatabase", tag_m.getDBError());
                     }
                 }
                 else
                 {
                     std::cout << dir_m.getLastError() << std::endl;
+                    log.write("DirectoryConfigManager", dir_m.getLastError());
+                }
+            }
+            else if (parameter[1] == "refresh")
+            {
+                matched = true;
+                if (dir_m.isPathAllowed(parameter[2]))
+                {
+                    if (tag_m.reLoadRoot(parameter[2]))
+                    {
+                        dir_m.saveToFile();
+                        std::cout << "reloaded:" << parameter[2] << std::endl;
+                    }
+                    else
+                    {
+                        std::cout << tag_m.getLastError() << " / " << tag_m.getDBError() << std::endl;
+                        log.write("TagServe", tag_m.getLastError());
+                        log.write("FileDatabase", tag_m.getDBError());
+                    }
+                }
+                else
+                {
+                    std::cout << dir_m.getLastError() << std::endl;
+                    log.write("DirectoryConfigManager", dir_m.getLastError());
                 }
             }
             break;
@@ -562,18 +742,19 @@ int main(int argc, char const *argv[])
 
         if (!matched)
         {
-            std::cout << "available commands: list / add / remove" << std::endl;
+            std::cout << "available commands: list / add / remove / refresh" << std::endl;
             std::cout << "tagmeow help" << std::endl;
             std::cout << "tagmeow root list" << std::endl;
             std::cout << "tagmeow root add <path>" << std::endl;
             std::cout << "tagmeow root remove <path>" << std::endl;
+            std::cout << "tagmeow root refresh <path>" << std::endl;
         }
 
         break;
     }
 
     // tag
-    case 2:
+    case 3:
     {
         bool matched = false;
 
@@ -612,6 +793,7 @@ int main(int argc, char const *argv[])
             else
             {
                 std::cout << tag_m.getTagError() << std::endl;
+                log.write("TagLibrary", tag_m.getTagError());
             }
         }
         else if (parameter[1] == "addtag" && size >= 4)
@@ -630,6 +812,7 @@ int main(int argc, char const *argv[])
             else
             {
                 std::cout << tag_m.getTagError() << std::endl;
+                log.write("TagLibrary", tag_m.getTagError());
             }
         }
         else if (parameter[1] == "removetag" && size >= 3)
@@ -647,6 +830,7 @@ int main(int argc, char const *argv[])
             else
             {
                 std::cout << tag_m.getTagError() << std::endl;
+                log.write("TagLibrary", tag_m.getTagError());
             }
         }
         else if (parameter[1] == "removetype" && size >= 3)
@@ -664,6 +848,7 @@ int main(int argc, char const *argv[])
             else
             {
                 std::cout << tag_m.getTagError() << std::endl;
+                log.write("TagLibrary", tag_m.getTagError());
             }
         }
         else if (parameter[1] == "renametag" && size == 4)
@@ -676,6 +861,7 @@ int main(int argc, char const *argv[])
             else
             {
                 std::cout << tag_m.getTagError() << std::endl;
+                log.write("TagLibrary", tag_m.getTagError());
             }
         }
         else if (parameter[1] == "renametype" && size == 4)
@@ -688,6 +874,7 @@ int main(int argc, char const *argv[])
             else
             {
                 std::cout << tag_m.getTagError() << std::endl;
+                log.write("TagLibrary", tag_m.getTagError());
             }
         }
         else if (parameter[1] == "resettype" && size == 4)
@@ -700,6 +887,7 @@ int main(int argc, char const *argv[])
             else
             {
                 std::cout << tag_m.getTagError() << std::endl;
+                log.write("TagLibrary", tag_m.getTagError());
             }
         }
 
@@ -720,7 +908,7 @@ int main(int argc, char const *argv[])
     }
 
     // file
-    case 3:
+    case 4:
     {
         bool matched = false;
 
@@ -743,6 +931,8 @@ int main(int argc, char const *argv[])
             else
             {
                 std::cout << tag_m.getLastError() << " / " << tag_m.getFileError() << std::endl;
+                log.write("TagServe", tag_m.getLastError());
+                log.write("TagFileManager", tag_m.getFileError());
             }
         }
         else if (parameter[1] == "add" && size >= 4)
@@ -760,6 +950,7 @@ int main(int argc, char const *argv[])
             else
             {
                 std::cout << tag_m.getTagError() << std::endl;
+                log.write("TagLibrary", tag_m.getTagError());
             }
         }
         else if (parameter[1] == "remove" && size >= 4)
@@ -777,6 +968,7 @@ int main(int argc, char const *argv[])
             else
             {
                 std::cout << tag_m.getTagError() << std::endl;
+                log.write("TagLibrary", tag_m.getTagError());
             }
         }
 
@@ -793,7 +985,7 @@ int main(int argc, char const *argv[])
     }
 
     // search
-    case 4:
+    case 5:
 
         if (size > 2)
         {
@@ -854,7 +1046,7 @@ int main(int argc, char const *argv[])
         }
         else
         {
-            std::cout << "available commands: help / root / tag / file / search" << std::endl;
+            std::cout << "available commands: help / refresh /root / tag / file / search" << std::endl;
             std::cout << "tagmeow search [-i <tag1,tag2,...>] [-e <tag1,tag2,...>] [-o <tag1,tag2,...>]" << std::endl;
         }
 
@@ -867,6 +1059,8 @@ int main(int argc, char const *argv[])
 
     dir_m.saveToFile();
     tag_m.saveTag();
+
+    log.write("ConfigLoader", config.error_string_);
 
     return 0;
 }

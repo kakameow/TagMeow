@@ -39,7 +39,7 @@
         { "id": "settings.restartTip", "str": "某些配置可能需要重启后生效点击确认保存并关闭程序" },
         { "id": "btn.ok", "str": "确认" },
         { "id": "btn.cancel", "str": "取消" },
-        { "id": "options.title", "str": "是否转换默认存储模式\n(额外的json文件存储 <-> 在文件名字后面存储)\n此操作可能费时可能需要重启程序或者刷新显示" },
+        { "id": "options.title", "str": "是否转换默认存储模式\n(sidecar <-> filename)\n此操作可能费时可能需要\n重启程序或者刷新显示" },
         { "id": "sync.share", "str": "从本机分享文件" },
         { "id": "sync.download", "str": "从其他设备下载" },
         { "id": "sync.serverName", "str": "输入服务器名称" },

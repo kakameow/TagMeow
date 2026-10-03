@@ -39,10 +39,10 @@ ApplicationWindow {
 
     Window {
         id: setWindow
-        width: 600
+        width: 700
         height: 500
-        minimumWidth: 600
-        maximumWidth: 600
+        minimumWidth: 700
+        maximumWidth: 700
         minimumHeight: 500
         maximumHeight: 500
         title: ""
@@ -145,7 +145,7 @@ ApplicationWindow {
             SpinBox {
                 objectName: "fontSizeSetting"
                 from: 10
-                to: 20
+                to: 18
                 value: 12
                 Layout.fillWidth: true
                 font.pixelSize: window.fontSize
@@ -250,11 +250,11 @@ ApplicationWindow {
     Window {
         id: optionsWindow
         width: 400
-        height: 160
+        height: 200
         minimumWidth: 400
         maximumWidth: 400
-        minimumHeight: 160
-        maximumHeight: 160
+        minimumHeight: 200
+        maximumHeight: 200
         title: ""
         modality: Qt.ApplicationModal
         visible: false
@@ -263,7 +263,7 @@ ApplicationWindow {
         Dialog {
             id: optionsDialog
             width: 400
-            height: 160
+            height: 200
             objectName: "optionsDialog"
             title: window.uiText["options.title"]
             font.pixelSize: window.fontSize

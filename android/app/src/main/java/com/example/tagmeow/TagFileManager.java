@@ -45,9 +45,15 @@ public final class TagFileManager {
     // Sidecar 目录名称
     public static final String TAG_DIRECTORY = ".tag";
     // 匹配文件名中的标签块 {[标签1,标签2]}
-    private static final Pattern TAG_BLOCK_PATTERN = Pattern.compile("\\{\\[([^\\]]+)\\]\\}");
-    // 匹配文件名中任意 {xxx} 块 用于清理
-    private static final Pattern BRACE_BLOCK_PATTERN = Pattern.compile("\\{[^\\}]*\\}");
+    // 读取宽松：名字里任意位置出现的 {[..]} 都算一个标签作用域 一个名字里可以有多个 全部读出来
+    // 但只有「{ + [ + 内容 + ] + }」这种正确双重包裹的才算一个标签作用域
+    // 单层包裹的 {} / [] / {] / ]] / {df} 之类一律不算标签
+    private static final Pattern TAG_BLOCK_PATTERN = Pattern.compile("\\{\\[([^\\]\\}]*)\\]\\}");
+    // 写入 / 删除时用的匹配：只认「名字结尾」那一个（紧挨扩展名也算结尾）
+    // 严格以原文件名为准：添加时加在名字尾 去掉时也只去掉结尾那一个
+    // 一样必须是 {[..]} 双重包裹
+    // 单层的 {df} 不是标签块 必须原样保留 不能被正则吃掉（10{df}.mp4 不能变成 10.mp4）
+    private static final Pattern TAIL_TAG_BLOCK_PATTERN = Pattern.compile("\\{\\[[^\\]\\}]*\\]\\}(?=(\\.[^.]*)?$)");
     // Sidecar 文件中标签字段的键名
     private static final String SIDECAR_KEY = "tags";
     // 封装类
@@ -128,6 +134,18 @@ public final class TagFileManager {
             return true;
         }
 
+        // 最后一个标签被删掉：要真的把标签从存储里去掉
+        // （Filename 模式就是把名字里的标签块去掉 空写入是不动文件名的）
+        if (tags.isEmpty()) {
+            if (removeModeTags(file, default_mode)) {
+                error_string = "";
+                return true;
+            }
+
+            error_string = "[warning] removal failed";
+            return false;
+        }
+
         if (writeTagsToFile(file, tags, default_mode)) {
             error_string = "";
             return true;
@@ -165,6 +183,17 @@ public final class TagFileManager {
             return true;
         }
 
+        // 删空了跟单标签删除一样：走 removeModeTags 真的清掉存储
+        if (new_tags.isEmpty()) {
+            if (removeModeTags(file, default_mode)) {
+                error_string = "";
+                return true;
+            }
+
+            error_string = "[warning] removal failed";
+            return false;
+        }
+
         if (writeTagsToFile(file, new_tags, default_mode)) {
             error_string = "";
             return true;
@@ -189,12 +218,25 @@ public final class TagFileManager {
         }
 
         List<String> tags = extractTags(file, from_mode);
+
+        if (to_mode == StoreMode.FILENAME) {
+            // 目标模式是 Filename：把名字里已经有的标签并进来
+            for (String tag : parseFromFilename(file.getName())) {
+                if (!tags.contains(tag)) {
+                    tags.add(tag);
+                }
+            }
+        }
+
         if (!writeTagsToFile(file, tags, to_mode)) {
             error_string = "[warning] write failed";
             return false;
         }
 
-        if (!keep_old && !removeModeTags(file, from_mode)) {
+        // 写入可能改了文件名 删旧格式要用改名之后的路径
+        FileRef current = last_written_path == null ? file : last_written_path;
+
+        if (!keep_old && !removeModeTags(current, from_mode)) {
             error_string = "[warning] remove old tags failed";
             return false;
         }
@@ -220,14 +262,21 @@ public final class TagFileManager {
                 return false;
             }
 
+            // 名字变了 侧车跟着搬
+            if (!clean_path.equals(file)) {
+                moveSidecar(file, clean_path);
+            }
+
             last_written_path = clean_path;
         } else {
-            FileRef sidecar_path = buildCleanSidecarPath(file);
+            FileRef sidecar_path = buildSidecarPath(file);
 
             if (!removeSidecar(sidecar_path)) {
                 error_string = "[warning] Failed to remove sidecar file: " + sidecar_path;
                 return false;
             }
+
+
 
             // 只删了侧车 文件本身没动
             last_written_path = file;
@@ -244,7 +293,9 @@ public final class TagFileManager {
         Objects.requireNonNull(file);
 
         if (storage.isDirectory(file) || mode == StoreMode.SIDECAR) {
+            // 侧车严格按「真实文件名」定位 和写入端完全一致
             List<String> tags = readSidecar(buildSidecarPath(file));
+
             return tags == null ? new ArrayList<>() : tags;
         }
 
@@ -313,6 +364,9 @@ public final class TagFileManager {
     }
 
     // 从文件名中解析出标签列表
+    // 读取宽松：名字里所有 {[..]} 作用域都读 位置不限（名字中间 / 扩展名后面都算）
+    // 只有 {[..]} 双重包裹的才算作用域 单层的 {} [] {] ]] 之类不读
+    // 同一个标签写在多个作用域里只算一个
     public static List<String> parseFromFilename(String file_name) {
         List<String> tags = new ArrayList<>();
 
@@ -328,7 +382,8 @@ public final class TagFileManager {
             }
 
             for (String tag : block.split(",")) {
-                if (!tag.isEmpty()) {
+                // 多个作用域里重复出现的标签只留第一个
+                if (!tag.isEmpty() && !tags.contains(tag)) {
                     tags.add(tag);
                 }
             }
@@ -347,13 +402,23 @@ public final class TagFileManager {
         return file_name + "{[" + join(tags) + "]}";
     }
 
-    // 从文件名中移除所有标签块 返回纯文件名
+    // 去掉结尾的标签块 返回纯文件名（名字中间的部分原样保留）
+    // 只有 {[..]} 双重包裹才算标签块：{df} / {} / {] 这种单层的原样留着 一个字符都不动
+    // 循环去：file{[a]}{[b]}.txt 这种连着写好几个的要全部去掉
     public static String removeTagsFromFilename(String file_name) {
         if (file_name == null || file_name.isEmpty()) {
             return file_name;
         }
 
-        return BRACE_BLOCK_PATTERN.matcher(file_name).replaceAll("");
+        String current = file_name;
+        String next = TAIL_TAG_BLOCK_PATTERN.matcher(current).replaceAll("");
+
+        while (!next.equals(current)) {
+            current = next;
+            next = TAIL_TAG_BLOCK_PATTERN.matcher(current).replaceAll("");
+        }
+
+        return current;
     }
 
     private boolean writeTagsToFile(FileRef file, List<String> tags, StoreMode mode) {
@@ -363,7 +428,8 @@ public final class TagFileManager {
         }
 
         if (storage.isDirectory(file) || mode == StoreMode.SIDECAR) {
-            FileRef sidecar_path = buildCleanSidecarPath(file);
+            // 跟读取端一致：按真实文件名放侧车
+            FileRef sidecar_path = buildSidecarPath(file);
 
             if (tags == null || tags.isEmpty()) {
                 if (!removeSidecar(sidecar_path)) {
@@ -379,6 +445,13 @@ public final class TagFileManager {
             }
 
             // 只写了侧车 文件本身没动
+            last_written_path = file;
+            return true;
+        }
+
+        // 标签为空时不动文件名
+        // 转换 / 写入时"源里没标签"是正常情况 不能因此把名字里原有的标签块抹掉
+        if (tags == null || tags.isEmpty()) {
             last_written_path = file;
             return true;
         }
@@ -399,8 +472,12 @@ public final class TagFileManager {
             return false;
         }
 
+        // 文件名变了：侧车跟着改名
+        FileRef renamed = file.getParent().child(new_name);
+        moveSidecar(file, renamed);
+
         // 文件名变了 记下新路径供上层做增量索引更新
-        last_written_path = file.getParent().child(new_name);
+        last_written_path = renamed;
         return true;
     }
 
@@ -463,6 +540,17 @@ public final class TagFileManager {
         }
 
         return null;
+    }
+
+    // 文件名改了：把侧车一起改名
+    private boolean moveSidecar(FileRef from, FileRef to) {
+        FileRef old_sidecar = buildSidecarPath(from);
+
+        if (!storage.exists(old_sidecar)) {
+            return true;
+        }
+
+        return storage.rename(old_sidecar, buildSidecarPath(to).getName());
     }
 
     // 删掉侧车文件 并在 .tag 目录变空时把该目录一并删掉

@@ -812,11 +812,11 @@ const TextItem kUiTextTable[] = {
     { "settings.tags", "(类型标签全局唯一 合并可能改变分类):"},
     { "theme.light", "浅色" },
     { "theme.dark", "深色" },
-    { "settings.restartTip", "某些配置可能需要重启后生效点击确认保存并关闭程序" }, // 原为带换行的版本，这里合并为一行（但 JSON 中是单行，去掉了换行）
+    { "settings.restartTip", "某些配置可能需要重启后生效点击确认保存并关闭程序" },
     { "btn.ok", "确认" },
     { "btn.cancel", "取消" },
     // 转换模式对话框
-    { "options.title", "是否转换默认存储模式\n(额外的json文件存储 <-> 在文件名字后面存储)\n此操作可能费时可能需要重启程序或者刷新显示" },
+    { "options.title", "是否转换默认存储模式\n(sidecar <-> filename)\n此操作可能费时可能需要\n重启程序或者刷新显示" },
     // 同步窗口
     { "sync.share", "从本机分享文件" },
     { "sync.download", "从其他设备下载" },
