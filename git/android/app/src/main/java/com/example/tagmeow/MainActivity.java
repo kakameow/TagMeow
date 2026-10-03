@@ -964,14 +964,16 @@ public class MainActivity extends AppCompatActivity {
 
             List<String> infoTags = info.tags == null ? new ArrayList<>() : info.tags;
 
-            int shown = 0;
-            for (String tag : infoTags) {
-                if (shown++ >= 4) {
-                    tags.addView(buildPlainChip("＋" + (infoTags.size() - 4)));
-                    break;
-                }
+            if (!infoTags.isEmpty()) {
+                // 标签自适应换行：一行放不下就换到下一行 全部显示 不再用 ＋N 折叠
+                FlowLayout tag_flow = new FlowLayout(this, dp(6), dp(4));
+                tag_flow.setLayoutParams(new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                tags.addView(tag_flow);
 
-                tags.addView(buildTagChip(tag, colorOfTag(tag)));
+                for (String tag : infoTags) {
+                    tag_flow.addView(buildTagChip(tag, colorOfTag(tag)));
+                }
             }
 
             row.setOnClickListener(v -> onFileClicked(info));
@@ -1342,15 +1344,6 @@ public class MainActivity extends AppCompatActivity {
         view.setTextSize(11);
         view.setTextColor(COLOR_MUTED);
         view.setPadding(dp(4), dp(6), dp(4), dp(6));
-        return view;
-    }
-
-    private View buildPlainChip(String label) {
-        TextView view = new TextView(this);
-        view.setText(label);
-        view.setTextSize(10);
-        view.setTextColor(COLOR_MUTED);
-        view.setPadding(dp(6), dp(6), dp(6), dp(4));
         return view;
     }
 

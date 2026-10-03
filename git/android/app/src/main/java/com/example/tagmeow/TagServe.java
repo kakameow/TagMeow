@@ -497,8 +497,7 @@ public final class TagServe {
                 tag_file_manager.setDefaultMode(to);
 
                 // 有根不存在时的错误信息
-                error_string = root_warning;
-                return true;
+                return refreshAfterConvert(root_warning);
             }
 
             if (failed_first > 0) {
@@ -532,9 +531,23 @@ public final class TagServe {
             }
 
             tag_file_manager.setDefaultMode(to);
-            error_string = "";
-            return true;
+
+            return refreshAfterConvert("");
         }
+    }
+
+    // 模式转换收尾：按磁盘重建索引
+    // 转换会真的重命名文件（Filename 模式）索引里的路径和标签全都失效了
+    // 返回 false 时说明转换本身完成了 但索引刷新有问题 error_string 里是警告
+    private boolean refreshAfterConvert(String extra_warning) {
+        if (!refreshAll()) {
+            error_string = "[warning] conversion finished, but the index refresh failed. " + error_string
+                    + (extra_warning.isEmpty() ? "" : " " + extra_warning);
+            return false;
+        }
+
+        error_string = extra_warning;
+        return true;
     }
 
     // 设置以后文件标签操作的默认模式
