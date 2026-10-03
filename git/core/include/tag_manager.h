@@ -131,6 +131,8 @@ private:
     // 删除 sidecar 文件 并在 .tag 目录变空时一并删除该目录（目录非空时 remove 会失败 属正常情况）
     // 与 writeSidecar 一样是静态的（静态的 writeTagsToFile 要调用它）失败信息由调用方补
     static bool removeSidecar(const std::filesystem::path &sidecar_path_utf8);
+    // 文件名变化时把侧车文件跟着搬过去（.tag/<旧名>.json -> .tag/<新名>.json）
+    static bool moveSidecar(const std::filesystem::path &from_path_utf8, const std::filesystem::path &to_path_utf8);
     // 将标签按指定模式写入文件
     static bool writeTagsToFile(const std::filesystem::path &file_path, const std::vector<std::string> &tags, StoreMode mode);
 };
