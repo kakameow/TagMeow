@@ -920,12 +920,16 @@ std::vector<table::FileInfo> FileDatabase::searchByTags(const SearchOptions &opt
         }
     }
 
+    bool has_exclude = false;
+
     for (const std::string &tag : opts.exclude_)
     {
         if (tag.empty())
         {
             continue;
         }
+
+        has_exclude = true;
 
         sql +=
             " AND NOT EXISTS ("
@@ -969,6 +973,60 @@ std::vector<table::FileInfo> FileDatabase::searchByTags(const SearchOptions &opt
         }
 
         sql += ")";
+    }
+
+    // 三个标签容器都为空(或只填了空字符串) -> 改成返回"没有标签"的文件
+    if (only_set.empty() && valid_include.empty() && !has_exclude)
+    {
+        sql +=
+            " AND NOT EXISTS ("
+            "SELECT 1 FROM tags t0 "
+            "WHERE t0.file_id = f.file_id"
+            ")";
+    }
+
+    // 目录过滤：dirs_ 为空(空指针/空目录)表示全部目录 否则只保留这些目录(含子目录)下的文件
+    // path 上有 UNIQUE 索引 -> 用范围查询 [dir + "/", dir + "0") 
+    std::string dir_sql;
+    std::vector<std::string> dir_bounds;
+
+    for (const std::filesystem::path &dir : opts.dirs_)
+    {
+        std::string dir_str = dir.generic_u8string();
+
+        while (dir_str.size() > 1 && dir_str.back() == '/')
+        {
+            dir_str.pop_back();
+        }
+
+        if (dir_str.empty())
+        {
+            continue; // 空目录等于不限制
+        }
+
+        std::string lower_bound = dir_str + "/";
+        std::string upper_bound = lower_bound;
+        upper_bound.back() = '0'; // '/' 的下一个字节 -> 前缀区间上界
+
+        if (dir_sql.empty())
+        {
+            dir_sql = " AND (";
+        }
+        else
+        {
+            dir_sql += " OR ";
+        }
+
+        dir_sql += "(f.path >= ? AND f.path < ?)";
+        dir_bounds.push_back(lower_bound);
+        dir_bounds.push_back(upper_bound);
+    }
+
+    if (!dir_sql.empty())
+    {
+        dir_sql += ")";
+        sql += dir_sql;
+        bind_values.insert(bind_values.end(), dir_bounds.begin(), dir_bounds.end());
     }
 
     sql += " GROUP BY f.file_id;";

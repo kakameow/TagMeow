@@ -33,7 +33,8 @@ public:
     // 数据库同步更新删除此目录信息 上层调用时保证路径有效性
     bool removeRoot(std::filesystem::path root_path_utf8);
     // 替换根目录列表 并同步更新数据库 删除旧目录数据插入新目录数据
-    bool reLoadRoot(std::filesystem::path root_list_utf8);
+    // 单目录刷新：只重扫这一个目录(含子目录) 不动其它根的记录 也不改根列表
+    bool reLoadRoot(std::filesystem::path dir_path_utf8);
     bool reLoadRoot(std::vector<std::filesystem::path> root_list_utf8);
     // 更换数据库文件路径 但不自动同步文件系统 需要手动调用 updateRoots
     bool reLoadDB(std::filesystem::path db_path_utf8);

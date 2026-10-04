@@ -1,5 +1,7 @@
 #include "tag_manager.h"
 
+#include <chrono>
+
 TagLibrary::TagLibrary(const std::filesystem::path &file_path_utf8) : config_path_(file_path_utf8)
 {
     if (!loadTagsFromFile(file_path_utf8))
@@ -738,7 +740,9 @@ bool TagFileManager::removeTag(const std::filesystem::path &file_path_utf8, cons
         return true;
     }
 
-    error_string_ = "[warning] removal failed";
+    // 带上具体原因 不然界面只看到「删除失败」不知道为什么
+    const std::string write_error = error_string_;
+    error_string_ = "[warning] removal failed: " + write_error;
     return false;
 }
 
@@ -771,7 +775,9 @@ bool TagFileManager::removeTag(const std::filesystem::path &file_path_utf8, cons
         return true;
     }
 
-    error_string_ = "[warning] removal failed";
+    // 带上具体原因 不然界面只看到「删除失败」不知道为什么
+    const std::string write_error = error_string_;
+    error_string_ = "[warning] removal failed: " + write_error;
     return false;
 }
 
@@ -811,7 +817,8 @@ bool TagFileManager::convertMode(const std::filesystem::path &file_path_utf8, St
     {
         if (!removeModeTags(written_path, from_mode))
         {
-            error_string_ = "[warning] remove old tags failed";
+            const std::string remove_error = error_string_;
+            error_string_ = "[warning] remove old tags failed: " + remove_error;
             return false;
         }
     }
@@ -824,7 +831,18 @@ bool TagFileManager::removeModeTags(const std::filesystem::path &file_path_utf8,
 {
     if (mode == StoreMode::Filename)
     {
-        std::filesystem::path new_path = removeFilenameTagsPath(file_path_utf8);
+        // 整名作用域（{[test]}.mp4）：去掉作用域之后连名字都没了
+        // 先在名字前面补一个毫秒时间戳当名字部分（原名称原样跟在后面）再照常去作用域
+        // 只有真要改名字时才补 纯读取 / 索引一个字节都不动
+        std::filesystem::path target_path = file_path_utf8;
+        const std::string materialized = materializeWholeNameBlock(file_path_utf8);
+
+        if (materialized != file_path_utf8.filename().u8string())
+        {
+            target_path = file_path_utf8.parent_path() / materialized;
+        }
+
+        std::filesystem::path new_path = removeFilenameTagsPath(target_path);
 
         if (new_path != file_path_utf8)
         {
@@ -929,12 +947,39 @@ std::filesystem::path TagFileManager::buildCleanSidecarPath(const std::filesyste
     return buildSidecarPath(removeFilenameTagsPath(file_path_utf8));
 }
 
+// 整个名字（扩展名之前）就是一个 {[..]} 作用域 例如 {[test]}.mp4
+bool TagFileManager::isWholeNameTagBlock(const std::filesystem::path &file_path_utf8)
+{
+    const std::string stem = file_path_utf8.stem().u8string();
+
+    return !stem.empty() && removeTagsFromFilename(stem).empty();
+}
+
+// 整名作用域的文件没有能当"名字"的部分：{[test]}.mp4 去掉作用域就什么都不剩
+// 这种在真要改名字时补一个毫秒时间戳前缀： <毫秒时间戳> + 原名称
+// 前缀只能加在最前面：作用域必须留在名字结尾 加在后面以后就再也去不掉了
+// 纯读取 / 索引 / 同步扫描都不会走到这里 文件不会因为"被读了一下"就改名
+std::string TagFileManager::materializeWholeNameBlock(const std::filesystem::path &file_path_utf8)
+{
+    const std::string name = file_path_utf8.filename().u8string();
+
+    if (!isWholeNameTagBlock(file_path_utf8))
+    {
+        return name;
+    }
+
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    return std::to_string(millis) + name;
+}
+
 // 与 writeTagsToFile 的 Filename 分支保持同一规则: 去掉旧标签块后按 tags 重新拼接
 std::filesystem::path TagFileManager::buildTaggedPath(const std::filesystem::path &file_path_utf8, const std::vector<std::string> &tags)
 {
-    std::filesystem::path parent = file_path_utf8.parent_path();
-    std::string stem = file_path_utf8.stem().u8string();
-    std::string ext = file_path_utf8.extension().u8string();
+    // 整名作用域先补时间戳前缀 与 writeTagsToFile 的实际改名保持一致 预测路径才不会落空
+    const std::filesystem::path target_path = file_path_utf8.parent_path() / materializeWholeNameBlock(file_path_utf8);
+    std::filesystem::path parent = target_path.parent_path();
+    std::string stem = target_path.stem().u8string();
+    std::string ext = target_path.extension().u8string();
     std::string clean_stem = removeTagsFromFilename(stem);
     std::string new_stem = formatFilenameWithTags(clean_stem, tags);
     return parent / (new_stem + ext);
@@ -1229,9 +1274,12 @@ bool TagFileManager::writeTagsToFile(const std::filesystem::path &file_path, con
             return true;
         }
 
-        auto parent = file_path.parent_path();
-        std::string stem = file_path.stem().u8string();
-        std::string ext = file_path.extension().u8string();
+        // 整名作用域：本来就没有名字部分 先补一个毫秒时间戳前缀再写标签
+        // （前缀只能加在最前面 作用域必须留在名字结尾 加在后面以后就再也去不掉了）
+        const std::filesystem::path target_path = file_path.parent_path() / materializeWholeNameBlock(file_path);
+        auto parent = target_path.parent_path();
+        std::string stem = target_path.stem().u8string();
+        std::string ext = target_path.extension().u8string();
 
         std::string clean_stem = removeTagsFromFilename(stem);
         std::string new_stem = formatFilenameWithTags(clean_stem, tags);

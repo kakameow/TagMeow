@@ -122,6 +122,11 @@ private:
     static std::string formatFilenameWithTags(const std::string &file_name, const std::vector<std::string> &tags);
     // 从文件名中移除所有标签块返回纯文件名 不带扩展名
     static std::string removeTagsFromFilename(const std::string &file_name);
+    // 整个名字（扩展名之前）就是一个 {[..]} 作用域 例如 {[test]}.mp4
+    // 这种名字"去掉结尾作用域"之后什么都不剩 改名就等于把原文件名删掉
+    static bool isWholeNameTagBlock(const std::filesystem::path &file_path_utf8);
+    // 整名作用域没有能当"名字"的部分 -> 需要改名字时补 <毫秒时间戳> 前缀（原名称原样跟在后面）
+    static std::string materializeWholeNameBlock(const std::filesystem::path &file_path_utf8);
     // 从文件路径中去除文件名中的标签块返回纯净路径
     static std::filesystem::path removeFilenameTagsPath(const std::filesystem::path &path);
     // 读取侧车文件中的标签列表
