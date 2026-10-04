@@ -86,6 +86,8 @@
     { "id": "filter.picker_title", "str": "Pick filter tags" },
     { "id": "filter.picker_hint", "str": "Tap a container below to make it the target; tags you pick from the library go into it" },
     { "id": "filter.pick_from_library", "str": "Pick from tag library" },
+    { "id": "filter.search_hint", "str": "Search tags by name" },
+    { "id": "filter.search_empty", "str": "No matching tags" },
 
     { "id": "dir.title", "str": "Folders" },
     { "id": "dir.none", "str": "No folder yet" },

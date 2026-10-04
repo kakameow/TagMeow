@@ -29,6 +29,8 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.MimeTypeMap;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
@@ -168,7 +170,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int THUMB_SIZE = 96;
 
     // 一次列表最多取多少张缩略图（超出的显示类型图标 防止大文件夹把内存吃光）
-    private static final int THUMB_LIMIT = 300;
+    private static final int THUMB_LIMIT = 1024;
 
     // 缩略图缓存上限（KB）：reload() 会重画整个列表 缓存住就不用反复解码
     // 缩略图缓存：解码后统一缩到 THUMB_SIZE（96×96×4B ≈ 36KB）
@@ -503,6 +505,17 @@ public class MainActivity extends AppCompatActivity {
 
     private String search_summary = "";
 
+    // 每个页签各自的滚动位置
+    private final int[] tab_scroll = new int[TAB_LABEL_KEYS.length];
+    private int active_tab = 0;
+    // 换目录 / 搜索之后要回到顶部 不还原旧位置
+    private boolean scroll_to_top = false;
+    private ScrollView content_scroll;
+
+    // 标签库搜索框里的文字 搜索子界面 / 文件标签子界面共用
+    private String tag_query = "";
+    private EditText edit_tag_search;
+
     // 搜索目录范围：这里存的是「被取消勾选的目录」空集合 = 默认全选
     // 用「取消集合」而不是「选中集合」 以后新加的目录自动就在搜索范围里
     private final Set<String> search_dirs_off = new LinkedHashSet<>();
@@ -625,6 +638,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void bindViews() {
+        content_scroll = findViewById(R.id.contentScroll);
         tv_stat_files = findViewById(R.id.tvStatFiles);
         tv_stat_tags = findViewById(R.id.tvStatTags);
         tv_files_title = findViewById(R.id.tvFilesTitle);
@@ -741,6 +755,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectTab(int index) {
+        // 离开当前页签之前记录滚动位置
+        if (content_scroll != null && active_tab != index) {
+            tab_scroll[active_tab] = content_scroll.getScrollY();
+        }
+
+        active_tab = index;
+
         for (int i = 0; i < tab_views.length; i++) {
             tab_views[i].setVisibility(i == index ? View.VISIBLE : View.GONE);
 
@@ -758,6 +779,20 @@ public class MainActivity extends AppCompatActivity {
 
         // 同步页的状态行（是否正在分享 / 保存目录在哪）
         renderSyncTabStatus();
+
+        // 切回来时还原这一页的滚动位置
+        restoreTabScroll(index);
+    }
+
+    // 还原某个页签的滚动位置
+    private void restoreTabScroll(final int index) {
+        if (content_scroll == null || index < 0 || index >= tab_scroll.length) {
+            return;
+        }
+
+        final int target = tab_scroll[index];
+
+        content_scroll.post(() -> content_scroll.scrollTo(0, target));
     }
 
     private void initEngine() {
@@ -909,9 +944,16 @@ public class MainActivity extends AppCompatActivity {
                 if (!stamp.equals(browse_stamp) || files_list.getChildCount() == 0) {
                     browse_stamp = stamp;
 
+                    // 重画会把滚动位置顶回开头 画完再还原
+                    if (scroll_to_top) {
+                        tab_scroll[active_tab] = 0;
+                        scroll_to_top = false;
+                    }
+
                     renderDirectories();
                     renderTagLibrary();
                     renderFiles(search_mode ? current_files : entries);
+                    restoreTabScroll(active_tab);
                 }
 
                 // 编辑器子界面开着的时候 也要跟着最新标签库刷新
@@ -1217,6 +1259,7 @@ public class MainActivity extends AppCompatActivity {
         if (info.is_directory) {
             current_directory = info.file_ref;
             search_mode = false;
+            scroll_to_top = true;
             reload();
             return;
         }
@@ -1232,6 +1275,7 @@ public class MainActivity extends AppCompatActivity {
 
         current_directory = current_directory.getParent();
         search_mode = false;
+        scroll_to_top = true;
         reload();
     }
 
@@ -1516,6 +1560,7 @@ public class MainActivity extends AppCompatActivity {
             runOnUiThread(() -> {
                 search_mode = true;
                 search_summary = label;
+                scroll_to_top = true;
                 current_files.clear();
                 current_files.addAll(result);
 
@@ -1535,6 +1580,7 @@ public class MainActivity extends AppCompatActivity {
 
         search_mode = false;
         search_summary = "";
+        scroll_to_top = true;
         reload();
     }
 
@@ -1749,6 +1795,12 @@ public class MainActivity extends AppCompatActivity {
             toast(Lang.get("filter.updated"));
         });
 
+        // 标签搜索框：每次打开都清空
+        edit_tag_search = search_tag_overlay.findViewById(R.id.editTagSearch);
+        tag_query = "";
+        edit_tag_search.setText("");
+        bindTagSearch(edit_tag_search, 1);
+
         applyOverlayTexts();
         renderFilterGroups();
         renderSearchDirList();
@@ -1826,12 +1878,20 @@ public class MainActivity extends AppCompatActivity {
 
         title.setText(filterGroupName(group) + Lang.get("filter.tags_suffix") + tags.size());
 
+        // 每个容器自己的边框色 没选中时恢复颜色
+        int own_border = group == 1
+                ? getColor(R.color.filter_exclude_border)
+                : (group == 2 ? getColor(R.color.filter_only_border) : getColor(R.color.filter_include_border));
+
         if (group == active_filter_group) {
             title.setTextColor(COLOR_TEXT);
             card.setStrokeWidth(dp(2));
+            // 被选中的容器：黑色描边
+            card.setStrokeColor(0xFF000000);
         } else {
             title.setTextColor(COLOR_MEDIUM);
             card.setStrokeWidth(dp(1));
+            card.setStrokeColor(own_border);
         }
 
         // 用矢量图标代替
@@ -1874,9 +1934,25 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        // 标签搜索框：按名字过滤（不分大小写 子串匹配）
+        final String query = tag_query == null ? "" : tag_query.trim().toLowerCase(Locale.getDefault());
+
         for (Map.Entry<String, List<String>> entry : tag_types.entrySet()) {
             final String type = entry.getKey();
-            final List<String> tags = entry.getValue();
+            final List<String> all_tags = entry.getValue();
+            final List<String> tags = new ArrayList<>();
+
+            for (String tag : all_tags) {
+                if (query.isEmpty() || tag.toLowerCase(Locale.getDefault()).contains(query)) {
+                    tags.add(tag);
+                }
+            }
+
+            // 没有匹配的标签的类型 不画类型
+            if (tags.isEmpty()) {
+                continue;
+            }
+
             final int color = colorOfType(type);
 
             View card = getLayoutInflater().inflate(R.layout.item_type, container, false);
@@ -1923,6 +1999,36 @@ public class MainActivity extends AppCompatActivity {
 
             container.addView(card);
         }
+
+        // 没有匹配的结果
+        if (container.getChildCount() == 0) {
+            container.addView(buildHint(Lang.get("filter.search_empty")));
+        }
+    }
+
+    // 标签搜索框：输入即按名字过滤标签库
+    private void bindTagSearch(EditText input, final int mode) {
+        if (input == null) {
+            return;
+        }
+
+        input.setHint(Lang.get("filter.search_hint"));
+        input.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence text, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence text, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable text) {
+                tag_query = text == null ? "" : text.toString();
+
+                renderLibraryInto(mode == 0 ? file_tag_library : search_tag_library, mode);
+            }
+        });
     }
 
     private void hideOverlay() {
@@ -3489,6 +3595,12 @@ public class MainActivity extends AppCompatActivity {
 
         file_tag_overlay.findViewById(R.id.btnFileTagCancel).setOnClickListener(v -> hideOverlay());
         file_tag_overlay.findViewById(R.id.btnFileTagSave).setOnClickListener(v -> saveFileTags());
+
+        // 标签搜索框：每次打开都清空
+        edit_tag_search = file_tag_overlay.findViewById(R.id.editTagSearch);
+        tag_query = "";
+        edit_tag_search.setText("");
+        bindTagSearch(edit_tag_search, 0);
 
         applyOverlayTexts();
         renderFileTagCurrent();

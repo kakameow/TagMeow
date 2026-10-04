@@ -86,6 +86,8 @@
     { "id": "filter.picker_title", "str": "选择筛选标签" },
     { "id": "filter.picker_hint", "str": "点下面的容器可以切换「当前容器」，标签库的标签会加进当前容器" },
     { "id": "filter.pick_from_library", "str": "从标签库选择" },
+    { "id": "filter.search_hint", "str": "按名字搜索标签" },
+    { "id": "filter.search_empty", "str": "没有匹配的标签" },
 
     { "id": "dir.title", "str": "目录" },
     { "id": "dir.none", "str": "还没有目录" },

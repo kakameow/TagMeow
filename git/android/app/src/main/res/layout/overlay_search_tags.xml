@@ -358,6 +358,25 @@
                         android:paddingStart="12dp"
                         android:paddingEnd="12dp">
 
+                        <!-- 标签搜索：按名字过滤下面的标签库 -->
+                        <EditText
+                            android:id="@+id/editTagSearch"
+                            android:layout_width="match_parent"
+                            android:layout_height="36dp"
+                            android:layout_marginStart="10dp"
+                            android:layout_marginTop="8dp"
+                            android:layout_marginEnd="10dp"
+                            android:background="@drawable/bg_mini"
+                            android:hint=""
+                            android:imeOptions="actionSearch"
+                            android:inputType="text"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:singleLine="true"
+                            android:textColor="@color/text_primary"
+                            android:textColorHint="@color/text_faint"
+                            android:textSize="12sp" />
+
                         <TextView
                             android:id="@+id/tvSearchTagLibraryTitle"
                             android:layout_width="wrap_content"
