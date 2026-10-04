@@ -96,6 +96,8 @@ public final class FileDatabase {
         public List<String> only = new ArrayList<>();
         // 至少包含其中一个标签
         public List<String> include = new ArrayList<>();
+        // 只在这些目录(含子目录)内搜索；为空表示全部目录
+        public List<FileRef> dirs = new ArrayList<>();
     }
 
     // SQLiteOpenHelper 封装
@@ -723,10 +725,14 @@ public final class FileDatabase {
         }
 
         // exclude：不能包含任何 exclude 标签
+        boolean has_exclude = false;
+
         for (String tag : safeList(opts.exclude)) {
             if (tag.isEmpty()) {
                 continue;
             }
+
+            has_exclude = true;
 
             sql.append(" AND NOT EXISTS (SELECT 1 FROM tags t3 WHERE t3.file_id = f.file_id AND t3.tag = ?)");
             bind_values.add(tag);
@@ -750,6 +756,37 @@ public final class FileDatabase {
                 bind_values.add(valid_include.get(i));
             }
             sql.append(")");
+        }
+
+        // 三个标签容器都为空(或只填了空字符串) -> 改成返回「没有标签」的文件
+        // 以前是返回全部文件 那等于没筛选；现在返回没打标签的 正好是待整理的那一批
+        if (only_set.isEmpty() && valid_include.isEmpty() && !has_exclude) {
+            sql.append(" AND NOT EXISTS (SELECT 1 FROM tags t0 WHERE t0.file_id = f.file_id)");
+        }
+
+        // 目录过滤：dirs 为空表示全部目录 否则只保留这些目录(含子目录)里的东西
+        List<FileRef> dirs = opts.dirs == null ? new ArrayList<FileRef>() : opts.dirs;
+        StringBuilder dir_sql = new StringBuilder();
+        List<String> dir_bounds = new ArrayList<>();
+
+        for (FileRef dir : dirs) {
+            if (dir == null) {
+                continue;
+            }
+
+            if (dir_sql.length() == 0) {
+                dir_sql.append(" AND (");
+            } else {
+                dir_sql.append(" OR ");
+            }
+
+            dir_sql.append(dirCondition(dir, dir_bounds));
+        }
+
+        if (dir_sql.length() > 0) {
+            dir_sql.append(")");
+            sql.append(dir_sql);
+            bind_values.addAll(dir_bounds);
         }
 
         sql.append(" GROUP BY f.file_id;");
@@ -854,7 +891,85 @@ public final class FileDatabase {
         return results;
     }
 
-    // 统计当前索引中的文件数量
+    // 目录（含子目录）在 files.path 上的范围条件
+    // path 是 root_id + 分隔符 + 相对路径 上面有 UNIQUE 索引 所以用范围查询
+    // 条件里的 ? 按顺序填进 bounds
+    private static String dirCondition(FileRef dir, List<String> bounds) {
+        String base = dir.key();
+
+        if (dir.getRelativePath().isEmpty()) {
+            // root 自己：下面的东西是 root_id + 分隔符 + 名字 没有多一层 '/'
+            // 上界取分隔符的后继字符（\u001F -> \u0020）正好卡住这一棵树
+            bounds.add(base);
+            bounds.add(dir.getRootId() + '\u0020');
+
+            return "(f.path >= ? AND f.path < ?)";
+        }
+
+        // 普通目录：目录自己 + 它下面的东西（base + '/' + 名字）
+        // 上界把末尾的 '/' 换成它后面的字符 '0' 正好卡住这个前缀
+        bounds.add(base);
+        bounds.add(base + "/");
+        bounds.add(base + "0");
+
+        return "(f.path = ? OR (f.path >= ? AND f.path < ?))";
+    }
+
+    // 统计指定目录（含子目录）下的记录数
+    // 传多个目录时用 OR 连起来 同一个文件只算一次；传空表示全库
+    public long countFiles(List<FileRef> dirs) {
+        if (dirs == null || dirs.isEmpty()) {
+            return countFiles();
+        }
+
+        SQLiteDatabase database = db();
+        if (database == null) {
+            error_string = "[warning] Database not opened";
+            return 0L;
+        }
+
+        StringBuilder where = new StringBuilder();
+        List<String> bounds = new ArrayList<>();
+
+        for (FileRef dir : dirs) {
+            if (dir == null) {
+                continue;
+            }
+
+            if (where.length() > 0) {
+                where.append(" OR ");
+            }
+
+            where.append(dirCondition(dir, bounds));
+        }
+
+        if (where.length() == 0) {
+            return countFiles();
+        }
+
+        try (Cursor cursor = database.rawQuery(
+                "SELECT COUNT(*) FROM files f WHERE " + where + ";",
+                bounds.toArray(new String[0]))) {
+            return cursor.moveToFirst() ? cursor.getLong(0) : 0L;
+        } catch (RuntimeException error) {
+            error_string = "[warning] " + error.getMessage();
+            return 0L;
+        }
+    }
+
+    // 统计单个目录（含子目录）下的记录数
+    public long countFiles(FileRef dir) {
+        if (dir == null) {
+            return countFiles();
+        }
+
+        List<FileRef> one = new ArrayList<>();
+        one.add(dir);
+
+        return countFiles(one);
+    }
+
+    // 统计当前索引中的文件数量（全库）
     public long countFiles() {
         SQLiteDatabase database = db();
         if (database == null) {

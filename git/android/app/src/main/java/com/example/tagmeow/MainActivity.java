@@ -345,6 +345,23 @@ public class MainActivity extends AppCompatActivity {
 
     private LinearLayout dir_manage_list;
 
+    // 搜索目录多选容器（在搜索标签子界面里 默认折叠）
+    private LinearLayout search_dir_list;
+
+    private LinearLayout search_dir_body;
+
+    private TextView tv_search_dir_hint;
+
+    private TextView tv_search_dir_empty;
+
+    private TextView tv_search_dir_summary;
+
+    private TextView tv_search_dir_toggle;
+
+    private TextView btn_search_dir_all;
+
+    private boolean search_dir_expanded = false;
+
     private TextView tv_dir_manage_empty;
 
     // 目录管理里被选中的 root_id（多选）
@@ -477,6 +494,10 @@ public class MainActivity extends AppCompatActivity {
     private boolean search_mode = false;
 
     private String search_summary = "";
+
+    // 搜索目录范围：这里存的是「被取消勾选的目录」空集合 = 默认全选
+    // 用「取消集合」而不是「选中集合」 以后新加的目录自动就在搜索范围里
+    private final Set<String> search_dirs_off = new LinkedHashSet<>();
 
     private final List<FileDatabase.FileInfo> current_files = new ArrayList<>();
 
@@ -622,6 +643,7 @@ public class MainActivity extends AppCompatActivity {
         edit_exclude.setOnClickListener(v -> showSearchTagOverlay(1));
         edit_only.setOnClickListener(v -> showSearchTagOverlay(2));
 
+        // 搜索目录多选容器在搜索标签子界面里 视图到那边去取
         renderSearchChips();
         applyStaticTexts();
 
@@ -635,11 +657,29 @@ public class MainActivity extends AppCompatActivity {
 
         findViewById(R.id.btnSearch).setOnClickListener(v -> doSearch());
         findViewById(R.id.btnClearSearch).setOnClickListener(v -> clearSearch());
-        findViewById(R.id.btnRefresh).setOnClickListener(v -> runAction(Lang.get("dir.action_refresh"), () -> {
-            boolean ok = serve.refreshAll();
-            toast(ok ? Lang.f("dir.refresh_done_count", serve.getFileDatabase().countFiles())
-                    : Lang.get("common.refresh_failed") + serve.getLastError());
-        }));
+        // 单目录刷新：在某个目录里就刷这个目录 在根列表上就把所有目录排队依次刷
+        // 「全部目录一把刷」只在设置里的「刷新索引」（那边走 refreshAll）
+        findViewById(R.id.btnRefresh).setOnClickListener(v -> {
+            final FileRef only_dir = current_directory;
+            final List<FileRef> all_dirs = rootRefsOf(current_roots);
+
+            runAction(Lang.get("dir.action_refresh"), () -> {
+                int done = only_dir != null
+                        ? (serve.refreshDirectory(only_dir) ? 1 : 0)
+                        : refreshOneByOne(all_dirs);
+                int total = only_dir != null ? 1 : all_dirs.size();
+                long refreshed = only_dir != null
+                        ? serve.getFileDatabase().countFiles(only_dir)
+                        : serve.getFileDatabase().countFiles(all_dirs);
+
+                toast(done == total
+                        ? (total > 1
+                                ? Lang.f("dir.refresh_done_dirs", done, total, refreshed)
+                                : Lang.f("dir.refresh_done_one", refreshed))
+                        : Lang.get("common.refresh_failed") + done + "/" + total
+                                + " " + serve.getLastError());
+            });
+        });
 
         btn_up.setOnClickListener(v -> openParentDirectory());
 
@@ -762,6 +802,8 @@ public class MainActivity extends AppCompatActivity {
         options.exclude.addAll(exclude_tags);
         options.only.addAll(only_tags);
 
+        options.dirs.addAll(searchDirRefs());
+
         return options;
     }
 
@@ -833,6 +875,8 @@ public class MainActivity extends AppCompatActivity {
                 tv_stat_tags.setText(Lang.get("stat.tags_prefix") + tagCount);
                 status_text = info;
                 renderSettings();
+                // 目录列表可能变了（新增 / 删除 / 授权丢了）搜索目录容器跟着刷一遍
+                renderSearchDirList();
 
                 collectLogMessages();
 
@@ -1411,12 +1455,16 @@ public class MainActivity extends AppCompatActivity {
         final List<String> include = new ArrayList<>(include_tags);
         final List<String> exclude = new ArrayList<>(exclude_tags);
         final List<String> only = new ArrayList<>(only_tags);
+        final List<FileRef> dirs = searchDirRefs();
+        final String dir_note = searchDirSummary();
 
         runAction(Lang.get("browse.search"), () -> {
             FileDatabase.SearchOptions options = new FileDatabase.SearchOptions();
             options.include.addAll(include);
             options.exclude.addAll(exclude);
             options.only.addAll(only);
+
+            options.dirs.addAll(dirs);
 
             final List<FileDatabase.FileInfo> result = new ArrayList<>(serve.searchByTags(options));
 
@@ -1429,6 +1477,9 @@ public class MainActivity extends AppCompatActivity {
             }
             if (!only.isEmpty()) {
                 summary.append(summary.length() > 0 ? "　" : "").append(Lang.get("browse.summary_only")).append(only);
+            }
+            if (!dir_note.isEmpty()) {
+                summary.append(summary.length() > 0 ? "　" : "").append(dir_note);
             }
 
             final String label = summary.length() == 0 ? Lang.get("browse.summary_none") : summary.toString();
@@ -1449,6 +1500,8 @@ public class MainActivity extends AppCompatActivity {
         include_tags.clear();
         exclude_tags.clear();
         only_tags.clear();
+        // 目录范围也跟着回到默认全选
+        search_dirs_off.clear();
         renderSearchChips();
 
         search_mode = false;
@@ -1469,6 +1522,145 @@ public class MainActivity extends AppCompatActivity {
         edit_only.setText(only_tags.isEmpty()
                 ? Lang.get("browse.only_placeholder")
                 : Lang.get("browse.only_prefix") + String.join("、", only_tags));
+
+        renderSearchDirList();
+    }
+
+    // 搜索目录多选容器：默认全选 取消勾选 = 那个目录不参与搜索
+    private void renderSearchDirList() {
+        if (search_dir_list == null) {
+            return;
+        }
+
+        search_dir_list.removeAllViews();
+
+        int total = current_roots.size();
+        boolean has_root = total > 0;
+        int picked = 0;
+
+        for (DirectoryConfigManager.Directory directory : current_roots) {
+            if (!search_dirs_off.contains(directory.getId())) {
+                picked++;
+            }
+        }
+
+        // 默认折叠
+        search_dir_body.setVisibility(search_dir_expanded ? View.VISIBLE : View.GONE);
+        tv_search_dir_toggle.setText(search_dir_expanded ? "▴" : "▾");
+        tv_search_dir_summary.setText(has_root ? picked + "/" + total : "");
+
+        tv_search_dir_empty.setVisibility(has_root ? View.GONE : View.VISIBLE);
+        btn_search_dir_all.setVisibility(has_root ? View.VISIBLE : View.GONE);
+
+        tv_search_dir_hint.setText(allSearchDirsOff()
+                ? Lang.get("browse.dir_scope_none")
+                : Lang.get("browse.dir_scope_hint"));
+
+        for (final DirectoryConfigManager.Directory directory : current_roots) {
+            final boolean checked = !search_dirs_off.contains(directory.getId());
+            boolean granted = Boolean.TRUE.equals(root_access.get(directory.getId()));
+
+            View row = getLayoutInflater().inflate(R.layout.item_dir_manage, search_dir_list, false);
+
+            TextView select = row.findViewById(R.id.dirSelect);
+            select.setText(checked ? "✓" : "");
+            select.setBackground(rounded(
+                    checked ? COLOR_TEXT : Color.WHITE,
+                    7,
+                    checked ? COLOR_TEXT : COLOR_BORDER,
+                    2));
+
+            ImageView icon = row.findViewById(R.id.dirManageIcon);
+            icon.setImageResource(R.drawable.folder);
+            icon.setImageTintList(ColorStateList.valueOf(0xFF59616E));
+            icon.setBackground(rounded(COLOR_ACTIVE_BG, 10, 0, 0));
+
+            TextView name = row.findViewById(R.id.dirManageName);
+            name.setText(directory.getDisplayName());
+
+            TextView path = row.findViewById(R.id.dirManagePath);
+            path.setText(displayPathOf(directory));
+
+            TextView badge = row.findViewById(R.id.dirBadge);
+            badge.setText(granted ? Lang.get("dir.badge_valid") : Lang.get("dir.badge_invalid"));
+            badge.setTextColor(granted ? 0xFF4E93C8 : COLOR_MUTED);
+            badge.setBackground(rounded(
+                    granted ? 0xFFEEF8FF : COLOR_ACTIVE_BG,
+                    6,
+                    granted ? 0xFF8EC8F7 : COLOR_BORDER,
+                    1));
+
+            row.findViewById(R.id.dirManageMore).setVisibility(View.GONE);
+
+            row.setOnClickListener(v -> {
+                if (search_dirs_off.contains(directory.getId())) {
+                    search_dirs_off.remove(directory.getId());
+                } else {
+                    search_dirs_off.add(directory.getId());
+                }
+
+                renderSearchDirList();
+            });
+
+            search_dir_list.addView(row);
+        }
+    }
+
+    // 被取消勾选的目录已经覆盖了全部受管理目录
+    private boolean allSearchDirsOff() {
+        if (current_roots.isEmpty()) {
+            return false;
+        }
+
+        for (DirectoryConfigManager.Directory directory : current_roots) {
+            if (!search_dirs_off.contains(directory.getId())) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // 搜索范围：全选返回空（等于不限制） 否则返回勾上的那些根
+    // 一个都没勾 -> 给一个匹配不到任何行的空根键（搜索结果为 0 而不是「变成搜全部」）
+    private List<FileRef> searchDirRefs() {
+        List<FileRef> refs = new ArrayList<>();
+
+        if (current_roots.isEmpty() || search_dirs_off.isEmpty()) {
+            return refs;
+        }
+
+        if (allSearchDirsOff()) {
+            refs.add(new FileRef("", ""));
+
+            return refs;
+        }
+
+        for (DirectoryConfigManager.Directory directory : current_roots) {
+            if (!search_dirs_off.contains(directory.getId())) {
+                refs.add(new FileRef(directory.getId(), ""));
+            }
+        }
+
+        return refs;
+    }
+
+    private String searchDirSummary() {
+        int total = current_roots.size();
+
+        if (total == 0 || search_dirs_off.isEmpty()) {
+            return "";
+        }
+
+        int picked = 0;
+
+        for (DirectoryConfigManager.Directory directory : current_roots) {
+            if (!search_dirs_off.contains(directory.getId())) {
+                picked++;
+            }
+        }
+
+        return Lang.get("browse.summary_dir") + picked + "/" + total;
     }
 
     // 搜索筛选标签
@@ -1495,6 +1687,27 @@ public class MainActivity extends AppCompatActivity {
         group_exclude = search_tag_overlay.findViewById(R.id.groupExclude);
         group_only = search_tag_overlay.findViewById(R.id.groupOnly);
 
+        // 搜索目录多选容器
+        search_dir_list = search_tag_overlay.findViewById(R.id.searchDirList);
+        search_dir_body = search_tag_overlay.findViewById(R.id.searchDirBody);
+        tv_search_dir_hint = search_tag_overlay.findViewById(R.id.tvSearchDirHint);
+        tv_search_dir_empty = search_tag_overlay.findViewById(R.id.tvSearchDirEmpty);
+        tv_search_dir_summary = search_tag_overlay.findViewById(R.id.tvSearchDirSummary);
+        tv_search_dir_toggle = search_tag_overlay.findViewById(R.id.tvSearchDirToggle);
+        btn_search_dir_all = search_tag_overlay.findViewById(R.id.btnSearchDirAll);
+
+        search_dir_expanded = false;
+
+        search_tag_overlay.findViewById(R.id.searchDirHead).setOnClickListener(v -> {
+            search_dir_expanded = !search_dir_expanded;
+            renderSearchDirList();
+        });
+
+        btn_search_dir_all.setOnClickListener(v -> {
+            search_dirs_off.clear();
+            renderSearchDirList();
+        });
+
         // 点容器标题 -> 切换「当前容器」
         search_tag_overlay.findViewById(R.id.headInclude).setOnClickListener(v -> setActiveFilterGroup(0));
         search_tag_overlay.findViewById(R.id.headExclude).setOnClickListener(v -> setActiveFilterGroup(1));
@@ -1509,6 +1722,7 @@ public class MainActivity extends AppCompatActivity {
 
         applyOverlayTexts();
         renderFilterGroups();
+        renderSearchDirList();
         renderLibraryInto(search_tag_library, 1);
     }
 
@@ -1688,6 +1902,13 @@ public class MainActivity extends AppCompatActivity {
 
         file_tag_overlay = null;
         search_tag_overlay = null;
+        search_dir_list = null;
+        search_dir_body = null;
+        tv_search_dir_hint = null;
+        tv_search_dir_empty = null;
+        tv_search_dir_summary = null;
+        tv_search_dir_toggle = null;
+        btn_search_dir_all = null;
         tag_editor_overlay = null;
         dir_manage_overlay = null;
         dir_manage_list = null;
@@ -2010,7 +2231,6 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-
         addFilesRoot(target);
     }
 
@@ -2287,7 +2507,7 @@ public class MainActivity extends AppCompatActivity {
 
         dir_manage_overlay.findViewById(R.id.btnDirManageBack).setOnClickListener(v -> hideOverlay());
         dir_manage_overlay.findViewById(R.id.btnDirManageOpen).setOnClickListener(v -> openSelectedRoot());
-        dir_manage_overlay.findViewById(R.id.btnDirManageRefresh).setOnClickListener(v -> refreshAllRoots());
+        dir_manage_overlay.findViewById(R.id.btnDirManageRefresh).setOnClickListener(v -> refreshSelectedRoots());
         dir_manage_overlay.findViewById(R.id.btnDirManageDelete).setOnClickListener(v -> deleteSelectedRoots());
 
         applyOverlayTexts();
@@ -2387,14 +2607,55 @@ public class MainActivity extends AppCompatActivity {
         selectTab(0);
     }
 
-    // 刷新：重扫全部受管理目录
-    private void refreshAllRoots() {
+    // 刷新：一个目录接一个目录地刷（单目录刷新）
+    // 选中多个就入队依次刷 一个都没选先提示选目录
+    private void refreshSelectedRoots() {
+        if (selected_root_ids.isEmpty()) {
+            toast(Lang.get("dir.refresh_selected_hint"));
+            return;
+        }
+
+        final List<FileRef> dirs = new ArrayList<>();
+
+        for (String id : selected_root_ids) {
+            dirs.add(new FileRef(id, ""));
+        }
+
         runAction(Lang.get("dir.action_refresh"), () -> {
-            boolean ok = serve.refreshAll();
-            toast(ok
-                    ? Lang.f("dir.refresh_done_count", serve.getFileDatabase().countFiles())
-                    : Lang.get("common.refresh_failed") + serve.getLastError());
+            int done = refreshOneByOne(dirs);
+
+            // 报本次刷新的这些目录下有多少条
+            long refreshed = serve.getFileDatabase().countFiles(dirs);
+
+            toast(done == dirs.size()
+                    ? Lang.f("dir.refresh_done_dirs", done, dirs.size(), refreshed)
+                    : Lang.get("common.refresh_failed") + done + "/" + dirs.size()
+                            + " " + serve.getLastError());
         });
+    }
+
+    // 受管理目录 -> root 引用
+    private static List<FileRef> rootRefsOf(List<DirectoryConfigManager.Directory> roots) {
+        List<FileRef> refs = new ArrayList<>();
+
+        for (DirectoryConfigManager.Directory directory : roots) {
+            refs.add(new FileRef(directory.getId(), ""));
+        }
+
+        return refs;
+    }
+
+    // 一个接一个地刷新（单目录刷新）返回成功的个数
+    private int refreshOneByOne(List<FileRef> dirs) {
+        int done = 0;
+
+        for (FileRef dir : dirs) {
+            if (serve.refreshDirectory(dir)) {
+                done++;
+            }
+        }
+
+        return done;
     }
 
     // 删除：确认后只摘掉管理关系 不动真实文件
@@ -2464,7 +2725,10 @@ public class MainActivity extends AppCompatActivity {
                     } else if (which == 1) {
                         runAction(Lang.get("dir.action_refresh_one"), () -> {
                             boolean ok = serve.refreshRoot(directory.getId());
-                            toast(ok ? Lang.get("dir.refresh_done") : Lang.get("common.refresh_failed") + serve.getLastError());
+                            toast(ok
+                                    ? Lang.f("dir.refresh_done_one", serve.getFileDatabase().countFiles(
+                                            new FileRef(directory.getId(), "")))
+                                    : Lang.get("common.refresh_failed") + serve.getLastError());
                         });
                     } else {
                         runAction(Lang.get("dir.action_remove"), () -> {
@@ -3314,7 +3578,9 @@ public class MainActivity extends AppCompatActivity {
                 buildValue("›"),
                 () -> runAction(Lang.get("dir.action_refresh"), () -> {
                     boolean ok = serve.refreshAll();
-                    toast(ok ? Lang.get("dir.refresh_done") : Lang.get("common.refresh_failed") + serve.getLastError());
+                    toast(ok
+                            ? Lang.f("dir.refresh_done_count", serve.getFileDatabase().countFiles())
+                            : Lang.get("common.refresh_failed") + serve.getLastError());
                 })));
 
         addRow(data_group, buildRow(R.drawable.brush_cleaning, Lang.get("settings.cleanup"), Lang.get("settings.cleanup_desc"),
@@ -4232,16 +4498,15 @@ public class MainActivity extends AppCompatActivity {
     // 布局里的静态文案
     // XML 里的中文只是默认值（方便布局预览）实际显示一律查语言表
     private void applyStaticTexts() {
-        // 卡片标题前面挂个小图标（矢量图）
         setTitleIcon(R.id.tvFilesTitle, R.drawable.text_align_justify);
         setTitleIcon(R.id.tvDirTitle, R.drawable.folder);
         setTitleIcon(R.id.tvTagTitle, R.drawable.tag);
         setTitleIcon(R.id.tvSyncTitle, R.drawable.arrow_right_left);
 
-        // 顶栏统计用矢量图标（原来的 ▧ / ◈ 是文字符号）
         setCompoundIcon(findViewById(R.id.tvStatFiles), R.drawable.file, COLOR_MUTED, 13);
         setCompoundIcon(findViewById(R.id.tvStatTags), R.drawable.tag, COLOR_MUTED, 13);
 
+        setText(R.id.tvAppName, "app.name");
         setText(R.id.tvFilterTitle, "browse.filter_title");
         setText(R.id.btnUp, "browse.up");
         setText(R.id.tvDirTitle, "dir.title");
@@ -4308,7 +4573,7 @@ public class MainActivity extends AppCompatActivity {
         view.setCompoundDrawablesRelative(icon, null, null, null);
     }
 
-    // 子界面里的静态文案（子界面每次打开都会重新 inflate 所以每次都要刷一遍）
+    // 子界面里的静态文案
     private void applyOverlayTexts() {
         applySyncOverlayTexts();
         if (file_tag_overlay != null) {
@@ -4329,6 +4594,10 @@ public class MainActivity extends AppCompatActivity {
             setText(search_tag_overlay, R.id.btnSearchTagConfirm, "common.confirm");
             setText(search_tag_overlay, R.id.tvSearchTagHint, "filter.picker_hint");
             setText(search_tag_overlay, R.id.tvSearchTagLibraryTitle, "filter.pick_from_library");
+
+            setText(search_tag_overlay, R.id.tvSearchDirTitle, "browse.dir_scope_title");
+            setText(search_tag_overlay, R.id.btnSearchDirAll, "browse.dir_scope_all");
+            setText(search_tag_overlay, R.id.tvSearchDirEmpty, "browse.dir_scope_empty");
         }
 
         if (dir_browser_overlay != null) {
@@ -4411,9 +4680,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // 导出 / 导入标签库
-
-    // 导出：每次都走系统「保存到…」对话框
-    // 默认导出目录那套要 SAF tree 授权 跟着系统选择器一起砍了
     private void exportTags() {
         export_picker.launch(EXPORT_FILE_NAME);
     }

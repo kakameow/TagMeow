@@ -24,7 +24,7 @@
             android:gravity="center"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
-            android:text="返回"
+            android:text=""
             android:textColor="#59616e"
             android:textSize="13sp" />
 
@@ -37,7 +37,7 @@
             android:id="@+id/tvSyncExportTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="其他方式分享"
+            android:text=""
             android:textColor="#20242b"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -73,7 +73,7 @@
                 android:id="@+id/tvSyncExportZipDirLabel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="压缩包目录"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="11sp" />
 
@@ -97,7 +97,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="要分享的目录"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="11sp" />
 
@@ -129,7 +129,7 @@
                     android:layout_weight="1"
                     android:background="@drawable/bg_mini"
                     android:gravity="center"
-                    android:text="选择目录"
+                    android:text=""
                     android:textColor="#20242b"
                     android:textSize="13sp" />
 
@@ -141,7 +141,7 @@
                     android:layout_weight="1"
                     android:background="@drawable/bg_mini_primary"
                     android:gravity="center"
-                    android:text="压缩并分享"
+                    android:text=""
                     android:textColor="#ffffff"
                     android:textSize="13sp" />
             </LinearLayout>
@@ -153,7 +153,7 @@
                 android:layout_marginTop="10dp"
                 android:background="@drawable/bg_danger"
                 android:gravity="center"
-                android:text="删除全部压缩包"
+                android:text=""
                 android:textColor="#df6876"
                 android:textSize="13sp" />
 
@@ -162,7 +162,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="压缩包只放在应用内部目录里，分享完可以一键全部删掉"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="11sp" />
         </LinearLayout>

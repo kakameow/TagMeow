@@ -25,7 +25,7 @@
             android:gravity="center"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
-            android:text="返回"
+            android:text=""
             android:textColor="#59616e"
             android:textSize="13sp" />
 
@@ -38,7 +38,7 @@
             android:id="@+id/tvDirManageTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="目录管理"
+            android:text=""
             android:textColor="#20242b"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -82,7 +82,7 @@
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:padding="30dp"
-                android:text="暂无目录，先去『目录』里添加一个"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="12sp"
                 android:visibility="gone" />
@@ -106,7 +106,7 @@
             android:layout_weight="1"
             android:background="@drawable/bg_mini_primary"
             android:gravity="center"
-            android:text="打开"
+            android:text=""
             android:textColor="#ffffff"
             android:textSize="14sp" />
 
@@ -118,7 +118,7 @@
             android:layout_weight="1"
             android:background="@drawable/bg_mini"
             android:gravity="center"
-            android:text="刷新"
+            android:text=""
             android:textColor="#20242b"
             android:textSize="14sp" />
 
@@ -130,7 +130,7 @@
             android:layout_weight="1"
             android:background="@drawable/bg_danger"
             android:gravity="center"
-            android:text="删除"
+            android:text=""
             android:textColor="#df6876"
             android:textSize="14sp" />
     </LinearLayout>

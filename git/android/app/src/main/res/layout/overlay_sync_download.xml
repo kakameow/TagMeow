@@ -24,7 +24,7 @@
             android:gravity="center"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
-            android:text="返回"
+            android:text=""
             android:textColor="#59616e"
             android:textSize="13sp" />
 
@@ -37,7 +37,7 @@
             android:id="@+id/tvSyncDownloadTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="从其他设备下载"
+            android:text=""
             android:textColor="#20242b"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -73,7 +73,7 @@
                 android:id="@+id/tvSyncPathLabel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="保存到"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="11sp" />
 
@@ -89,7 +89,7 @@
                 android:paddingTop="9dp"
                 android:paddingEnd="10dp"
                 android:paddingBottom="9dp"
-                android:text="/storage/emulated/0/TagMeow/download"
+                android:text=""
                 android:textColor="#20242b"
                 android:textSize="12sp" />
 
@@ -106,7 +106,7 @@
                     android:layout_weight="1"
                     android:background="@drawable/bg_mini"
                     android:gravity="center"
-                    android:text="更改保存目录"
+                    android:text=""
                     android:textColor="#20242b"
                     android:textSize="13sp" />
 
@@ -118,7 +118,7 @@
                     android:layout_weight="1"
                     android:background="@drawable/bg_mini_primary"
                     android:gravity="center"
-                    android:text="加入管理目录"
+                    android:text=""
                     android:textColor="#ffffff"
                     android:textSize="13sp" />
             </LinearLayout>
@@ -128,7 +128,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="局域网设备"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="11sp" />
 
@@ -146,7 +146,7 @@
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:padding="22dp"
-                android:text="还没有扫描到设备"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="12sp" />
 
@@ -155,7 +155,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="下载记录：已经成功下载过的文件会被跳过；清除记录后下次会全部重下（不会删除已下载的文件）"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="11sp" />
         </LinearLayout>
@@ -206,7 +206,7 @@
             android:layout_weight="1"
             android:background="@drawable/bg_mini_primary"
             android:gravity="center"
-            android:text="搜索设备"
+            android:text=""
             android:textColor="#ffffff"
             android:textSize="12sp" />
 
@@ -218,7 +218,7 @@
             android:layout_weight="1"
             android:background="@drawable/bg_mini"
             android:gravity="center"
-            android:text="下载选中"
+            android:text=""
             android:textColor="#20242b"
             android:textSize="12sp" />
 
@@ -230,7 +230,7 @@
             android:layout_weight="1"
             android:background="@drawable/bg_mini"
             android:gravity="center"
-            android:text="清除记录"
+            android:text=""
             android:textColor="#20242b"
             android:textSize="12sp" />
 
@@ -242,7 +242,7 @@
             android:layout_weight="1"
             android:background="@drawable/bg_danger"
             android:gravity="center"
-            android:text="断开"
+            android:text=""
             android:textColor="#df6876"
             android:textSize="12sp" />
     </LinearLayout>

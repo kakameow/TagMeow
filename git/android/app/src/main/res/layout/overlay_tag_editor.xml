@@ -25,7 +25,7 @@
             android:gravity="center"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
-            android:text="返回"
+            android:text=""
             android:textColor="#59616e"
             android:textSize="13sp" />
 
@@ -38,7 +38,7 @@
             android:id="@+id/tvEditorTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="新建类型"
+            android:text=""
             android:textColor="#20242b"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -85,7 +85,7 @@
                     android:layout_height="34dp"
                     android:layout_weight="1"
                     android:gravity="center"
-                    android:text="新建类型"
+                    android:text=""
                     android:textColor="#20242b"
                     android:textSize="12sp"
                     android:textStyle="bold" />
@@ -96,7 +96,7 @@
                     android:layout_height="34dp"
                     android:layout_weight="1"
                     android:gravity="center"
-                    android:text="新建标签"
+                    android:text=""
                     android:textColor="#626a75"
                     android:textSize="12sp" />
             </LinearLayout>
@@ -128,7 +128,7 @@
                             android:id="@+id/tvTypeNameLabel"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="类型名称"
+                            android:text=""
                             android:textColor="#656d79"
                             android:textSize="11sp"
                             android:textStyle="bold" />
@@ -139,7 +139,7 @@
                             android:layout_height="38dp"
                             android:layout_marginTop="8dp"
                             android:background="@drawable/bg_mini"
-                            android:hint="例如：项目、状态、文件类型"
+                            android:hint=""
                             android:importantForAutofill="no"
                             android:inputType="text"
                             android:paddingStart="12dp"
@@ -152,7 +152,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
-                            android:text="点下面列表里的类型可以把名称和颜色回填到这里"
+                            android:text=""
                             android:textColor="#8c939f"
                             android:textSize="10sp" />
 
@@ -172,7 +172,7 @@
                                 android:gravity="center"
                                 android:paddingStart="12dp"
                                 android:paddingEnd="12dp"
-                                android:text="重命名"
+                                android:text=""
                                 android:textColor="#20242b"
                                 android:textSize="12sp" />
 
@@ -183,7 +183,7 @@
                                 android:layout_marginStart="8dp"
                                 android:layout_weight="1"
                                 android:background="@drawable/bg_mini"
-                                android:hint="新类型名称"
+                                android:hint=""
                                 android:importantForAutofill="no"
                                 android:inputType="text"
                                 android:paddingStart="12dp"
@@ -214,7 +214,7 @@
                             android:id="@+id/tvColorLabel"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="颜色"
+                            android:text=""
                             android:textColor="#656d79"
                             android:textSize="11sp"
                             android:textStyle="bold" />
@@ -256,7 +256,7 @@
                                 android:gravity="center"
                                 android:paddingStart="12dp"
                                 android:paddingEnd="12dp"
-                                android:text="选色"
+                                android:text=""
                                 android:textColor="#20242b"
                                 android:textSize="12sp" />
                         </LinearLayout>
@@ -266,7 +266,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
-                            android:text="点色块或「选色」打开选色盘，也可以直接填 #RRGGBB"
+                            android:text=""
                             android:textColor="#8c939f"
                             android:textSize="10sp" />
 
@@ -281,7 +281,7 @@
                                 android:id="@+id/tvPreviewLabel"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="预览"
+                                android:text=""
                                 android:textColor="#8c939f"
                                 android:textSize="11sp" />
 
@@ -315,7 +315,7 @@
                             android:id="@+id/tvTypeListTitle"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="类型列表（点一下回填）"
+                            android:text=""
                             android:textColor="#656d79"
                             android:textSize="11sp"
                             android:textStyle="bold" />
@@ -359,7 +359,7 @@
                             android:id="@+id/tvGroupLabel"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="所属类型"
+                            android:text=""
                             android:textColor="#656d79"
                             android:textSize="11sp"
                             android:textStyle="bold" />
@@ -429,7 +429,7 @@
                             android:id="@+id/tvTagNameLabel"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="标签名"
+                            android:text=""
                             android:textColor="#656d79"
                             android:textSize="11sp"
                             android:textStyle="bold" />
@@ -440,7 +440,7 @@
                             android:layout_height="38dp"
                             android:layout_marginTop="8dp"
                             android:background="@drawable/bg_mini"
-                            android:hint="例如：工作、重要、待处理"
+                            android:hint=""
                             android:importantForAutofill="no"
                             android:inputType="text"
                             android:paddingStart="12dp"
@@ -453,7 +453,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
-                            android:text="标签名在标签库里全局唯一"
+                            android:text=""
                             android:textColor="#8c939f"
                             android:textSize="10sp" />
                     </LinearLayout>
@@ -479,7 +479,7 @@
                             android:id="@+id/tvTagListTitle"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="该类型下的标签（点一下回填）"
+                            android:text=""
                             android:textColor="#656d79"
                             android:textSize="11sp"
                             android:textStyle="bold" />
@@ -514,7 +514,7 @@
             android:layout_weight="1"
             android:background="@drawable/bg_danger"
             android:gravity="center"
-            android:text="删除"
+            android:text=""
             android:textColor="#df6876"
             android:textSize="14sp" />
 
@@ -526,7 +526,7 @@
             android:layout_weight="1"
             android:background="@drawable/bg_mini_primary"
             android:gravity="center"
-            android:text="添加"
+            android:text=""
             android:textColor="#ffffff"
             android:textSize="14sp" />
     </LinearLayout>

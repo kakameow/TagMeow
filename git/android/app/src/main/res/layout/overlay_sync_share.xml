@@ -24,7 +24,7 @@
             android:gravity="center"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
-            android:text="返回"
+            android:text=""
             android:textColor="#59616e"
             android:textSize="13sp" />
 
@@ -37,7 +37,7 @@
             android:id="@+id/tvSyncShareTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="从本机分享文件"
+            android:text=""
             android:textColor="#20242b"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -73,7 +73,7 @@
                 android:id="@+id/tvSyncNameLabel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="服务器名称"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="11sp" />
 
@@ -83,7 +83,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:background="#ffffff"
-                android:hint="输入服务器名称"
+                android:hint=""
                 android:inputType="text"
                 android:maxLines="1"
                 android:paddingStart="10dp"
@@ -108,7 +108,7 @@
                     android:layout_weight="1"
                     android:background="@drawable/bg_mini_primary"
                     android:gravity="center"
-                    android:text="启动"
+                    android:text=""
                     android:textColor="#ffffff"
                     android:textSize="14sp" />
 
@@ -120,7 +120,7 @@
                     android:layout_weight="1"
                     android:background="@drawable/bg_mini"
                     android:gravity="center"
-                    android:text="关闭"
+                    android:text=""
                     android:textColor="#20242b"
                     android:textSize="14sp" />
             </LinearLayout>
@@ -130,7 +130,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="要分享的目录"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="11sp" />
 
@@ -140,7 +140,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:background="#ffffff"
-                android:hint="输入目录路径"
+                android:hint=""
                 android:inputType="text"
                 android:maxLines="1"
                 android:paddingStart="10dp"
@@ -164,7 +164,7 @@
                     android:layout_weight="1"
                     android:background="@drawable/bg_mini"
                     android:gravity="center"
-                    android:text="浏览目录"
+                    android:text=""
                     android:textColor="#20242b"
                     android:textSize="14sp" />
 
@@ -176,7 +176,7 @@
                     android:layout_weight="1"
                     android:background="@drawable/bg_mini_primary"
                     android:gravity="center"
-                    android:text="加入传输列表"
+                    android:text=""
                     android:textColor="#ffffff"
                     android:textSize="14sp" />
             </LinearLayout>
@@ -186,7 +186,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="待发送目录"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="11sp" />
 
@@ -204,7 +204,7 @@
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:padding="22dp"
-                android:text="还没有要发送的目录"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="12sp" />
 
@@ -214,7 +214,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="从受管理目录里选"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="11sp" />
 
@@ -232,7 +232,7 @@
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:padding="22dp"
-                android:text="还没有受管理目录"
+                android:text=""
                 android:textColor="#8c939f"
                 android:textSize="12sp" />
         </LinearLayout>
@@ -283,7 +283,7 @@
             android:layout_weight="1"
             android:background="@drawable/bg_danger"
             android:gravity="center"
-            android:text="断开连接设备"
+            android:text=""
             android:textColor="#df6876"
             android:textSize="14sp" />
     </LinearLayout>
