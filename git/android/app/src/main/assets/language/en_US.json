@@ -222,7 +222,7 @@
     { "id": "settings.status", "str": "Current status" },
     { "id": "settings.status_line", "str": "%1$d folders · %2$d indexed · %3$s by default" },
     { "id": "settings.theme", "str": "Theme color" },
-    { "id": "settings.theme_placeholder", "str": "Reserved" },
+
     { "id": "settings.theme_changed_prefix", "str": "Accent changed: " },
     { "id": "settings.mode", "str": "Mode conversion" },
     { "id": "settings.mode_current_prefix", "str": "Current " },
@@ -258,6 +258,8 @@
     { "id": "theme.pink", "str": "Pink" },
     { "id": "theme.blue", "str": "Blue" },
     { "id": "theme.gray", "str": "Gray" },
+    { "id": "theme.white_day", "str": "White / Day" },
+    { "id": "theme.gray_night", "str": "Gray / Night" },
 
     { "id": "export.read_failed", "str": "Could not read the tag library" },
     { "id": "export.done_default_prefix", "str": "Exported to the default folder: " },

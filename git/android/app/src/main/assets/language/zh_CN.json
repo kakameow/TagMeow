@@ -222,7 +222,7 @@
     { "id": "settings.status", "str": "当前状态" },
     { "id": "settings.status_line", "str": "目录 %1$d 个 · 索引 %2$d 项 · 默认 %3$s" },
     { "id": "settings.theme", "str": "主题配色" },
-    { "id": "settings.theme_placeholder", "str": "保留" },
+
     { "id": "settings.theme_changed_prefix", "str": "主题已切换：" },
     { "id": "settings.mode", "str": "模式转换" },
     { "id": "settings.mode_current_prefix", "str": "当前 " },
@@ -258,6 +258,8 @@
     { "id": "theme.pink", "str": "粉色" },
     { "id": "theme.blue", "str": "蓝色" },
     { "id": "theme.gray", "str": "灰色" },
+    { "id": "theme.white_day", "str": "白色 / 日间" },
+    { "id": "theme.gray_night", "str": "灰色 / 夜间" },
 
     { "id": "export.read_failed", "str": "读取标签库失败" },
     { "id": "export.done_default_prefix", "str": "已导出到默认目录：" },

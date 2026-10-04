@@ -36,7 +36,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="middle"
             android:maxLines="1"
-            android:textColor="#20242b"
+            android:textColor="@color/text_primary"
             android:textSize="12sp"
             android:textStyle="bold" />
 
@@ -47,7 +47,7 @@
             android:layout_marginTop="2dp"
             android:ellipsize="middle"
             android:maxLines="1"
-            android:textColor="#8c939f"
+            android:textColor="@color/text_secondary"
             android:textSize="10sp" />
 
         <LinearLayout
@@ -79,7 +79,7 @@
             android:contentDescription="@null"
             android:scaleType="fitCenter"
             android:src="@drawable/tag"
-            android:tint="#9aa1ab" />
+            android:tint="@color/text_faint" />
 
         <TextView
             android:id="@+id/fileMoreLabel"
@@ -87,7 +87,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
             android:text=""
-            android:textColor="#9aa1ab"
+            android:textColor="@color/text_faint"
             android:textSize="10sp" />
     </LinearLayout>
 </LinearLayout>

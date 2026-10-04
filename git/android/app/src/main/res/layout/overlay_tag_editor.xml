@@ -5,13 +5,13 @@
     android:id="@+id/tagEditorOverlay"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#f5f6f8"
+    android:background="@color/page_bg"
     android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="52dp"
-        android:background="#ffffff"
+        android:background="@color/surface"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="8dp"
@@ -26,7 +26,7 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:text=""
-            android:textColor="#59616e"
+            android:textColor="@color/text_medium"
             android:textSize="13sp" />
 
         <Space
@@ -39,7 +39,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text=""
-            android:textColor="#20242b"
+            android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -56,7 +56,7 @@
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="#e2e6ee" />
+        android:background="@color/border" />
 
     <ScrollView
         android:id="@+id/editorScroll"
@@ -86,7 +86,7 @@
                     android:layout_weight="1"
                     android:gravity="center"
                     android:text=""
-                    android:textColor="#20242b"
+                    android:textColor="@color/text_primary"
                     android:textSize="12sp"
                     android:textStyle="bold" />
 
@@ -97,7 +97,7 @@
                     android:layout_weight="1"
                     android:gravity="center"
                     android:text=""
-                    android:textColor="#626a75"
+                    android:textColor="@color/text_button_2"
                     android:textSize="12sp" />
             </LinearLayout>
 
@@ -112,10 +112,10 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -129,7 +129,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text=""
-                            android:textColor="#656d79"
+                            android:textColor="@color/text_section"
                             android:textSize="11sp"
                             android:textStyle="bold" />
 
@@ -144,7 +144,7 @@
                             android:inputType="text"
                             android:paddingStart="12dp"
                             android:paddingEnd="12dp"
-                            android:textColorHint="#9aa1ab"
+                            android:textColorHint="@color/text_faint"
                             android:textSize="13sp" />
 
                         <TextView
@@ -153,7 +153,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
                             android:text=""
-                            android:textColor="#8c939f"
+                            android:textColor="@color/text_secondary"
                             android:textSize="10sp" />
 
                         <!-- 改名：左边「重命名」按钮，右边填新类型名称 -->
@@ -173,7 +173,7 @@
                                 android:paddingStart="12dp"
                                 android:paddingEnd="12dp"
                                 android:text=""
-                                android:textColor="#20242b"
+                                android:textColor="@color/text_primary"
                                 android:textSize="12sp" />
 
                             <EditText
@@ -188,7 +188,7 @@
                                 android:inputType="text"
                                 android:paddingStart="12dp"
                                 android:paddingEnd="12dp"
-                                android:textColorHint="#9aa1ab"
+                                android:textColorHint="@color/text_faint"
                                 android:textSize="13sp" />
                         </LinearLayout>
                     </LinearLayout>
@@ -198,10 +198,10 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -215,7 +215,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text=""
-                            android:textColor="#656d79"
+                            android:textColor="@color/text_section"
                             android:textSize="11sp"
                             android:textStyle="bold" />
 
@@ -244,7 +244,7 @@
                                 android:inputType="text"
                                 android:paddingStart="12dp"
                                 android:paddingEnd="12dp"
-                                android:textColorHint="#9aa1ab"
+                                android:textColorHint="@color/text_faint"
                                 android:textSize="13sp" />
 
                             <TextView
@@ -257,7 +257,7 @@
                                 android:paddingStart="12dp"
                                 android:paddingEnd="12dp"
                                 android:text=""
-                                android:textColor="#20242b"
+                                android:textColor="@color/text_primary"
                                 android:textSize="12sp" />
                         </LinearLayout>
 
@@ -267,7 +267,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
                             android:text=""
-                            android:textColor="#8c939f"
+                            android:textColor="@color/text_secondary"
                             android:textSize="10sp" />
 
                         <LinearLayout
@@ -282,7 +282,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text=""
-                                android:textColor="#8c939f"
+                                android:textColor="@color/text_secondary"
                                 android:textSize="11sp" />
 
                             <LinearLayout
@@ -299,10 +299,10 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -316,7 +316,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text=""
-                            android:textColor="#656d79"
+                            android:textColor="@color/text_section"
                             android:textSize="11sp"
                             android:textStyle="bold" />
 
@@ -343,10 +343,10 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -360,7 +360,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text=""
-                            android:textColor="#656d79"
+                            android:textColor="@color/text_section"
                             android:textSize="11sp"
                             android:textStyle="bold" />
 
@@ -388,14 +388,14 @@
                                 android:layout_weight="1"
                                 android:ellipsize="end"
                                 android:maxLines="1"
-                                android:textColor="#20242b"
+                                android:textColor="@color/text_primary"
                                 android:textSize="13sp" />
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="›"
-                                android:textColor="#9aa1ab"
+                                android:textColor="@color/text_faint"
                                 android:textSize="17sp" />
                         </LinearLayout>
 
@@ -413,10 +413,10 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -430,7 +430,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text=""
-                            android:textColor="#656d79"
+                            android:textColor="@color/text_section"
                             android:textSize="11sp"
                             android:textStyle="bold" />
 
@@ -445,7 +445,7 @@
                             android:inputType="text"
                             android:paddingStart="12dp"
                             android:paddingEnd="12dp"
-                            android:textColorHint="#9aa1ab"
+                            android:textColorHint="@color/text_faint"
                             android:textSize="13sp" />
 
                         <TextView
@@ -454,7 +454,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
                             android:text=""
-                            android:textColor="#8c939f"
+                            android:textColor="@color/text_secondary"
                             android:textSize="10sp" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -463,10 +463,10 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -480,7 +480,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text=""
-                            android:textColor="#656d79"
+                            android:textColor="@color/text_section"
                             android:textSize="11sp"
                             android:textStyle="bold" />
 
@@ -501,7 +501,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="60dp"
-        android:background="#ffffff"
+        android:background="@color/surface"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="12dp"
@@ -515,7 +515,7 @@
             android:background="@drawable/bg_danger"
             android:gravity="center"
             android:text=""
-            android:textColor="#df6876"
+            android:textColor="@color/danger_text"
             android:textSize="14sp" />
 
         <TextView
@@ -527,7 +527,7 @@
             android:background="@drawable/bg_mini_primary"
             android:gravity="center"
             android:text=""
-            android:textColor="#ffffff"
+            android:textColor="@color/on_primary_text"
             android:textSize="14sp" />
     </LinearLayout>
 </LinearLayout>

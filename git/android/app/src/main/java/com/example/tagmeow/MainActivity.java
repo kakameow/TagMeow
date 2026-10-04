@@ -46,6 +46,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.Insets;
@@ -74,6 +75,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 // TagMeow 主界面
 
@@ -98,6 +100,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String PROJECT_URL = "https://github.com/kakameow/TagMeow";
 
     private static final String PREFS_NAME = "tagmeow";
+    private static final String KEY_NIGHT_THEME = "night_theme";
     private static final String KEY_DEFAULT_MODE = "default_mode";
     private static final String KEY_LANGUAGE = "language";
 
@@ -133,11 +136,16 @@ public class MainActivity extends AppCompatActivity {
     // 所以现在只拿「手里真有授权、且现在读得到」的目录当种子，
     // 一个都没有时不传初始位置，让系统开它自己的默认视图
 
-    // 内容展示的颜色固定：列表、卡片、文字、边框都不跟主题走
-    private static final int COLOR_TEXT = 0xFF20242B;
-    private static final int COLOR_MUTED = 0xFF8C939F;
-    private static final int COLOR_BORDER = 0xFFE0E3E7;
-    private static final int COLOR_ACTIVE_BG = 0xFFF0F2F5;
+    private static int COLOR_TEXT;
+    private static int COLOR_MUTED;
+    private static int COLOR_BORDER;
+    private static int COLOR_ACTIVE_BG;
+    private static int COLOR_MEDIUM;
+    private static int COLOR_MEDIUM_2;
+    private static int COLOR_BADGE_BG;
+    private static int COLOR_BADGE_BORDER;
+    private static int COLOR_SURFACE;
+    private static int COLOR_DIVIDER;
 
     // 类型没设颜色时的兜底色（标签自己的颜色也不属于界面主题）
     private static final int COLOR_PINK = 0xFFFFC0CB;
@@ -512,8 +520,15 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle saved_instance_state) {
         super.onCreate(saved_instance_state);
+
+        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        applyStoredTheme();
+
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
+
+        // 配色从资源表读：values/colors.xml 或 values-night/colors.xml
+        loadPalette();
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
             Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
@@ -589,7 +604,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
 
-        worker.execute(() -> {
+        submit(worker, () -> {
             if (serve != null) {
                 serve.getFileDatabase().close();
             }
@@ -734,7 +749,7 @@ public class MainActivity extends AppCompatActivity {
             background.setColor(i == index ? COLOR_ACTIVE_BG : Color.TRANSPARENT);
             nav_items[i].setBackground(background);
 
-            int color = i == index ? COLOR_TEXT : (i == 2 ? COLOR_ACCENT : 0xFF626A75);
+            int color = i == index ? COLOR_TEXT : (i == 2 ? COLOR_ACCENT : COLOR_MEDIUM_2);
             setIconTint(nav_icons[i], color);
             nav_labels[i].setTextColor(color);
         }
@@ -746,7 +761,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initEngine() {
-        worker.execute(() -> {
+        submit(worker, () -> {
             try {
                 // logcat 诊断：本应用当前持有的持久化授权
                 // 授权被系统/厂商回收时这里会少掉对应的目录
@@ -811,7 +826,7 @@ public class MainActivity extends AppCompatActivity {
     private void reload() {
         final FileDatabase.SearchOptions search_options = currentSearchOptions();
 
-        worker.execute(() -> {
+        submit(worker, () -> {
             TagServe current = serve;
 
             if (current == null) {
@@ -1032,7 +1047,7 @@ public class MainActivity extends AppCompatActivity {
     // 先按类型画矢量图 图片 / 视频再由调用方决定要不要去取缩略图
     private void bindFileIcon(ImageView icon, FileDatabase.FileInfo info, int padding) {
         icon.setImageResource(iconResOf(info));
-        icon.setImageTintList(ColorStateList.valueOf(0xFF59616E));
+        icon.setImageTintList(ColorStateList.valueOf(COLOR_MEDIUM));
         icon.setPadding(padding, padding, padding, padding);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         icon.setBackground(rounded(COLOR_ACTIVE_BG, 9, 0, 0));
@@ -1060,7 +1075,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        thumb_worker.execute(() -> {
+        submit(thumb_worker, () -> {
             try {
                 // 又重画过一轮了：这个任务作废 直接丢掉 别占着线程池
                 // 少了这一步 来回切页面时上一轮的任务会一直堆在队列里 越切越慢
@@ -1312,7 +1327,7 @@ public class MainActivity extends AppCompatActivity {
         chip.setOrientation(LinearLayout.HORIZONTAL);
         chip.setGravity(Gravity.CENTER_VERTICAL);
         chip.setPadding(dp(6), 0, dp(6), 0);
-        chip.setBackground(rounded(Color.WHITE, 7, COLOR_BORDER, 1));
+        chip.setBackground(rounded(COLOR_SURFACE, 7, COLOR_BORDER, 1));
 
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, dp(24));
@@ -1429,6 +1444,20 @@ public class MainActivity extends AppCompatActivity {
         }
 
         return drawable;
+    }
+
+    // 统一走这里提交后台任务：Activity 重建（切主题 / 转屏）会关掉这几个池
+    // 旧界面迟到的回调再往里丢任务会抛 RejectedExecutionException 直接把 App 崩掉
+    private static void submit(ExecutorService pool, Runnable task) {
+        if (pool == null || pool.isShutdown()) {
+            return;
+        }
+
+        try {
+            pool.execute(task);
+        } catch (RejectedExecutionException error) {
+            // 刚好在这一刻被关掉：这个任务丢掉就行
+        }
     }
 
     private int dp(int value) {
@@ -1565,14 +1594,14 @@ public class MainActivity extends AppCompatActivity {
             TextView select = row.findViewById(R.id.dirSelect);
             select.setText(checked ? "✓" : "");
             select.setBackground(rounded(
-                    checked ? COLOR_TEXT : Color.WHITE,
+                    checked ? COLOR_TEXT : COLOR_SURFACE,
                     7,
                     checked ? COLOR_TEXT : COLOR_BORDER,
                     2));
 
             ImageView icon = row.findViewById(R.id.dirManageIcon);
             icon.setImageResource(R.drawable.folder);
-            icon.setImageTintList(ColorStateList.valueOf(0xFF59616E));
+            icon.setImageTintList(ColorStateList.valueOf(COLOR_MEDIUM));
             icon.setBackground(rounded(COLOR_ACTIVE_BG, 10, 0, 0));
 
             TextView name = row.findViewById(R.id.dirManageName);
@@ -1585,9 +1614,9 @@ public class MainActivity extends AppCompatActivity {
             badge.setText(granted ? Lang.get("dir.badge_valid") : Lang.get("dir.badge_invalid"));
             badge.setTextColor(granted ? 0xFF4E93C8 : COLOR_MUTED);
             badge.setBackground(rounded(
-                    granted ? 0xFFEEF8FF : COLOR_ACTIVE_BG,
+                    granted ? COLOR_BADGE_BG : COLOR_ACTIVE_BG,
                     6,
-                    granted ? 0xFF8EC8F7 : COLOR_BORDER,
+                    granted ? COLOR_BADGE_BORDER : COLOR_BORDER,
                     1));
 
             row.findViewById(R.id.dirManageMore).setVisibility(View.GONE);
@@ -1801,12 +1830,12 @@ public class MainActivity extends AppCompatActivity {
             title.setTextColor(COLOR_TEXT);
             card.setStrokeWidth(dp(2));
         } else {
-            title.setTextColor(0xFF59616E);
+            title.setTextColor(COLOR_MEDIUM);
             card.setStrokeWidth(dp(1));
         }
 
         // 用矢量图标代替
-        setCompoundIcon(title, group == 0 ? R.drawable.funnel_plus : (group == 1 ? R.drawable.funnel_x : R.drawable.funnel), group == active_filter_group ? COLOR_TEXT : 0xFF59616E, 12);
+        setCompoundIcon(title, group == 0 ? R.drawable.funnel_plus : (group == 1 ? R.drawable.funnel_x : R.drawable.funnel), group == active_filter_group ? COLOR_TEXT : COLOR_MEDIUM, 12);
 
         container.removeAllViews();
 
@@ -2080,7 +2109,7 @@ public class MainActivity extends AppCompatActivity {
             if (directory) {
                 // 统一风格：跟目录页 / 文件列表一样 中性色图标 + 浅底
                 icon.setImageResource(R.drawable.folder);
-                icon.setImageTintList(ColorStateList.valueOf(0xFF59616E));
+                icon.setImageTintList(ColorStateList.valueOf(COLOR_MEDIUM));
                 icon.setBackground(rounded(COLOR_ACTIVE_BG, 11, 0, 0));
 
                 File[] inner = child.listFiles();
@@ -2532,14 +2561,14 @@ public class MainActivity extends AppCompatActivity {
             TextView select = row.findViewById(R.id.dirSelect);
             select.setText(selected ? "✓" : "");
             select.setBackground(rounded(
-                    selected ? COLOR_TEXT : Color.WHITE,
+                    selected ? COLOR_TEXT : COLOR_SURFACE,
                     7,
                     selected ? COLOR_TEXT : COLOR_BORDER,
                     2));
 
             ImageView icon = row.findViewById(R.id.dirManageIcon);
             icon.setImageResource(R.drawable.folder);
-            icon.setImageTintList(ColorStateList.valueOf(0xFF59616E));
+            icon.setImageTintList(ColorStateList.valueOf(COLOR_MEDIUM));
             icon.setBackground(rounded(COLOR_ACTIVE_BG, 10, 0, 0));
 
             TextView name = row.findViewById(R.id.dirManageName);
@@ -2553,9 +2582,9 @@ public class MainActivity extends AppCompatActivity {
             badge.setText(granted ? Lang.get("dir.badge_valid") : Lang.get("dir.badge_invalid"));
             badge.setTextColor(granted ? 0xFF4E93C8 : COLOR_MUTED);
             badge.setBackground(rounded(
-                    granted ? 0xFFEEF8FF : COLOR_ACTIVE_BG,
+                    granted ? COLOR_BADGE_BG : COLOR_ACTIVE_BG,
                     6,
-                    granted ? 0xFF8EC8F7 : COLOR_BORDER,
+                    granted ? COLOR_BADGE_BORDER : COLOR_BORDER,
                     1));
 
             row.setOnClickListener(v -> {
@@ -2856,11 +2885,11 @@ public class MainActivity extends AppCompatActivity {
 
         tv_editor_title.setText(isType ? Lang.get("editor.title_type") : Lang.get("editor.title_tag"));
 
-        seg_type.setBackground(isType ? rounded(Color.WHITE, 10, 0, 0) : null);
-        seg_tag.setBackground(isType ? null : rounded(Color.WHITE, 10, 0, 0));
+        seg_type.setBackground(isType ? rounded(COLOR_SURFACE, 10, 0, 0) : null);
+        seg_tag.setBackground(isType ? null : rounded(COLOR_SURFACE, 10, 0, 0));
 
-        seg_type.setTextColor(isType ? COLOR_TEXT : 0xFF626A75);
-        seg_tag.setTextColor(isType ? 0xFF626A75 : COLOR_TEXT);
+        seg_type.setTextColor(isType ? COLOR_TEXT : COLOR_MEDIUM_2);
+        seg_tag.setTextColor(isType ? COLOR_MEDIUM_2 : COLOR_TEXT);
 
         seg_type.setTypeface(null, isType ? Typeface.BOLD : Typeface.NORMAL);
         seg_tag.setTypeface(null, isType ? Typeface.NORMAL : Typeface.BOLD);
@@ -2902,7 +2931,7 @@ public class MainActivity extends AppCompatActivity {
             item.setGravity(Gravity.CENTER_VERTICAL);
             item.setPadding(dp(10), dp(7), dp(10), dp(7));
             item.setBackground(rounded(
-                    active ? COLOR_ACTIVE_BG : Color.WHITE,
+                    active ? COLOR_ACTIVE_BG : COLOR_SURFACE,
                     10,
                     active ? COLOR_TEXT : COLOR_BORDER,
                     active ? 2 : 1));
@@ -2947,7 +2976,7 @@ public class MainActivity extends AppCompatActivity {
             option.setOrientation(LinearLayout.HORIZONTAL);
             option.setGravity(Gravity.CENTER_VERTICAL);
             option.setPadding(dp(12), dp(10), dp(12), dp(10));
-            option.setBackgroundColor(active ? COLOR_ACTIVE_BG : Color.WHITE);
+            option.setBackgroundColor(active ? COLOR_ACTIVE_BG : COLOR_SURFACE);
 
             View dot = new View(this);
             dot.setLayoutParams(new LinearLayout.LayoutParams(dp(9), dp(9)));
@@ -3868,7 +3897,7 @@ public class MainActivity extends AppCompatActivity {
     // 受管理目录一键入队
     // Windows 端只能手打绝对路径（serverDirField）这里多给一条捷径，但同样不做授权校验以外的限制
     private void renderSyncRoots() {
-        worker.execute(() -> {
+        submit(worker, () -> {
             final List<String> names = new ArrayList<>();
             final List<String> paths = new ArrayList<>();
 
@@ -3915,7 +3944,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onSyncEnqueue(final File dir) {
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             syncServer().enqueueDirectory(dir);
 
             runOnUiThread(() -> {
@@ -3942,7 +3971,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             // 去掉末尾分隔符 否则 core 的 parent_dir 首段（入队目录名）会变成空串
             final File target = new File(StorageAccess.normalizePath(dir.getAbsolutePath()));
 
@@ -3961,7 +3990,7 @@ public class MainActivity extends AppCompatActivity {
 
         prefs.edit().putString(KEY_SYNC_SERVER_NAME, name).apply();
 
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             final SyncServer server = syncServer();
 
             // 回调在工作线程上：先排队到主线程再改 View
@@ -3988,7 +4017,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onSyncServerStop() {
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             SyncEngine.closeServer();
 
             runOnUiThread(() -> {
@@ -4001,7 +4030,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onSyncServerDisconnect() {
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             if (SyncEngine.hasServer()) {
                 SyncEngine.server().disconnect();
             }
@@ -4210,7 +4239,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onSyncScan() {
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             final SyncClient client;
 
             try {
@@ -4242,7 +4271,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             final SyncClient client;
 
             try {
@@ -4269,7 +4298,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onSyncClearRecords() {
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             final SyncClient client;
 
             try {
@@ -4287,7 +4316,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onSyncClientDisconnect() {
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             if (SyncEngine.hasClient()) {
                 SyncEngine.client().disconnect();
             }
@@ -4301,7 +4330,7 @@ public class MainActivity extends AppCompatActivity {
     private void refreshDownloadRootIfManaged() {
         final File dir = syncDownloadDir();
 
-        worker.execute(() -> {
+        submit(worker, () -> {
             TagServe current = serve;
 
             if (current == null) {
@@ -4352,7 +4381,7 @@ public class MainActivity extends AppCompatActivity {
             View divider = new View(this);
             divider.setLayoutParams(new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
-            divider.setBackgroundColor(0xFFF0F2F4);
+            divider.setBackgroundColor(COLOR_DIVIDER);
             group.addView(divider);
         }
 
@@ -4413,11 +4442,87 @@ public class MainActivity extends AppCompatActivity {
         return row;
     }
 
-    // 主题：占位行
+    // 主题配色：两个色块按钮 选中的那个用黑色描边
     private View buildThemeRow() {
         return buildRow(R.drawable.palette, Lang.get("settings.theme"),
-                Lang.get("settings.theme_placeholder"),
-                buildBadge(Lang.get("common.reserved")), null);
+                themeName(),
+                buildThemeSwatches(), null);
+    }
+
+    private View buildThemeSwatches() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        row.addView(buildThemeSwatch(false));
+        row.addView(buildThemeSwatch(true));
+
+        return row;
+    }
+
+    // 色块本身就是按钮：白色 / 日间 用页面底色 灰色 / 夜间 用 #202124
+    // 选中的那个加 2dp 黑色描边（没选中只有 1dp 的主题边框）
+    private View buildThemeSwatch(final boolean night) {
+        boolean picked = isNightTheme() == night;
+
+        View swatch = new View(this);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(26), dp(26));
+        params.setMargins(dp(8), 0, 0, 0);
+        swatch.setLayoutParams(params);
+        swatch.setBackground(rounded(
+                night ? 0xFF202124 : 0xFFFFFFFF,
+                7,
+                picked ? 0xFF000000 : (night ? 0xFF3C3D40 : 0xFFE2E6EE),
+                picked ? 2 : 1));
+        swatch.setOnClickListener(v -> switchTheme(night));
+
+        return swatch;
+    }
+
+    // 存下来的主题选择（没有就是日间）
+    private boolean isNightTheme() {
+        return prefs != null && prefs.getBoolean(KEY_NIGHT_THEME, false);
+    }
+
+    private String themeName() {
+        return Lang.get(isNightTheme() ? "theme.gray_night" : "theme.white_day");
+    }
+
+    // 启动时按存下来的选择定日夜：要在 inflate 布局之前调用
+    private void applyStoredTheme() {
+        AppCompatDelegate.setDefaultNightMode(
+                isNightTheme() ? AppCompatDelegate.MODE_NIGHT_YES : AppCompatDelegate.MODE_NIGHT_NO);
+    }
+
+    // 切主题：存下来 -> 换日夜模式 -> 重建界面（配色全部从资源表重读）
+    private void switchTheme(boolean night) {
+        if (night == isNightTheme()) {
+            return;
+        }
+
+        prefs.edit().putBoolean(KEY_NIGHT_THEME, night).apply();
+
+        toast(Lang.get("settings.theme_changed_prefix")
+                + Lang.get(night ? "theme.gray_night" : "theme.white_day"));
+
+        AppCompatDelegate.setDefaultNightMode(
+                night ? AppCompatDelegate.MODE_NIGHT_YES : AppCompatDelegate.MODE_NIGHT_NO);
+
+        recreate();
+    }
+
+    // 把当前这套配色读进内存（列表、卡片、文字、边框都从这里取）
+    private void loadPalette() {
+        COLOR_TEXT = getColor(R.color.text_primary);
+        COLOR_MUTED = getColor(R.color.text_secondary);
+        COLOR_BORDER = getColor(R.color.border_soft);
+        COLOR_ACTIVE_BG = getColor(R.color.inset_bg);
+        COLOR_MEDIUM = getColor(R.color.text_medium);
+        COLOR_MEDIUM_2 = getColor(R.color.text_button_2);
+        COLOR_BADGE_BG = getColor(R.color.filter_include_bg);
+        COLOR_BADGE_BORDER = getColor(R.color.filter_include_border);
+        COLOR_SURFACE = getColor(R.color.surface);
+        COLOR_DIVIDER = getColor(R.color.divider);
     }
 
     private View buildValue(String text) {
@@ -4982,7 +5087,7 @@ public class MainActivity extends AppCompatActivity {
         setSyncExportStatus(Lang.f("status.export.zipping", source.getName()));
         setSyncExportProgress(Lang.f("status.export.progress", 0, formatBytes(0L)));
 
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             try {
                 DirectoryZipper.Result result = DirectoryZipper.zip(source, zip_file,
                         (entry_name, file_count, byte_count) -> runOnUiThread(
@@ -5087,7 +5192,7 @@ public class MainActivity extends AppCompatActivity {
     // 基础设施
     // 在 worker 上执行模块操作 完成后自动重画
     private void runAction(String label, Runnable task) {
-        worker.execute(() -> {
+        submit(worker, () -> {
             try {
                 if (serve == null) {
                     toast(label + Lang.get("run.engine_not_ready"));

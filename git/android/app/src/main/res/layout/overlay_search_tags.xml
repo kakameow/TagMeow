@@ -5,13 +5,13 @@
     android:id="@+id/searchTagOverlay"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#f5f6f8"
+    android:background="@color/page_bg"
     android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="52dp"
-        android:background="#ffffff"
+        android:background="@color/surface"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="8dp"
@@ -26,7 +26,7 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:text=""
-            android:textColor="#59616e"
+            android:textColor="@color/text_medium"
             android:textSize="13sp" />
 
         <Space
@@ -39,7 +39,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text=""
-            android:textColor="#20242b"
+            android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -57,14 +57,14 @@
             android:paddingStart="14dp"
             android:paddingEnd="14dp"
             android:text=""
-            android:textColor="#ffffff"
+            android:textColor="@color/on_primary_text"
             android:textSize="13sp" />
     </LinearLayout>
 
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="#e2e6ee" />
+        android:background="@color/border" />
 
     <ScrollView
         android:layout_width="match_parent"
@@ -85,7 +85,7 @@
                 android:layout_marginStart="4dp"
                 android:layout_marginBottom="8dp"
                 android:text=""
-                android:textColor="#8c939f"
+                android:textColor="@color/text_secondary"
                 android:textSize="11sp" />
 
             <!-- 搜索目录多选容器：默认全选 默认折叠（点标题栏展开） -->
@@ -93,10 +93,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="8dp"
-                app:cardBackgroundColor="#ffffff"
+                app:cardBackgroundColor="@color/surface"
                 app:cardCornerRadius="14dp"
                 app:cardElevation="0dp"
-                app:strokeColor="#e2e6ee"
+                app:strokeColor="@color/border"
                 app:strokeWidth="1dp">
 
                 <LinearLayout
@@ -118,7 +118,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text=""
-                            android:textColor="#20242b"
+                            android:textColor="@color/text_primary"
                             android:textSize="12sp"
                             android:textStyle="bold" />
 
@@ -132,7 +132,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text=""
-                            android:textColor="#8c939f"
+                            android:textColor="@color/text_secondary"
                             android:textSize="11sp" />
 
                         <TextView
@@ -142,7 +142,7 @@
                             android:layout_marginStart="4dp"
                             android:gravity="center"
                             android:text="▾"
-                            android:textColor="#9aa1ab"
+                            android:textColor="@color/text_faint"
                             android:textSize="12sp" />
                     </LinearLayout>
 
@@ -166,7 +166,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
                                 android:text=""
-                                android:textColor="#8c939f"
+                                android:textColor="@color/text_secondary"
                                 android:textSize="10sp" />
 
                             <TextView
@@ -179,7 +179,7 @@
                                 android:paddingStart="12dp"
                                 android:paddingEnd="12dp"
                                 android:text=""
-                                android:textColor="#5a626d"
+                                android:textColor="@color/text_button"
                                 android:textSize="11sp" />
                         </LinearLayout>
 
@@ -196,7 +196,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="4dp"
                             android:text=""
-                            android:textColor="#8c939f"
+                            android:textColor="@color/text_secondary"
                             android:textSize="11sp"
                             android:visibility="gone" />
                     </LinearLayout>
@@ -208,10 +208,10 @@
                 android:id="@+id/groupInclude"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="#eef8ff"
+                app:cardBackgroundColor="@color/filter_include_bg"
                 app:cardCornerRadius="14dp"
                 app:cardElevation="0dp"
-                app:strokeColor="#8ec8f7"
+                app:strokeColor="@color/filter_include_border"
                 app:strokeWidth="1dp">
 
                 <LinearLayout
@@ -231,7 +231,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text=""
-                            android:textColor="#59616e"
+                            android:textColor="@color/text_medium"
                             android:textSize="11sp"
                             android:textStyle="bold" />
                     </LinearLayout>
@@ -252,10 +252,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                app:cardBackgroundColor="#fff2f2"
+                app:cardBackgroundColor="@color/filter_exclude_bg"
                 app:cardCornerRadius="14dp"
                 app:cardElevation="0dp"
-                app:strokeColor="#f2a2a2"
+                app:strokeColor="@color/filter_exclude_border"
                 app:strokeWidth="1dp">
 
                 <LinearLayout
@@ -275,7 +275,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text=""
-                            android:textColor="#59616e"
+                            android:textColor="@color/text_medium"
                             android:textSize="11sp"
                             android:textStyle="bold" />
                     </LinearLayout>
@@ -296,10 +296,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                app:cardBackgroundColor="#f3f0ff"
+                app:cardBackgroundColor="@color/filter_only_bg"
                 app:cardCornerRadius="14dp"
                 app:cardElevation="0dp"
-                app:strokeColor="#b9a8ff"
+                app:strokeColor="@color/filter_only_border"
                 app:strokeWidth="1dp">
 
                 <LinearLayout
@@ -319,7 +319,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text=""
-                            android:textColor="#59616e"
+                            android:textColor="@color/text_medium"
                             android:textSize="11sp"
                             android:textStyle="bold" />
                     </LinearLayout>
@@ -339,10 +339,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                app:cardBackgroundColor="#ffffff"
+                app:cardBackgroundColor="@color/surface"
                 app:cardCornerRadius="16dp"
                 app:cardElevation="2dp"
-                app:strokeColor="#e2e6ee"
+                app:strokeColor="@color/border"
                 app:strokeWidth="1dp">
 
                 <LinearLayout
@@ -363,7 +363,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text=""
-                            android:textColor="#20242b"
+                            android:textColor="@color/text_primary"
                             android:textSize="12sp"
                             android:textStyle="bold" />
 
@@ -377,14 +377,14 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text=""
-                            android:textColor="#8c939f"
+                            android:textColor="@color/text_secondary"
                             android:textSize="11sp" />
                     </LinearLayout>
 
                     <View
                         android:layout_width="match_parent"
                         android:layout_height="1dp"
-                        android:background="#edf0f3" />
+                        android:background="@color/divider" />
 
                     <LinearLayout
                         android:id="@+id/searchTagLibrary"

@@ -2,4 +2,28 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="page_bg">#F5F6F8</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="segmented_bg">#ECEFF3</color>
+    <color name="inset_bg">#F0F2F5</color>
+    <color name="divider">#EDF0F3</color>
+    <color name="border">#E2E6EE</color>
+    <color name="border_soft">#E0E3E7</color>
+    <color name="text_primary">#20242B</color>
+    <color name="text_secondary">#8C939F</color>
+    <color name="text_medium">#59616E</color>
+    <color name="text_section">#656D79</color>
+    <color name="text_faint">#9AA1AB</color>
+    <color name="text_button">#5A626D</color>
+    <color name="text_button_2">#626A75</color>
+    <color name="text_hint_strong">#B6BCC6</color>
+    <color name="on_primary_text">#FFFFFF</color>
+    <color name="primary_button_bg">#20242B</color>
+    <color name="danger_text">#DF6876</color>
+    <color name="filter_include_bg">#EEF8FF</color>
+    <color name="filter_include_border">#8EC8F7</color>
+    <color name="filter_exclude_bg">#FFF2F2</color>
+    <color name="filter_exclude_border">#F2A2A2</color>
+    <color name="filter_only_bg">#F3F0FF</color>
+    <color name="filter_only_border">#B9A8FF</color>
 </resources>

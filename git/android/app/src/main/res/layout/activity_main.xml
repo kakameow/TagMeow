@@ -5,7 +5,7 @@
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#f5f6f8"
+    android:background="@color/page_bg"
     tools:context=".MainActivity">
 
     <!-- 顶部栏 -->
@@ -13,7 +13,7 @@
         android:id="@+id/topBar"
         android:layout_width="0dp"
         android:layout_height="52dp"
-        android:background="#ffffff"
+        android:background="@color/surface"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="4dp"
@@ -28,7 +28,7 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
             android:text=""
-            android:textColor="#20242b"
+            android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -44,7 +44,7 @@
             android:paddingStart="5dp"
             android:paddingEnd="5dp"
             android:text=""
-            android:textColor="#8c939f"
+            android:textColor="@color/text_secondary"
             android:textSize="11sp" />
 
         <TextView
@@ -54,7 +54,7 @@
             android:paddingStart="5dp"
             android:paddingEnd="5dp"
             android:text=""
-            android:textColor="#8c939f"
+            android:textColor="@color/text_secondary"
             android:textSize="11sp" />
     </LinearLayout>
 
@@ -62,7 +62,7 @@
         android:id="@+id/topDivider"
         android:layout_width="0dp"
         android:layout_height="1dp"
-        android:background="#e2e6ee"
+        android:background="@color/border"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/topBar" />
@@ -94,10 +94,10 @@
                 <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -114,7 +114,7 @@
                             android:layout_marginTop="2dp"
                             android:layout_marginBottom="7dp"
                             android:text=""
-                            android:textColor="#656d79"
+                            android:textColor="@color/text_section"
                             android:textSize="12sp"
                             android:textStyle="bold" />
 
@@ -144,7 +144,7 @@
                                         android:contentDescription="@null"
                                         android:scaleType="fitCenter"
                                         android:src="@drawable/funnel_plus"
-                                        android:tint="#59616e" />
+                                        android:tint="@color/text_medium" />
 
                                     <!-- 点整块打开标签库选择界面 -->
                                     <TextView
@@ -157,7 +157,7 @@
                                         android:gravity="center_vertical"
                                         android:maxLines="1"
                                         android:text=""
-                                        android:textColor="#59616e"
+                                        android:textColor="@color/text_medium"
                                         android:textSize="12sp" />
                                 </LinearLayout>
 
@@ -177,7 +177,7 @@
                                         android:contentDescription="@null"
                                         android:scaleType="fitCenter"
                                         android:src="@drawable/funnel_x"
-                                        android:tint="#59616e" />
+                                        android:tint="@color/text_medium" />
 
                                     <TextView
                                         android:id="@+id/editExclude"
@@ -189,7 +189,7 @@
                                         android:gravity="center_vertical"
                                         android:maxLines="1"
                                         android:text=""
-                                        android:textColor="#59616e"
+                                        android:textColor="@color/text_medium"
                                         android:textSize="12sp" />
                                 </LinearLayout>
 
@@ -209,7 +209,7 @@
                                         android:contentDescription="@null"
                                         android:scaleType="fitCenter"
                                         android:src="@drawable/funnel"
-                                        android:tint="#59616e" />
+                                        android:tint="@color/text_medium" />
 
                                     <TextView
                                         android:id="@+id/editOnly"
@@ -221,7 +221,7 @@
                                         android:gravity="center_vertical"
                                         android:maxLines="1"
                                         android:text=""
-                                        android:textColor="#59616e"
+                                        android:textColor="@color/text_medium"
                                         android:textSize="12sp" />
                                 </LinearLayout>
                             </LinearLayout>
@@ -242,7 +242,7 @@
                                     android:padding="8dp"
                                     android:scaleType="fitCenter"
                                     android:src="@drawable/search"
-                                    android:tint="#ffffff" />
+                                    android:tint="@color/on_primary_text" />
 
                                 <ImageView
                                     android:id="@+id/btnClearSearch"
@@ -254,7 +254,7 @@
                                     android:padding="8dp"
                                     android:scaleType="fitCenter"
                                     android:src="@drawable/trash"
-                                    android:tint="#5a626d" />
+                                    android:tint="@color/text_button" />
 
                                 <ImageView
                                     android:id="@+id/btnRefresh"
@@ -266,7 +266,7 @@
                                     android:padding="8dp"
                                     android:scaleType="fitCenter"
                                     android:src="@drawable/refresh_cw"
-                                    android:tint="#5a626d" />
+                                    android:tint="@color/text_button" />
                             </LinearLayout>
                         </LinearLayout>
                     </LinearLayout>
@@ -277,10 +277,10 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -301,7 +301,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text=""
-                                android:textColor="#20242b"
+                                android:textColor="@color/text_primary"
                                 android:textSize="13sp"
                                 android:textStyle="bold" />
 
@@ -319,7 +319,7 @@
                                 android:paddingStart="10dp"
                                 android:paddingEnd="10dp"
                                 android:text=""
-                                android:textColor="#5a626d"
+                                android:textColor="@color/text_button"
                                 android:textSize="11sp"
                                 android:visibility="gone" />
 
@@ -329,14 +329,14 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginStart="8dp"
                                 android:text=""
-                                android:textColor="#8c939f"
+                                android:textColor="@color/text_secondary"
                                 android:textSize="11sp" />
                         </LinearLayout>
 
                         <View
                             android:layout_width="match_parent"
                             android:layout_height="1dp"
-                            android:background="#edf0f3" />
+                            android:background="@color/divider" />
 
                         <LinearLayout
                             android:id="@+id/filesList"
@@ -351,7 +351,7 @@
                             android:gravity="center"
                             android:padding="24dp"
                             android:text=""
-                            android:textColor="#8c939f"
+                            android:textColor="@color/text_secondary"
                             android:textSize="12sp"
                             android:visibility="gone" />
                     </LinearLayout>
@@ -369,10 +369,10 @@
                 <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -393,7 +393,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text=""
-                                android:textColor="#20242b"
+                                android:textColor="@color/text_primary"
                                 android:textSize="13sp"
                                 android:textStyle="bold" />
 
@@ -411,7 +411,7 @@
                                 android:paddingStart="10dp"
                                 android:paddingEnd="10dp"
                                 android:text=""
-                                android:textColor="#ffffff"
+                                android:textColor="@color/on_primary_text"
                                 android:textSize="11sp" />
 
                             <TextView
@@ -424,14 +424,14 @@
                                 android:paddingStart="10dp"
                                 android:paddingEnd="10dp"
                                 android:text=""
-                                android:textColor="#5a626d"
+                                android:textColor="@color/text_button"
                                 android:textSize="11sp" />
                         </LinearLayout>
 
                         <View
                             android:layout_width="match_parent"
                             android:layout_height="1dp"
-                            android:background="#edf0f3" />
+                            android:background="@color/divider" />
 
                         <LinearLayout
                             android:id="@+id/dirList"
@@ -448,7 +448,7 @@
                             android:gravity="center"
                             android:padding="24dp"
                             android:text=""
-                            android:textColor="#8c939f"
+                            android:textColor="@color/text_secondary"
                             android:textSize="12sp" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -465,10 +465,10 @@
                 <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -489,7 +489,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text=""
-                                android:textColor="#20242b"
+                                android:textColor="@color/text_primary"
                                 android:textSize="13sp"
                                 android:textStyle="bold" />
 
@@ -507,7 +507,7 @@
                                 android:paddingStart="10dp"
                                 android:paddingEnd="10dp"
                                 android:text=""
-                                android:textColor="#ffffff"
+                                android:textColor="@color/on_primary_text"
                                 android:textSize="11sp" />
 
                             <TextView
@@ -520,14 +520,14 @@
                                 android:paddingStart="10dp"
                                 android:paddingEnd="10dp"
                                 android:text=""
-                                android:textColor="#5a626d"
+                                android:textColor="@color/text_button"
                                 android:textSize="11sp" />
                         </LinearLayout>
 
                         <View
                             android:layout_width="match_parent"
                             android:layout_height="1dp"
-                            android:background="#edf0f3" />
+                            android:background="@color/divider" />
 
                         <LinearLayout
                             android:id="@+id/typeList"
@@ -543,7 +543,7 @@
                             android:gravity="center"
                             android:padding="24dp"
                             android:text=""
-                            android:textColor="#8c939f"
+                            android:textColor="@color/text_secondary"
                             android:textSize="12sp" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -561,10 +561,10 @@
                 <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -581,7 +581,7 @@
                             android:paddingEnd="14dp"
                             android:paddingBottom="6dp"
                             android:text=""
-                            android:textColor="#656d79"
+                            android:textColor="@color/text_section"
                             android:textSize="12sp"
                             android:textStyle="bold" />
 
@@ -598,10 +598,10 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -618,7 +618,7 @@
                             android:paddingEnd="14dp"
                             android:paddingBottom="6dp"
                             android:text=""
-                            android:textColor="#656d79"
+                            android:textColor="@color/text_section"
                             android:textSize="12sp"
                             android:textStyle="bold" />
 
@@ -635,10 +635,10 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -655,7 +655,7 @@
                             android:paddingEnd="14dp"
                             android:paddingBottom="6dp"
                             android:text=""
-                            android:textColor="#656d79"
+                            android:textColor="@color/text_section"
                             android:textSize="12sp"
                             android:textStyle="bold" />
 
@@ -675,7 +675,7 @@
                     android:background="@drawable/bg_mini_primary"
                     android:gravity="center"
                     android:text=""
-                    android:textColor="#ffffff"
+                    android:textColor="@color/on_primary_text"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -690,10 +690,10 @@
                 <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    app:cardBackgroundColor="#ffffff"
+                    app:cardBackgroundColor="@color/surface"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="2dp"
-                    app:strokeColor="#e2e6ee"
+                    app:strokeColor="@color/border"
                     app:strokeWidth="1dp">
 
                     <LinearLayout
@@ -714,7 +714,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text=""
-                                android:textColor="#20242b"
+                                android:textColor="@color/text_primary"
                                 android:textSize="13sp"
                                 android:textStyle="bold" />
                         </LinearLayout>
@@ -722,7 +722,7 @@
                         <View
                             android:layout_width="match_parent"
                             android:layout_height="1dp"
-                            android:background="#edf0f3" />
+                            android:background="@color/divider" />
 
                         <LinearLayout
                             android:id="@+id/btnSyncShare"
@@ -747,7 +747,7 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:text=""
-                                    android:textColor="#20242b"
+                                    android:textColor="@color/text_primary"
                                     android:textSize="13sp" />
 
                                 <TextView
@@ -756,7 +756,7 @@
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="2dp"
                                     android:text=""
-                                    android:textColor="#8c939f"
+                                    android:textColor="@color/text_secondary"
                                     android:textSize="10sp" />
                             </LinearLayout>
 
@@ -764,14 +764,14 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="›"
-                                android:textColor="#8c939f"
+                                android:textColor="@color/text_secondary"
                                 android:textSize="15sp" />
                         </LinearLayout>
 
                         <View
                             android:layout_width="match_parent"
                             android:layout_height="1dp"
-                            android:background="#edf0f3" />
+                            android:background="@color/divider" />
 
                         <LinearLayout
                             android:id="@+id/btnSyncDownload"
@@ -796,7 +796,7 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:text=""
-                                    android:textColor="#20242b"
+                                    android:textColor="@color/text_primary"
                                     android:textSize="13sp" />
 
                                 <TextView
@@ -805,7 +805,7 @@
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="2dp"
                                     android:text=""
-                                    android:textColor="#8c939f"
+                                    android:textColor="@color/text_secondary"
                                     android:textSize="10sp" />
                             </LinearLayout>
 
@@ -813,14 +813,14 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="›"
-                                android:textColor="#8c939f"
+                                android:textColor="@color/text_secondary"
                                 android:textSize="15sp" />
                         </LinearLayout>
 
                         <View
                             android:layout_width="match_parent"
                             android:layout_height="1dp"
-                            android:background="#edf0f3" />
+                            android:background="@color/divider" />
 
                         <LinearLayout
                             android:id="@+id/btnSyncExport"
@@ -845,7 +845,7 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:text=""
-                                    android:textColor="#20242b"
+                                    android:textColor="@color/text_primary"
                                     android:textSize="13sp" />
 
                                 <TextView
@@ -854,7 +854,7 @@
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="2dp"
                                     android:text=""
-                                    android:textColor="#8c939f"
+                                    android:textColor="@color/text_secondary"
                                     android:textSize="10sp" />
                             </LinearLayout>
 
@@ -862,14 +862,14 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="›"
-                                android:textColor="#8c939f"
+                                android:textColor="@color/text_secondary"
                                 android:textSize="15sp" />
                         </LinearLayout>
 
                         <View
                             android:layout_width="match_parent"
                             android:layout_height="1dp"
-                            android:background="#edf0f3" />
+                            android:background="@color/divider" />
 
                         <TextView
                             android:id="@+id/tvSyncStatus"
@@ -883,7 +883,7 @@
                             android:paddingEnd="12dp"
                             android:paddingBottom="14dp"
                             android:text=""
-                            android:textColor="#8c939f"
+                            android:textColor="@color/text_secondary"
                             android:textSize="11sp" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -895,7 +895,7 @@
         android:id="@+id/navDivider"
         android:layout_width="0dp"
         android:layout_height="1dp"
-        android:background="#e2e6ee"
+        android:background="@color/border"
         app:layout_constraintBottom_toTopOf="@id/bottomNav"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
@@ -905,7 +905,7 @@
         android:id="@+id/bottomNav"
         android:layout_width="0dp"
         android:layout_height="64dp"
-        android:background="#ffffff"
+        android:background="@color/surface"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="7dp"
