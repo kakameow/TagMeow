@@ -342,6 +342,8 @@
     { "id": "status.server.dirEmpty", "str": "Directory is empty" },
     { "id": "status.server.invalidDir", "str": "Invalid directory: %1" },
     { "id": "status.server.enqueued", "str": "Enqueued: %1" },
+    { "id": "status.server.duplicate", "str": "Already in the queue: %1" },
+    { "id": "status.server.notStarted", "str": "Start the server before adding folders" },
     { "id": "status.server.disconnected", "str": "Device disconnected" },
     { "id": "status.server.queueEmpty", "str": "Server: queue empty, waiting for directories..." },
     { "id": "status.server.sessionEnd", "str": "Server: session ended" },

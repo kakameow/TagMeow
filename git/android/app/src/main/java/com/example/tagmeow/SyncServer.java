@@ -174,6 +174,9 @@ public final class SyncServer {
     public SyncError stop() {
 
         if (!started) {
+            // 清空待发送队列
+            clearTaskQueue();
+
             return SyncError.NONE;
         }
 
@@ -216,6 +219,14 @@ public final class SyncServer {
 
         client_connected = false;
 
+        // 关闭清空队列
+        clearTaskQueue();
+
+        return SyncError.NONE;
+    }
+
+    // 清空待发送队列
+    private void clearTaskQueue() {
         queue_lock.lock();
 
         try {
@@ -223,26 +234,44 @@ public final class SyncServer {
         } finally {
             queue_lock.unlock();
         }
-
-        return SyncError.NONE;
     }
 
-    // 选择要发送的目录 推入队列（客户端自行按下载记录校验进度）
-    public void enqueueDirectory(File dir) {
+    // 选择要发送的目录 推入队列（客户端自行按下载记录校验进度）队列不能有重复元素
+    public boolean enqueueDirectory(File dir) {
 
         if (dir == null) {
-            return;
+            return false;
         }
+
+        final String key = pathKey(dir);
 
         queue_lock.lock();
 
         try {
+            for (File queued : task_queue) {
+                if (pathKey(queued).equals(key)) {
+                    return false;
+                }
+            }
+
             task_queue.addLast(dir);
         } finally {
             queue_lock.unlock();
         }
 
         signalQueue();
+        return true;
+    }
+
+    // 比较路径用的键：统一分隔符 + 去掉末尾的 '/'
+    private static String pathKey(File dir) {
+        String path = dir.getAbsolutePath().replace('\\', '/');
+
+        while (path.length() > 1 && path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+
+        return path;
     }
 
     // 获取待发送目录队列的快照（返回拷贝 可安全迭代）

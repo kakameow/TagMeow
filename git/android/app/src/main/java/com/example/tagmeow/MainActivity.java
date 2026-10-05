@@ -4056,14 +4056,31 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onSyncEnqueue(final File dir) {
+        if (!ensureServerStarted()) {
+            return;
+        }
+
         submit(sync_worker, () -> {
-            syncServer().enqueueDirectory(dir);
+            final boolean added = syncServer().enqueueDirectory(dir);
 
             runOnUiThread(() -> {
-                setSyncShareStatus(Lang.f("status.server.enqueued", dir.getAbsolutePath()));
+                setSyncShareStatus(added
+                        ? Lang.f("status.server.enqueued", dir.getAbsolutePath())
+                        : Lang.f("status.server.duplicate", dir.getAbsolutePath()));
                 renderSyncQueue();
             });
         });
+    }
+
+    // 只有服务器开着才允许往队列里加目录
+    private boolean ensureServerStarted() {
+        if (SyncEngine.hasServer() && SyncEngine.server().isStarted()) {
+            return true;
+        }
+
+        setSyncShareStatus(Lang.get("status.server.notStarted"));
+
+        return false;
     }
 
     private void onSyncAddDir(EditText path_field) {
@@ -4083,15 +4100,26 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        // 只有服务器开着才能加目录
+        if (!ensureServerStarted()) {
+            return;
+        }
+
         submit(sync_worker, () -> {
             // 去掉末尾分隔符 否则 core 的 parent_dir 首段（入队目录名）会变成空串
             final File target = new File(StorageAccess.normalizePath(dir.getAbsolutePath()));
-
-            syncServer().enqueueDirectory(target);
+            final boolean added = syncServer().enqueueDirectory(target);
 
             runOnUiThread(() -> {
-                path_field.setText("");
-                setSyncShareStatus(Lang.f("status.server.enqueued", target.getAbsolutePath()));
+                setSyncShareStatus(added
+                        ? Lang.f("status.server.enqueued", target.getAbsolutePath())
+                        : Lang.f("status.server.duplicate", target.getAbsolutePath()));
+
+                // 重复保留输入框留
+                if (added) {
+                    path_field.setText("");
+                }
+
                 renderSyncQueue();
             });
         });
@@ -4194,8 +4222,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 下载 / 连接进行中把「更改保存目录」压暗做视觉提示
-        // （不禁用点击：点了要给出明确原因 而不是点了没反应）
+        // 下载 / 连接进行中把「更改保存目录」压暗
         if (btn_sync_path_change != null) {
             btn_sync_path_change.setAlpha(downloading ? 0.45f : 1.0f);
         }
@@ -4215,7 +4242,7 @@ public class MainActivity extends AppCompatActivity {
         sync_progress_handler.removeCallbacks(sync_progress_tick);
     }
 
-    // 人类可读的字节数（进度行和完成提示共用）
+    // 字节数（进度行和完成提示共用）
     private static String formatBytes(long bytes) {
         if (bytes < 1024L) {
             return bytes + " B";

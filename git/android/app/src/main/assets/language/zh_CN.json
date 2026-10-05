@@ -342,6 +342,8 @@
     { "id": "status.server.dirEmpty", "str": "目录为空" },
     { "id": "status.server.invalidDir", "str": "无效目录: %1" },
     { "id": "status.server.enqueued", "str": "已入队: %1" },
+    { "id": "status.server.duplicate", "str": "这个目录已经在队列里了: %1" },
+    { "id": "status.server.notStarted", "str": "请先启动服务器再添加目录" },
     { "id": "status.server.disconnected", "str": "已断开连接设备" },
     { "id": "status.server.queueEmpty", "str": "服务器: 队列为空 等待目录..." },
     { "id": "status.server.sessionEnd", "str": "服务器: 会话结束" },
