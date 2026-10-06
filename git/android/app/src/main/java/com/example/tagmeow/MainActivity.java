@@ -27,8 +27,10 @@ import android.util.Log;
 import android.util.LruCache;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewParent;
 import android.view.ViewGroup;
 import android.webkit.MimeTypeMap;
+import android.media.MediaMetadataRetriever;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.widget.EditText;
@@ -49,6 +51,8 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.Insets;
@@ -87,7 +91,7 @@ import java.util.concurrent.RejectedExecutionException;
 // - 目录：受管理目录的增删与索引刷新
 // - 标签：标签库（组 -> 标签 带颜色）
 // - 设置：设置
-// - 同步：占位
+// - 同步：局域网同步
 
 // 线程约定：
 // - 所有模块调用都在 worker 单线程上执行
@@ -282,6 +286,8 @@ public class MainActivity extends AppCompatActivity {
     // 缩略图代次：renderFiles 每跑一次 +1 上一轮没跑完的任务自动作废
     private int thumb_generation = 0;
 
+    // （缩略图改成「行被绑定时才取」见 bindFileRow：RecyclerView 只会绑定可视行）
+
     // 正在解码的缩略图 key（主线程排队 工作线程收尾 所以用并发集合）
     private final Set<String> thumb_inflight = ConcurrentHashMap.newKeySet();
 
@@ -346,7 +352,8 @@ public class MainActivity extends AppCompatActivity {
 
     private TextView btn_up;
 
-    private LinearLayout files_list;
+    // 文件列表：RecyclerView 只绑定可视行
+    private RecyclerView files_list;
 
     private LinearLayout dir_list;
 
@@ -384,7 +391,21 @@ public class MainActivity extends AppCompatActivity {
 
     private LinearLayout dir_browser_crumb_row;
 
-    private LinearLayout dir_browser_list;
+    // 目录浏览列表：RecyclerView 只渲染可视行
+    private RecyclerView dir_browser_list;
+
+    private final List<File> dir_browse_items = new ArrayList<>();
+
+    private DirBrowseAdapter dir_browse_adapter;
+
+    private final List<FileDatabase.FileInfo> file_items = new ArrayList<>();
+
+    private FileListAdapter file_adapter;
+
+    // 浏览页自己的滚动位置（首个可见行 + 行内偏移
+    private int browse_scroll_position = 0;
+
+    private int browse_scroll_offset = 0;
 
     private View dir_browser_empty;
 
@@ -646,6 +667,11 @@ public class MainActivity extends AppCompatActivity {
         tv_files_empty = findViewById(R.id.tvFilesEmpty);
         btn_up = findViewById(R.id.btnUp);
         files_list = findViewById(R.id.filesList);
+        files_list.setLayoutManager(new LinearLayoutManager(this));
+        // 关掉动画
+        files_list.setItemAnimator(null);
+        file_adapter = new FileListAdapter();
+        files_list.setAdapter(file_adapter);
         dir_list = findViewById(R.id.dirList);
         tv_dir_empty = findViewById(R.id.tvDirEmpty);
         type_list = findViewById(R.id.typeList);
@@ -756,8 +782,12 @@ public class MainActivity extends AppCompatActivity {
 
     private void selectTab(int index) {
         // 离开当前页签之前记录滚动位置
-        if (content_scroll != null && active_tab != index) {
-            tab_scroll[active_tab] = content_scroll.getScrollY();
+        if (active_tab != index) {
+            if (active_tab == 0) {
+                saveBrowseScroll();
+            } else if (content_scroll != null) {
+                tab_scroll[active_tab] = content_scroll.getScrollY();
+            }
         }
 
         active_tab = index;
@@ -775,9 +805,14 @@ public class MainActivity extends AppCompatActivity {
             nav_labels[i].setTextColor(color);
         }
 
+        // 浏览页在根布局里和 contentScroll 平级 而且声明在它前面
+        if (content_scroll != null) {
+            content_scroll.setVisibility(index == 0 ? View.GONE : View.VISIBLE);
+        }
+
         reload();
 
-        // 同步页的状态行（是否正在分享 / 保存目录在哪）
+        // 同步页的状态行
         renderSyncTabStatus();
 
         // 切回来时还原这一页的滚动位置
@@ -790,9 +825,38 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        // 浏览页滚的是自己的 RecyclerView（位置 + 行内偏移）其余页签滚共用 ScrollView
+        if (index == 0) {
+            if (files_list != null && files_list.getLayoutManager() instanceof LinearLayoutManager) {
+                ((LinearLayoutManager) files_list.getLayoutManager())
+                        .scrollToPositionWithOffset(browse_scroll_position, browse_scroll_offset);
+            }
+
+            return;
+        }
+
         final int target = tab_scroll[index];
 
         content_scroll.post(() -> content_scroll.scrollTo(0, target));
+    }
+
+    // 记下浏览页文件列表滚到哪了（首个可见行 + 行内偏移）
+    private void saveBrowseScroll() {
+        if (files_list == null) {
+            return;
+        }
+
+        View first = files_list.getChildAt(0);
+
+        if (first == null) {
+            browse_scroll_position = 0;
+            browse_scroll_offset = 0;
+
+            return;
+        }
+
+        browse_scroll_position = files_list.getChildAdapterPosition(first);
+        browse_scroll_offset = first.getTop() - files_list.getPaddingTop();
     }
 
     private void initEngine() {
@@ -925,7 +989,7 @@ public class MainActivity extends AppCompatActivity {
                 tv_stat_tags.setText(Lang.get("stat.tags_prefix") + tagCount);
                 status_text = info;
                 renderSettings();
-                // 目录列表可能变了（新增 / 删除 / 授权丢了）搜索目录容器跟着刷一遍
+                // 目录列表可能改变搜索目录容器跟着刷新
                 renderSearchDirList();
 
                 collectLogMessages();
@@ -941,12 +1005,19 @@ public class MainActivity extends AppCompatActivity {
                 String stamp = browseStampOf(search_mode, target, access, types, colors, file_count,
                         search_mode ? current_files : entries);
 
-                if (!stamp.equals(browse_stamp) || files_list.getChildCount() == 0) {
+                if (!stamp.equals(browse_stamp) || file_adapter == null || file_adapter.getItemCount() == 0) {
                     browse_stamp = stamp;
 
                     // 重画会把滚动位置顶回开头 画完再还原
                     if (scroll_to_top) {
                         tab_scroll[active_tab] = 0;
+                        browse_scroll_position = 0;
+                        browse_scroll_offset = 0;
+
+                        if (active_tab == 0 && files_list != null) {
+                            files_list.scrollToPosition(0);
+                        }
+
                         scroll_to_top = false;
                     }
 
@@ -1038,52 +1109,91 @@ public class MainActivity extends AppCompatActivity {
 
         tv_files_empty.setVisibility(empty ? View.VISIBLE : View.GONE);
 
-        int thumbBudget = THUMB_LIMIT;
+        // 交给 RecyclerView：只绑定可视行
+        file_items.clear();
+        file_items.addAll(files);
 
-        for (FileDatabase.FileInfo info : files) {
-            View row = getLayoutInflater().inflate(R.layout.item_file, files_list, false);
-
-            ImageView icon = row.findViewById(R.id.fileIcon);
-            TextView name = row.findViewById(R.id.fileName);
-            TextView path = row.findViewById(R.id.filePath);
-            LinearLayout tags = row.findViewById(R.id.fileTags);
-            TextView moreLabel = row.findViewById(R.id.fileMoreLabel);
-
-            moreLabel.setText(Lang.get("tag.row_label"));
-
-            bindFileIcon(icon, info, dp(7));
-
-            if (wantsThumbnail(info, thumbBudget)) {
-                thumbBudget--;
-                loadThumbnail(icon, info, generation);
-            }
-
-            name.setText(info.file_ref.isRoot() ? "(root)" : info.file_ref.getName());
-
-            String parent = info.file_ref.getParentPath();
-            path.setText(info.file_ref.getRootId() + (parent.isEmpty() ? "" : " / " + parent) + (info.is_directory ? Lang.get("browse.dir_suffix") : "  ·  " + formatSize(info.file_size)));
-
-            List<String> infoTags = info.tags == null ? new ArrayList<>() : info.tags;
-
-            if (!infoTags.isEmpty()) {
-                // 标签自适应换行：一行放不下就换到下一行 全部显示 不再用 ＋N 折叠
-                FlowLayout tag_flow = new FlowLayout(this, dp(6), dp(4));
-                tag_flow.setLayoutParams(new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-                tags.addView(tag_flow);
-
-                for (String tag : infoTags) {
-                    tag_flow.addView(buildTagChip(tag, colorOfTag(tag)));
-                }
-            }
-
-            row.setOnClickListener(v -> onFileClicked(info));
-
-            // 右侧 2/10 区域：打开这个文件的标签修改界面
-            row.findViewById(R.id.fileMore).setOnClickListener(v -> showFileTagOverlay(info));
-
-            files_list.addView(row);
+        if (file_adapter != null) {
+            file_adapter.submit(file_items);
         }
+    }
+
+    // 文件列表适配器
+    private final class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.Holder> {
+
+        private final List<FileDatabase.FileInfo> items = new ArrayList<>();
+
+        void submit(List<FileDatabase.FileInfo> files) {
+            items.clear();
+            items.addAll(files);
+            notifyDataSetChanged();
+        }
+
+        @Override
+        public Holder onCreateViewHolder(ViewGroup parent, int view_type) {
+            return new Holder(getLayoutInflater().inflate(R.layout.item_file, parent, false));
+        }
+
+        @Override
+        public void onBindViewHolder(Holder holder, int position) {
+            bindFileRow(holder.itemView, items.get(position));
+        }
+
+        @Override
+        public int getItemCount() {
+            return items.size();
+        }
+
+        final class Holder extends RecyclerView.ViewHolder {
+            Holder(View row) {
+                super(row);
+            }
+        }
+    }
+
+    // 绑定一行文件
+    // 行会被回收复用：标签容器每次都要清空重建 图标也要先恢复成类型图标再考虑缩略图
+    private void bindFileRow(View row, FileDatabase.FileInfo info) {
+        ImageView icon = row.findViewById(R.id.fileIcon);
+        TextView name = row.findViewById(R.id.fileName);
+        TextView path = row.findViewById(R.id.filePath);
+        LinearLayout tags = row.findViewById(R.id.fileTags);
+        TextView moreLabel = row.findViewById(R.id.fileMoreLabel);
+
+        moreLabel.setText(Lang.get("tag.row_label"));
+
+        bindFileIcon(icon, info, dp(7));
+
+        // 缩略图：只有可视行会被绑定 缓存命中就直接显示
+        if (wantsThumbnail(info)) {
+            loadThumbnail(icon, info, thumb_generation);
+        }
+
+        name.setText(info.file_ref.isRoot() ? "(root)" : info.file_ref.getName());
+
+        String parent = info.file_ref.getParentPath();
+        path.setText(info.file_ref.getRootId() + (parent.isEmpty() ? "" : " / " + parent) + (info.is_directory ? Lang.get("browse.dir_suffix") : "  ·  " + formatSize(info.file_size)));
+
+        tags.removeAllViews();
+
+        List<String> infoTags = info.tags == null ? new ArrayList<>() : info.tags;
+
+        if (!infoTags.isEmpty()) {
+            // 标签自适应换行：一行放不下就换到下一行 全部显示 不再用 ＋N 折叠
+            FlowLayout tag_flow = new FlowLayout(this, dp(6), dp(4));
+            tag_flow.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            tags.addView(tag_flow);
+
+            for (String tag : infoTags) {
+                tag_flow.addView(buildTagChip(tag, colorOfTag(tag)));
+            }
+        }
+
+        row.setOnClickListener(v -> onFileClicked(info));
+
+        // 右侧 2/10 区域：打开这个文件的标签修改界面
+        row.findViewById(R.id.fileMore).setOnClickListener(v -> showFileTagOverlay(info));
     }
 
     // 先按类型画矢量图 图片 / 视频再由调用方决定要不要去取缩略图
@@ -1095,12 +1205,12 @@ public class MainActivity extends AppCompatActivity {
         icon.setBackground(rounded(COLOR_ACTIVE_BG, 9, 0, 0));
     }
 
-    // 能取缩略图、而且还在这次列表的预算之内
-    private boolean wantsThumbnail(FileDatabase.FileInfo info, int budget) {
-        return budget > 0 && !info.is_directory && FileTypes.hasThumbnail(info.file_ref.getName());
+    // 这个条目能不能取缩略图
+    private boolean wantsThumbnail(FileDatabase.FileInfo info) {
+        return !info.is_directory && FileTypes.hasThumbnail(info.file_ref.getName());
     }
 
-    // 缩略图在后台取：失败（格式不支持 / 太大 / 没权限）就保持矢量图不动
+    // 缩略图在后台取：失败就保持矢量图
     private void loadThumbnail(final ImageView icon, final FileDatabase.FileInfo info, final int generation) {
         final String key = info.file_ref.getRootId() + ":" + info.file_ref.getRelativePath()
                 + ":" + info.file_mtime;
@@ -1112,15 +1222,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // 同一张图这轮已经在解了：不重复排队（一张图可能在列表里出现多次）
+        // 不重复排队
         if (!thumb_inflight.add(key)) {
             return;
         }
 
         submit(thumb_worker, () -> {
             try {
-                // 又重画过一轮了：这个任务作废 直接丢掉 别占着线程池
-                // 少了这一步 来回切页面时上一轮的任务会一直堆在队列里 越切越慢
+                // 又重画过一轮了：这个任务作废 直接丢掉 不占着线程池
                 if (generation != thumb_generation) {
                     return;
                 }
@@ -1137,7 +1246,7 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                Bitmap bitmap = loadThumbnailBitmap(locator);
+                Bitmap bitmap = loadThumbnailBitmap(locator, info.file_ref.getName());
 
                 if (bitmap == null) {
                     return;
@@ -1173,10 +1282,40 @@ public class MainActivity extends AppCompatActivity {
         return scaled;
     }
 
-    // 缩略图只有一个来源了：绝对路径（所有文件访问模式）
-    // 原来 SAF 的 ContentResolver.loadThumbnail 分支跟着系统选择器一起砍了
-    private Bitmap loadThumbnailBitmap(String locator) {
+    // 缩略图来源：绝对路径（所有文件访问模式）
+    private Bitmap loadThumbnailBitmap(String locator, String file_name) {
+        // 视频 BitmapFactory 解不了：用 MediaMetadataRetriever 抓一帧
+        if (FileTypes.isVideo(file_name)) {
+            return decodeVideoFrame(locator);
+        }
+
         return decodeScaledThumbnail(locator);
+    }
+
+    // 视频缩略图：抓第一帧（同步帧）抓不到就返回 null 保持类型图标
+    private static Bitmap decodeVideoFrame(String path) {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+
+        try {
+            retriever.setDataSource(path);
+
+            Bitmap frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+
+            if (frame == null) {
+                // 有的编码第一帧取不到：往后挪 1 秒再试一次
+                frame = retriever.getFrameAtTime(1000000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            }
+
+            return frame == null ? null : scaleToThumb(frame);
+        } catch (RuntimeException error) {
+            return null;
+        } finally {
+            try {
+                retriever.release();
+            } catch (Exception ignored) {
+                // release 失败没什么可做的（新 SDK 上它会抛 IOException）
+            }
+        }
     }
 
     // 自己缩放解码（开两次：先量尺寸、再按 inSampleSize 解）
@@ -2114,6 +2253,9 @@ public class MainActivity extends AppCompatActivity {
         dir_browser_crumbs = dir_browser_overlay.findViewById(R.id.dirBrowserCrumbs);
         dir_browser_crumb_row = dir_browser_overlay.findViewById(R.id.dirBrowserCrumbRow);
         dir_browser_list = dir_browser_overlay.findViewById(R.id.dirBrowserList);
+        dir_browser_list.setLayoutManager(new LinearLayoutManager(this));
+        dir_browse_adapter = new DirBrowseAdapter();
+        dir_browser_list.setAdapter(dir_browse_adapter);
         dir_browser_empty = dir_browser_overlay.findViewById(R.id.dirBrowserEmpty);
 
         dir_browser_overlay.findViewById(R.id.btnDirBrowserBack).setOnClickListener(v -> hideOverlay());
@@ -2170,7 +2312,8 @@ public class MainActivity extends AppCompatActivity {
         TextView current = dir_browser_overlay.findViewById(R.id.tvDirBrowserCurrent);
         current.setText(Lang.get("dir.browser_current") + dir_browser_path.getAbsolutePath());
 
-        dir_browser_list.removeAllViews();
+        // 读不出来 / 空目录时列表必须是空的
+        dir_browse_adapter.submit(new ArrayList<File>());
 
         File[] children = dir_browser_path.listFiles();
 
@@ -2200,42 +2343,77 @@ public class MainActivity extends AppCompatActivity {
             return left.getName().compareToIgnoreCase(right.getName());
         });
 
-        // 不过滤任何目录
-        for (final File child : children) {
-            boolean directory = child.isDirectory();
-            View row = getLayoutInflater().inflate(R.layout.item_dir_browse, dir_browser_list, false);
+        // 交给 RecyclerView：只渲染可视行 几千个文件也不卡
+        dir_browse_items.clear();
+        dir_browse_items.addAll(Arrays.asList(children));
+        dir_browse_adapter.submit(dir_browse_items);
+    }
 
-            ImageView icon = row.findViewById(R.id.dirBrowseIcon);
-            TextView name = row.findViewById(R.id.dirBrowseName);
-            TextView meta = row.findViewById(R.id.dirBrowseMeta);
-            TextView arrow = row.findViewById(R.id.dirBrowseArrow);
+    // 一行目录 / 文件（目录统一 folder 图标 文件统一 file 图标 都不取缩略图）
+    private void bindDirBrowseRow(View row, final File child) {
+        ImageView icon = row.findViewById(R.id.dirBrowseIcon);
+        TextView name = row.findViewById(R.id.dirBrowseName);
+        TextView meta = row.findViewById(R.id.dirBrowseMeta);
+        TextView arrow = row.findViewById(R.id.dirBrowseArrow);
 
-            name.setText(child.getName());
+        name.setText(child.getName());
 
-            if (directory) {
-                // 统一风格：跟目录页 / 文件列表一样 中性色图标 + 浅底
-                icon.setImageResource(R.drawable.folder);
-                icon.setImageTintList(ColorStateList.valueOf(COLOR_MEDIUM));
-                icon.setBackground(rounded(COLOR_ACTIVE_BG, 11, 0, 0));
+        if (child.isDirectory()) {
+            icon.setImageResource(R.drawable.folder);
+            icon.setImageTintList(ColorStateList.valueOf(COLOR_MEDIUM));
+            icon.setBackground(rounded(COLOR_ACTIVE_BG, 11, 0, 0));
 
-                File[] inner = child.listFiles();
-                meta.setText(Lang.f("dir.browser_items", inner == null ? 0 : inner.length)
-                        + " · " + formatDate(child.lastModified()));
+            // 不再对每个子目录 listFiles() 数条目
+            meta.setText(formatDate(child.lastModified()));
+            arrow.setVisibility(View.VISIBLE);
+            row.setAlpha(1f);
 
-                row.setOnClickListener(v -> {
-                    dir_browser_path = child;
-                    renderDirBrowser();
-                });
-            } else {
-                icon.setImageResource(R.drawable.file_text);
-                icon.setImageTintList(ColorStateList.valueOf(COLOR_MUTED));
-                icon.setBackground(rounded(COLOR_ACTIVE_BG, 11, 0, 0));
-                meta.setText(formatSize(child.length()) + " · " + formatDate(child.lastModified()));
-                arrow.setVisibility(View.GONE);
-                row.setAlpha(0.55f);
+            row.setOnClickListener(v -> {
+                dir_browser_path = child;
+                renderDirBrowser();
+            });
+        } else {
+            icon.setImageResource(R.drawable.file);
+            icon.setImageTintList(ColorStateList.valueOf(COLOR_MUTED));
+            icon.setBackground(rounded(COLOR_ACTIVE_BG, 11, 0, 0));
+            meta.setText(formatSize(child.length()) + " · " + formatDate(child.lastModified()));
+            arrow.setVisibility(View.GONE);
+            row.setAlpha(0.55f);
+
+            row.setOnClickListener(null);
+        }
+    }
+
+    // 目录浏览列表适配器
+    private final class DirBrowseAdapter extends RecyclerView.Adapter<DirBrowseAdapter.Holder> {
+
+        private final List<File> items = new ArrayList<>();
+
+        void submit(List<File> children) {
+            items.clear();
+            items.addAll(children);
+            notifyDataSetChanged();
+        }
+
+        @Override
+        public Holder onCreateViewHolder(ViewGroup parent, int view_type) {
+            return new Holder(getLayoutInflater().inflate(R.layout.item_dir_browse, parent, false));
+        }
+
+        @Override
+        public void onBindViewHolder(Holder holder, int position) {
+            bindDirBrowseRow(holder.itemView, items.get(position));
+        }
+
+        @Override
+        public int getItemCount() {
+            return items.size();
+        }
+
+        final class Holder extends RecyclerView.ViewHolder {
+            Holder(View row) {
+                super(row);
             }
-
-            dir_browser_list.addView(row);
         }
     }
 
@@ -3580,7 +3758,7 @@ public class MainActivity extends AppCompatActivity {
         ImageView icon = file_tag_overlay.findViewById(R.id.fileTagIcon);
         bindFileIcon(icon, info, dp(10));
 
-        if (wantsThumbnail(info, 1)) {
+        if (wantsThumbnail(info)) {
             loadThumbnail(icon, info, thumb_generation);
         }
 
