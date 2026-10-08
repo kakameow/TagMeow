@@ -714,7 +714,7 @@ bool FileDatabase::removeDirectory(const std::filesystem::path &dir_path_utf8)
     return true;
 }
 
-bool FileDatabase::clearRepeat()
+bool FileDatabase::clearRepeat(int *removed_count)
 {
     if (!db_)
     {
@@ -736,11 +736,18 @@ bool FileDatabase::clearRepeat()
         return false;
     }
 
-    error_string_.clear();
+    // 数据走 out 参数（sqlite3_changes = 上一条 DELETE 影响的行数）；error_string_ 只留给人看
+    const int removed = sqlite3_changes(db_);
+    if (removed_count != nullptr)
+    {
+        *removed_count = removed;
+    }
+
+    error_string_ = "[tip] clearRepeat deduped=" + std::to_string(removed);
     return true;
 }
 
-bool FileDatabase::cleanupInvalid()
+bool FileDatabase::cleanupInvalid(int *removed_count)
 {
     if (!db_)
     {
@@ -798,7 +805,12 @@ bool FileDatabase::cleanupInvalid()
 
     if (invalid_ids.empty())
     {
-        error_string_.clear();
+        if (removed_count != nullptr)
+        {
+            *removed_count = 0;
+        }
+
+        error_string_ = "[tip] cleanupInvalid removed=0";
         return true;
     }
 
@@ -840,8 +852,52 @@ bool FileDatabase::cleanupInvalid()
         return false;
     }
 
-    error_string_.clear();
+    // 数据走 out 参数；error_string_ 只留给人看
+    const int removed = static_cast<int>(invalid_ids.size());
+    if (removed_count != nullptr)
+    {
+        *removed_count = removed;
+    }
+
+    error_string_ = "[tip] cleanupInvalid removed=" + std::to_string(removed);
     return true;
+}
+
+// files 表的记录条数：给上层显示"索引了多少项"用。
+// 注意不能用 searchByTags(全空的 SearchOptions) 代替 —— 三个标签容器全空时它返回的是
+// "没有标签的文件"（见下面的语义），数出来的是待整理收件箱而不是全库
+int FileDatabase::countFiles() const
+{
+    if (!db_)
+    {
+        error_string_ = "[warning] Database not opened";
+        return -1;
+    }
+
+    const char *count_sql = "SELECT COUNT(*) FROM files;";
+    sqlite3_stmt *stmt = nullptr;
+
+    if (sqlite3_prepare_v2(db_, count_sql, -1, &stmt, nullptr) != SQLITE_OK)
+    {
+        error_string_ = sqlite3_errmsg(db_);
+        return -1;
+    }
+
+    int count = -1;
+
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+    {
+        count = sqlite3_column_int(stmt, 0);
+        error_string_.clear();
+    }
+    else
+    {
+        error_string_ = sqlite3_errmsg(db_);
+    }
+
+    sqlite3_finalize(stmt);
+    stmt = nullptr;
+    return count;
 }
 
 std::vector<table::FileInfo> FileDatabase::searchByTags(const SearchOptions &opts) const
