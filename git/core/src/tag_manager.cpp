@@ -1,4 +1,5 @@
 #include "tag_manager.h"
+#include "system_error_text.h"
 
 #include <chrono>
 
@@ -156,7 +157,7 @@ bool TagLibrary::saveTagsToFile() const
     std::filesystem::rename(temp_path, config_path_, ec);
     if (ec)
     {
-        error_string_ = "[warning] Failed to rename temp file: " + ec.message();
+        error_string_ = "[warning] Failed to rename temp file: " + systemErrorText(ec);
         std::filesystem::remove(temp_path, ec);
         return false;
     }
@@ -851,7 +852,7 @@ bool TagFileManager::removeModeTags(const std::filesystem::path &file_path_utf8,
 
             if (ec)
             {
-                error_string_ = "[warning] Failed to rename file when removing filename tags: " + ec.message();
+                error_string_ = "[warning] Failed to rename file when removing filename tags: " + systemErrorText(ec);
                 return false;
             }
 

@@ -1,15 +1,19 @@
 // 同步页：服务端共享 + 客户端下载
 // 参考稿 #page-sync（HTML 1375-1443 行）与 CSS .sync-layout / .sync-panel /
 // .sync-form-row / .input-field / .queue-header / .queue-list / .queue-item / .server-list（540-568 行）
-// 数据全部来自 Store（core 桥接层），本页不再有任何假数据 / 假提示：
-//   * 发送队列 = Store.serverQueue（core 的待发送目录快照），入队走「选择目录」-> Store.enqueueServerDir(index)
-//   * 设备列表 = Store.clientServers（core 扫到的局域网设备），选中行 = Store.selectedServerIndex
-//   * 每个按钮都落到 core 的真实接口（见 page.runAction / 行内「下载」按钮），没有"只弹一句按钮名"的占位提示
-// 固定尺寸版：页面根节点 = 内容区可用高度 740，两个面板固定高度平分，列表内部滚动（滚动条 AlwaysOff）
-// 测试阶段残留已清：两个 ListModel 初始为空（不再有 Project Aurora / TagMeow-Server 假数据），
-// 列表头的「＋ 添加」按钮与其 addClicked 逻辑已删；列表为空时在框内显示灰色提示（暂无任务 / 未发现服务端）
-// 行内 ✕ 已删：core 没有"把某条目录移出队列""从扫描结果里删一台设备"的接口
-//（停服 / 断开客户端才会清队列，设备列表靠重新扫描刷新），留着它只能假成功，所以直接去掉
+//
+// 数据全部来自 ConfigBridge（core 的 SyncServer / SyncClient 桥接层），本页没有假数据 / 假提示：
+//   * 发送队列 = ConfigBridge.serverQueue（SyncServer::getTaskQueue() 的快照）
+//   * 设备列表 = ConfigBridge.clientServers（SyncClient::getServers() 的快照）
+//   * 每个按钮都落到 core 的真实接口（见 page.runAction），没有"只弹一句按钮名"的占位提示
+// 服务端：
+//   * 服务器名称默认 tagmeow（Store.serverName），启动时交给 SyncServer::start
+//   * 共享目录一行两个按钮：「选择目录」打开系统目录框只负责把路径写进输入框（输入框本身可写），
+//     「加入发送队列」才把输入框里的目录推入 SyncServer 的队列
+//   * 入队 / 停服 / 断开客户端后 core 会给回报 -> serverQueueChanged -> 列表重新渲染
+// 客户端：
+//   * 保存目录来自 config.json 的 DownloadPath（默认 ./download），只在"没在下载"时能改
+//   * 「加入管理目录」把"具体下载目录"downloadPath/<最近一次下载的任务目录> 加进受管目录并建索引
 //
 // 字号说明：参考稿的 11.5 / 10.5px 在 Qt 6.11 里写不了字面量（font.pixelSize 是整型，
 // 会报 Invalid property assignment: int expected），所以统一向下取整，注释里保留原值。
@@ -17,6 +21,8 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
+// FolderDialog：共享目录 / 保存目录走系统目录选择框（PageSettings 的导出导入也是这么做的）
+import QtQuick.Dialogs
 
 Item {
     id: page
@@ -38,24 +44,28 @@ Item {
     // 参考稿断点：<760 时表单行纵向、输入框整宽、按钮换行
     readonly property bool narrow: width < 760
 
+    // 「共享目录」输入框的内容：输入框自己可写（用户手敲路径也行），
+    // 「选择目录」按钮只是把系统目录框选中的路径写进来，真正入队要靠「加入发送队列」
+    property string shareDir: ""
+
     // ---------------- 本页私有数据（数据源都是 Store，这里只做"快照 -> 列表模型"的搬运） ----------------
-    // 发送队列：内容 = Store.serverQueue（core 的待发送目录），为空时列表里显示灰色提示
+    // 发送队列：内容 = ConfigBridge.serverQueue（core 的待发送目录），为空时列表里显示灰色提示
     ListModel {
         id: sendModel
     }
 
-    // 扫描到的服务端：内容 = Store.clientServers（core 扫到的局域网设备）
+    // 扫描到的服务端：内容 = ConfigBridge.clientServers（core 扫到的局域网设备）
     ListModel {
         id: serverModel
     }
 
     // ---------------- core 快照 -> 本页列表模型 ----------------
-    // core 的 serverQueue() / scanServers() 都是"调一次拿一次"的普通调用，
-    // Store 里已经把结果缓存成 serverQueue / clientServers，这里只把快照搬进 ListModel
+    // core 的 getTaskQueue() / getServers() 都是"调一次拿一次"的普通调用，
+    // 桥里已经把结果缓存成 serverQueue / clientServers，这里只把快照搬进 ListModel
     function syncSendQueue() {
         sendModel.clear()
-        for (var i = 0; i < Store.serverQueue.length; i++) {
-            var dir = Store.serverQueue[i]
+        for (var i = 0; i < ConfigBridge.serverQueue.length; i++) {
+            var dir = ConfigBridge.serverQueue[i]
             // title = 目录名（core 给的规范名），status = 目录绝对路径
             sendModel.append({ title: String(dir.name), status: String(dir.path) })
         }
@@ -63,8 +73,8 @@ Item {
 
     function syncServerList() {
         serverModel.clear()
-        for (var i = 0; i < Store.clientServers.length; i++) {
-            var device = Store.clientServers[i]
+        for (var i = 0; i < ConfigBridge.clientServers.length; i++) {
+            var device = ConfigBridge.clientServers[i]
             // 设备行显示 名字 + ip:port（core 只给这三样，端口拼在地址后面）
             serverModel.append({ name: String(device.name),
                                  address: String(device.ip) + ":" + String(device.port) })
@@ -78,7 +88,7 @@ Item {
     }
 
     Connections {
-        target: Store
+        target: ConfigBridge
 
         // 入队 / 停服 / 断开客户端后 core 会重新广播队列：重新搬一遍
         function onServerQueueChanged() {
@@ -93,21 +103,26 @@ Item {
 
     // ---------------- 本页按钮的动作分发 ----------------
     // 两个面板的按钮都是数据行渲染出来的（FieldRow / QueueHeader 的 buttons 数组），
-    // 所以"点的是哪个动作"由数据行里的 action 名字决定；每个分支都落到 Store / core 的真实接口上：
-    // 没有任何分支只是弹一句提示（占位 toast 就是这次要清掉的东西）
+    // 所以"点的是哪个动作"由数据行里的 action 名字决定；每个分支都落到 ConfigBridge / core 的真实接口上
     function runAction(action) {
         if (action === "toggleServer") {
-            Store.toggleServer()
+            ConfigBridge.toggleServer(Store.serverName)
         } else if (action === "chooseDir") {
-            dirPicker.open()
+            shareDirDialog.open()
+        } else if (action === "enqueueDir") {
+            ConfigBridge.enqueueServerDir(shareDir)
         } else if (action === "disconnectServerClient") {
-            Store.disconnectServerClient()
+            ConfigBridge.disconnectServerClient()
         } else if (action === "scan") {
-            Store.scanServers()
+            ConfigBridge.scanServers()
         } else if (action === "clearRecords") {
-            Store.clearDownloadRecords()
+            ConfigBridge.clearDownloadRecords()
         } else if (action === "disconnectClient") {
-            Store.disconnectClient()
+            ConfigBridge.disconnectClient()
+        } else if (action === "changeSavePath") {
+            savePathDialog.open()
+        } else if (action === "addDownloadDir") {
+            ConfigBridge.addDownloadDirToLibrary()
         }
     }
 
@@ -318,9 +333,9 @@ Item {
                     }
 
                     // 表单行：服务器名称 + 启动/关闭
-                    // 与 Store.serverName 双向绑定：Store 一变输入框跟着变，用户敲进去的内容立刻写回 Store，
-                    // 启动按钮就是拿这个名字去 Core.startServer(Store.serverName)
-                    //（名字留空时原样把空串交 core，core 自己会兜底成默认应用名）
+                    // 与 Store.serverName 双向绑定（默认名 tagmeow）：Store 一变输入框跟着变，
+                    // 用户敲进去的内容立刻写回 Store；启动按钮就是拿这个名字去 SyncServer::start
+                    //（名字留空时桥也会兜底成 tagmeow）
                     FieldRow {
                         id: serverNameRow
                         labelText: Lang.t("sync.server_name_label")
@@ -332,23 +347,30 @@ Item {
                         onFieldTextChanged: Store.serverName = fieldText
                         onActionClicked: (action) => page.runAction(action)
                         buttons: [{
-                            text: Store.serverRunning ? Lang.t("sync.stop") : Lang.t("sync.start"),
-                            kind: Store.serverRunning ? "danger" : "primary",
+                            text: ConfigBridge.serverRunning ? Lang.t("sync.stop") : Lang.t("sync.start"),
+                            kind: ConfigBridge.serverRunning ? "danger" : "primary",
                             action: "toggleServer",
-                            icon: Store.serverRunning ? "qrc:/img/power-off.svg" : "qrc:/img/power.svg"
+                            icon: ConfigBridge.serverRunning ? "qrc:/img/power-off.svg" : "qrc:/img/power.svg"
                         }]
                     }
 
-                    // 表单行：共享目录（只读回显最近一次入队的目录；真正的入队走右边的「选择目录」弹窗）
+                    // 表单行：共享目录 —— 输入框可写，右边两个按钮：
+                    //   「选择目录」只打开系统目录框，把选中的路径写进输入框（方便，不是唯一途径）
+                    //   「加入发送队列」把输入框里当前这个目录推入 SyncServer 的发送队列
                     FieldRow {
                         id: dirRow
                         labelText: Lang.t("sync.share_dir_label")
                         placeholder: Lang.t("sync.dirPath")
                         stacked: page.narrow
-                        fieldReadOnly: true
+                        fieldText: page.shareDir
+                        onFieldTextChanged: page.shareDir = fieldText
                         onActionClicked: (action) => page.runAction(action)
-                        buttons: [{ text: Lang.t("sync.choose_dir"), kind: "secondary", action: "chooseDir",
-                                    icon: "qrc:/img/folder.svg" }]
+                        buttons: [
+                            { text: Lang.t("sync.choose_dir"), kind: "secondary", action: "chooseDir",
+                              icon: "qrc:/img/folder.svg" },
+                            { text: Lang.t("sync.enqueue"), kind: "primary", action: "enqueueDir",
+                              icon: "qrc:/img/folder-plus.svg" }
+                        ]
                     }
 
                     // 队列头：发送队列 + 断开客户端连接（「＋ 添加」测试按钮已删）
@@ -492,20 +514,23 @@ Item {
                         color: Theme.text
                     }
 
-                    // 表单行：保存路径（只读）
-                    // core 既没有"改下载目录"的接口，也没有保存路径的 getter，所以这里：
-                    //   * 输入框只留 placeholder 并置为只读 —— 不显示、也不接受一个从没被真正应用过的路径
-                    //   * 右边的「更改保存目录 / 加入管理目录」两个按钮留位置但置灰（没有 action 名字 -> 不可点）
+                    // 表单行：保存路径（只读显示，真值来自 config.json 的 DownloadPath，默认 ./download）
+                    //   「更改保存目录」：只在没在下载时可以点（下载中改路径没有意义，core 也不接受）
+                    //                    点了打开系统目录框 -> ConfigBridge.setDownloadPath
+                    //   「加入管理目录」：把"具体下载目录"（downloadPath/<最近一次下载的任务目录>）
+                    //                    加进受管目录并建索引，这样下载回来的文件会被标签库收录
                     FieldRow {
                         labelText: Lang.t("sync.save_to")
                         placeholder: Lang.t("sync.save_path_placeholder")
                         stacked: page.narrow
                         fieldReadOnly: true
+                        fieldText: ConfigBridge.downloadPath
                         onActionClicked: (action) => page.runAction(action)
                         buttons: [
-                            { text: Lang.t("sync.change_path"), kind: "secondary",
+                            { text: Lang.t("sync.change_path"), kind: "secondary", action: "changeSavePath",
+                              enabled: !ConfigBridge.clientDownloading,
                               icon: "qrc:/img/folder-plus.svg" },
-                            { text: Lang.t("sync.path_as_root"), kind: "secondary",
+                            { text: Lang.t("sync.path_as_root"), kind: "secondary", action: "addDownloadDir",
                               icon: "qrc:/img/folder.svg" }
                         ]
                     }
@@ -636,8 +661,12 @@ Item {
                                 }
 
                                 // 下载（primary small）：下载的永远是"当前选中的设备"
-                                //（先点这一行把它设为选中，再按 Store.selectedServerIndex 去下）
-                                // 正在下载（Core.clientDownloading）时置灰，避免并发下第二台
+                                //（先点这一行把它设为选中，桥里再记住"当前连的是哪台"）
+                                //
+                                // 「不能点」和「变灰」是两件事 —— Btn 不会因为 enabled:false 自动灰化：
+                                //   * 不能点：连接期间**所有行**的下载按钮都禁用（core 的客户端同一时间
+                                //     只能跑一个会话，点别的也只会被 operation_in_progress 拒掉）
+                                //   * 变灰：只有**当前连接的那一台**灰化，别的行保持原样（点了没反应）
                                 Btn {
                                     id: downloadBtn
                                     anchors.right: parent.right
@@ -649,16 +678,17 @@ Item {
                                     kind: "primary"
                                     small: true
                                     iconSource: "qrc:/img/download.svg"
-                                    enabled: !Store.clientDownloading
-                                    opacity: enabled ? 1.0 : 0.5
+                                    enabled: !ConfigBridge.clientDownloading
+                                    opacity: (ConfigBridge.clientDownloading
+                                              && ConfigBridge.connectedServerIndex === serverItem.index) ? 0.5 : 1.0
                                     onClicked: {
                                         Store.selectServer(serverItem.index)
-                                        Store.startDownload(Store.selectedServerIndex)
+                                        ConfigBridge.startDownload(serverItem.index)
                                     }
                                 }
 
                                 // 原来的行尾 ✕（从扫描结果里删掉这台）已删：core 没有"删掉扫到的某台设备"的接口，
-                                // 设备列表由 Store.scanServers() 的扫描结果决定；留着 ✕ 只能弹假提示
+                                // 设备列表由 ConfigBridge.scanServers() 的扫描结果决定；留着 ✕ 只能弹假提示
 
                                 Rectangle {
                                     anchors.bottom: parent.bottom
@@ -675,137 +705,30 @@ Item {
         }
     }
 
-    // ---------- 共享目录选择弹窗（「选择目录」按钮打开） ----------
-    // 不引入新的文件对话框依赖：直接列 Store.dirs（core 已经管着、且已经建立索引的目录），
-    // 选中一项 -> Store.enqueueServerDir(index)（服务端没开 / 队列里已有同一目录时，Store 会给出提示并拒绝）
-    Popup {
-        id: dirPicker
+        // FolderDialog 给的是 file:// URL；输入框里显示成本地路径更像样（桥那边两种写法都认）
+    function localPath(url) {
+        var s = String(url)
+        if (s.indexOf("file:///") === 0)
+            s = s.substring(8)
+        return decodeURIComponent(s)
+    }
 
-        anchors.centerIn: parent
-        width: Math.min(380, page.width - 40)
-        // 高度 = 上下内边距 24 + 标题 17 + 间距 8 + 列表（每行 38，最多 5 行）
-        height: 24 + 17 + 8 + Math.max(1, Math.min(5, Store.dirs.length)) * 38
-        modal: true
-        padding: 0
+    // ---------- 共享目录：系统目录选择框（「选择目录」按钮打开） ----------
+    // 只负责把选中的路径写进「共享目录」输入框 —— 入队是另一个按钮的事。
+    // 输入框本身可写，用户手敲路径完全等价，这个按钮只是省事
+    FolderDialog {
+        id: shareDirDialog
 
-        background: Rectangle {
-            radius: 10
-            color: Theme.surface
-            border.width: 1
-            border.color: Theme.line
-        }
+        title: Lang.t("sync.share_dir_label")
+        onAccepted: page.shareDir = page.localPath(selectedFolder)
+    }
 
-        contentItem: Item {
-            Text {
-                id: pickerTitle
-                x: 12
-                y: 12
-                width: parent.width - 24
-                height: 17
-                text: Lang.t("sync.share_dir_label")
-                verticalAlignment: Text.AlignVCenter
-                font.pixelSize: Theme.px(12)
-                font.weight: Font.Bold
-                font.family: Theme.fontFamily
-                color: Theme.text
-            }
+    // ---------- 保存目录：系统目录选择框（「更改保存目录」按钮打开） ----------
+    // 只在没在下载时可点（按钮已经按 clientDownloading 置灰，桥里也会再挡一次）
+    FolderDialog {
+        id: savePathDialog
 
-            // 还没加过受管目录：没有可入队的目录
-            Text {
-                x: 12
-                y: 37
-                width: parent.width - 24
-                height: 38
-                visible: Store.dirs.length === 0
-                text: Lang.t("dir.empty")
-                verticalAlignment: Text.AlignVCenter
-                elide: Text.ElideRight
-                font.pixelSize: Theme.px(11)
-                font.family: Theme.fontFamily
-                color: Theme.text3
-            }
-
-            ListView {
-                id: pickerList
-                x: 0
-                y: 37
-                width: parent.width
-                height: parent.height - 37
-                visible: Store.dirs.length > 0
-                clip: true
-                boundsBehavior: Flickable.StopAtBounds
-                model: Store.dirs
-
-                delegate: Item {
-                    id: pickerRow
-
-                    required property var modelData
-                    required property int index
-
-                    width: pickerList.width
-                    height: 38
-
-                    Rectangle {
-                        anchors.fill: parent
-                        color: pickerArea.containsMouse ? Theme.hover : "transparent"
-                    }
-
-                    Column {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 12
-                        anchors.right: parent.right
-                        anchors.rightMargin: 12
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 1
-
-                        Text {
-                            width: parent.width
-                            height: 17
-                            text: pickerRow.modelData.name
-                            elide: Text.ElideRight
-                            verticalAlignment: Text.AlignVCenter
-                            font.pixelSize: Theme.px(12)
-                            font.weight: Font.DemiBold
-                            font.family: Theme.fontFamily
-                            color: Theme.text
-                        }
-
-                        Text {
-                            width: parent.width
-                            height: 15
-                            text: pickerRow.modelData.path
-                            elide: Text.ElideMiddle
-                            verticalAlignment: Text.AlignVCenter
-                            font.pixelSize: Theme.px(10)
-                            font.family: Theme.fontFamily
-                            color: Theme.text3
-                        }
-                    }
-
-                    MouseArea {
-                        id: pickerArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            // 先把要入队的目录取出来（close() 之后列表可能已经变了，索引会失效）
-                            var picked = Store.dirs[pickerRow.index]
-                            // 入队成功才把路径回显到「共享目录」输入框：不成功不写，避免显示一个没进队列的目录
-                            if (Store.enqueueServerDir(pickerRow.index) && picked)
-                                dirRow.fieldText = String(picked.path)
-                            dirPicker.close()
-                        }
-                    }
-
-                    Rectangle {
-                        anchors.bottom: parent.bottom
-                        width: parent.width
-                        height: 1
-                        color: Theme.line
-                        visible: pickerRow.index < Store.dirs.length - 1
-                    }
-                }
-            }
-        }
+        title: Lang.t("sync.change_path")
+        onAccepted: ConfigBridge.setDownloadPath(selectedFolder.toString())
     }
 }

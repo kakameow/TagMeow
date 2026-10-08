@@ -80,6 +80,42 @@ ConfigBridge::ConfigBridge(QObject *parent)
     {
         QCoreApplication::instance()->installEventFilter(this);
     }
+
+    // 工作线程的回调只发信号（syncStateChanged）—— 那些信号是跨线程发的，auto 连接会自动排队，
+    // 所以这里接的回调一定跑在主线程上：趁"有回报"的时候把队列/设备快照重新搬一遍。
+    // SyncServer::disconnect() 只是置位断开请求、由工作线程在下一个有界阻塞点真正清空队列，
+    // 所以断开后队列快照必须等这条回报才更新，不能在 disconnect() 之后立刻读。
+    connect(this, &ConfigBridge::syncStateChanged, this,
+            [this]()
+            {
+                refreshServerQueue();
+
+                // 状态一变就立刻落一条：下载的结局（成功 / 失败原因）是工作线程通过这个信号
+                // 排队回来的，不在这里记的话日志里只留得住"开始下载"，看不到结果
+                if (s_client_)
+                {
+                    logNow(QStringLiteral("[tip] sync state: downloading=%1 connected=%2 clientErr=[%3]")
+                               .arg(clientDownloading() ? 1 : 0)
+                               .arg(connectedServerIndex())
+                               .arg(QString::fromStdString(s_client_->getLastError()))
+                               .toStdString());
+                }
+            });
+
+    // 任务(入队目录)完成回报：工作线程发的信号排队到这里，在主线程记下"具体下载目录"。
+    // 之前只声明了 last_task_dir_ 却从来没人写它，所以"加入管理目录"永远退回下载根目录。
+    connect(this, &ConfigBridge::clientTaskReported, this,
+            [this](const QString &task_dir)
+            {
+                if (task_dir.isEmpty())
+                {
+                    return;
+                }
+
+                last_task_dir_ = task_dir;
+                logNow(QStringLiteral("[tip] sync last task dir -> %1").arg(task_dir).toStdString());
+                emit syncStateChanged();
+            });
 }
 
 ConfigBridge::~ConfigBridge()
@@ -87,6 +123,19 @@ ConfigBridge::~ConfigBridge()
     if (QCoreApplication::instance() != nullptr)
     {
         QCoreApplication::instance()->removeEventFilter(this);
+    }
+
+    // 先停工作线程再销毁：SyncServer / SyncClient 的回调捕获了 this，
+    // 顺序反了就会让回调落到已经析构一半的对象上
+    if (s_server_)
+    {
+        std::error_code ec;
+        s_server_->stop(ec);
+    }
+
+    if (s_client_)
+    {
+        s_client_->disconnect();
     }
 
     // 真正落盘由 ConfigLoader 的析构负责，这里不用再存一次
@@ -119,6 +168,17 @@ void ConfigBridge::collectLogMessages()
     logOne("FileDatabase", ts_.getDBError());
     logOne("TagLibrary", ts_.getTagError());
     logOne("TagFileManager", ts_.getFileError());
+
+    // 同步对象是惰性创建的，没建过就不读（与旧工程里 s_server_ / s_client_ 的非空判断一致）
+    if (s_server_)
+    {
+        logOne("SyncServer", s_server_->getLastError());
+    }
+
+    if (s_client_)
+    {
+        logOne("SyncClient", s_client_->getLastError());
+    }
 }
 
 void ConfigBridge::logOne(const std::string &class_name, const std::string &message)
@@ -136,6 +196,21 @@ void ConfigBridge::logOne(const std::string &class_name, const std::string &mess
 
     last_logged_[class_name] = message;
     log_.write(class_name, message);
+}
+
+// 立刻写盘（不参与"与上次相同就跳过"的去重）：给同步这种异步流程的关键节点用。
+// 只靠 eventFilter 的"交互后收集"时，用户点完最后一个按钮就关窗口的话，
+// 那条记录会一直留在内存里 —— 排查时日志里干干净净，什么都看不到。
+void ConfigBridge::logNow(const std::string &message)
+{
+    if (message.empty())
+    {
+        return;
+    }
+
+    log_.write("ConfigBridge", message);
+    // 同步一下去重基线，免得下一次 collectLogMessages 把同一条再写一遍
+    last_logged_["ConfigBridge"] = last_error_.toStdString();
 }
 
 QString ConfigBridge::version() const
@@ -583,4 +658,528 @@ void ConfigBridge::setTip(const QString &message)
     // 提示不算"失败"：只更新 error_string_（由本类的 collectLogMessages 在下次鼠标/键盘交互后收进日志），
     // 不发 errorOccurred，所以不会弹 Toast
     last_error_ = message;
+}
+
+// ============================================================================
+// 同步：服务端
+// ============================================================================
+
+bool ConfigBridge::serverRunning() const
+{
+    return server_running_flag_;
+}
+
+QVariantList ConfigBridge::serverQueue() const
+{
+    return server_queue_;
+}
+
+void ConfigBridge::ensureServer()
+{
+    if (s_server_)
+    {
+        return;
+    }
+
+    // 广播端口 / 魔术字 / 空队列等待时长都来自 config.json（与旧工程一致）
+    s_server_ = std::make_unique<SyncServer>(config_.broadcast_port_,
+                                            config_.broadcast_magic_word_,
+                                            config_.server_waiting_time_);
+
+    s_server_->setTaskCallback([this](const TaskReport &report)
+                               {
+                                   // 工作线程：只发信号（Qt 会自动排队到主线程），不碰任何成员
+                                   emit syncMessage(QStringLiteral("sync.task_done"),
+                                                    QString::fromStdString(report.name_));
+                               });
+}
+
+void ConfigBridge::refreshServerQueue()
+{
+    QVariantList list;
+
+    if (s_server_)
+    {
+        for (const std::filesystem::path &dir : s_server_->getTaskQueue())
+        {
+            QVariantMap item;
+            item.insert(QStringLiteral("name"), QString::fromStdString(dir.filename().u8string()));
+            item.insert(QStringLiteral("path"), QString::fromStdString(dir.generic_u8string()));
+            list.append(item);
+        }
+    }
+
+    server_queue_ = list;
+    emit serverQueueChanged();
+}
+
+bool ConfigBridge::toggleServer(const QString &server_name)
+{
+    logNow(QStringLiteral("[tip] sync toggleServer entered: name=[%1] running=%2")
+               .arg(server_name)
+               .arg(server_running_flag_ ? 1 : 0)
+               .toStdString());
+
+    if (server_running_flag_)
+    {
+        if (!s_server_)
+        {
+            server_running_flag_ = false;
+            emit syncStateChanged();
+            return true;
+        }
+
+        std::error_code ec;
+        s_server_->stop(ec);
+        server_running_flag_ = false;
+
+        if (ec)
+        {
+            reportError(QString::fromUtf8(s_server_->getLastError()));
+            emit syncStateChanged();
+            refreshServerQueue();
+            return false;
+        }
+
+        setTip(QStringLiteral("[tip] sync server stopped"));
+        emit syncMessage(QStringLiteral("status.server.stop"), QString());
+        emit syncStateChanged();
+        refreshServerQueue();
+        return true;
+    }
+
+    ensureServer();
+
+    QString name = server_name.trimmed();
+    if (name.isEmpty())
+    {
+        // 与旧工程一致：名字留空就兜底成默认名
+        name = QStringLiteral("tagmeow");
+    }
+
+    std::error_code ec;
+    const bool ok = s_server_->start(name.toStdString(), 0, ec, [this](bool success, std::error_code e)
+                                     {
+                                         // 工作线程回调：只发信号
+                                         if (success)
+                                         {
+                                             const bool queue_empty =
+                                                 (e == std::make_error_code(std::errc::no_message_available));
+                                             emit syncMessage(queue_empty
+                                                                  ? QStringLiteral("sync.server_waiting")
+                                                                  : QStringLiteral("sync.server_session_end"),
+                                                              QString());
+                                         }
+                                         else
+                                         {
+                                             emit syncMessage(QStringLiteral("sync.server_session_error"), QString());
+                                         }
+                                         emit syncStateChanged();
+                                     });
+
+    if (!ok)
+    {
+        reportError(QStringLiteral("[error] sync server start failed: %1")
+                        .arg(QString::fromStdString(ec.message())));
+        emit syncMessage(QStringLiteral("sync.start_failed"),
+                         QString::fromStdString(ec.message()));
+        emit syncStateChanged();
+        return false;
+    }
+
+    server_running_flag_ = true;
+    setTip(QStringLiteral("[tip] sync server started: %1").arg(name));
+    emit syncMessage(QStringLiteral("status.server.started"), QString());
+    emit syncStateChanged();
+    refreshServerQueue();
+    return true;
+}
+
+bool ConfigBridge::enqueueServerDir(const QString &dir_path)
+{
+    logNow(QStringLiteral("[tip] sync enqueueServerDir entered: [%1] running=%2")
+               .arg(dir_path)
+               .arg(server_running_flag_ ? 1 : 0)
+               .toStdString());
+
+    if (!server_running_flag_ || !s_server_)
+    {
+        reportError(QStringLiteral("[warning] enqueue rejected: sync server is not running"));
+        emit syncMessage(QStringLiteral("sync.server_off_hint"), QString());
+        return false;
+    }
+
+    const std::filesystem::path raw = localPathFromUrl(dir_path);
+    if (raw.empty())
+    {
+        emit syncMessage(QStringLiteral("sync.dir_invalid"), dir_path);
+        return false;
+    }
+
+    std::error_code ec;
+    const std::filesystem::path abs = std::filesystem::absolute(raw, ec);
+    if (ec || !std::filesystem::is_directory(abs, ec) || ec)
+    {
+        reportError(QStringLiteral("[warning] enqueue rejected, not a directory: %1")
+                        .arg(QString::fromStdString(raw.u8string())));
+        emit syncMessage(QStringLiteral("sync.dir_invalid"), dir_path);
+        return false;
+    }
+
+    const std::filesystem::path norm = abs.lexically_normal();
+    s_server_->enqueueDirectory(norm);
+    setTip(QStringLiteral("[tip] sync server enqueued: %1")
+               .arg(QString::fromStdString(norm.generic_u8string())));
+
+    // 入队后立刻把队列快照推给界面（"有回报就刷新渲染"）
+    refreshServerQueue();
+    emit syncMessage(QStringLiteral("sync.enqueued"), QString::fromStdString(norm.generic_u8string()));
+    return true;
+}
+
+bool ConfigBridge::disconnectServerClient()
+{
+    if (!s_server_)
+    {
+        reportError(QStringLiteral("[warning] disconnect rejected: sync server was never started"));
+        return false;
+    }
+
+    std::error_code ec;
+    s_server_->disconnect(ec);
+    if (ec)
+    {
+        reportError(QStringLiteral("[error] sync server disconnect failed: %1")
+                        .arg(QString::fromStdString(ec.message())));
+        return false;
+    }
+
+    setTip(QStringLiteral("[tip] sync server disconnected the client"));
+    emit syncMessage(QStringLiteral("status.server.disconnected"), QString());
+    refreshServerQueue();
+    emit syncStateChanged();
+    return true;
+}
+
+// ============================================================================
+// 同步：客户端
+// ============================================================================
+
+bool ConfigBridge::clientDownloading() const
+{
+    return s_client_ && s_client_->isDownloading();
+}
+
+int ConfigBridge::connectedServerIndex() const
+{
+    // 只在"正在连接/下载"期间才报下标：会话一结束就回到 -1，
+    // 这样界面上的灰化会跟着会话自动恢复（is_busy_ 由 SyncClient 原子维护，跨线程读安全）
+    return clientDownloading() ? connected_server_index_ : -1;
+}
+
+QVariantList ConfigBridge::clientServers() const
+{
+    return client_servers_;
+}
+
+QString ConfigBridge::lastTaskDir() const
+{
+    return last_task_dir_;
+}
+
+void ConfigBridge::ensureClient()
+{
+    if (s_client_)
+    {
+        return;
+    }
+
+    // 保存目录固定取 config.json 的 DownloadPath（默认 ./download）；
+    // 想改只能整个重建（core 的 SyncClient 构造时固定下载路径）
+    s_client_ = std::make_unique<SyncClient>(config_.broadcast_port_,
+                                             config_.broadcast_magic_word_,
+                                             std::filesystem::u8path(config_.download_path_.string()));
+
+    s_client_->setTaskCallback([this](const TaskReport &report)
+                               {
+                                   // 工作线程：只发信号（排队回主线程后再记 last_task_dir_）
+                                   const QString task_dir = QString::fromStdString(report.name_);
+                                   emit clientTaskReported(task_dir);
+                                   emit syncMessage(QStringLiteral("sync.task_done"), task_dir);
+                               });
+}
+
+void ConfigBridge::refreshClientServers()
+{
+    QVariantList list;
+
+    if (s_client_)
+    {
+        for (const ServerInfo &server : s_client_->getServers())
+        {
+            QVariantMap item;
+            item.insert(QStringLiteral("name"), QString::fromStdString(server.name_));
+            item.insert(QStringLiteral("ip"), QString::fromStdString(server.ip_));
+            item.insert(QStringLiteral("port"), static_cast<int>(server.port_));
+            list.append(item);
+        }
+    }
+
+    client_servers_ = list;
+    emit clientServersChanged();
+}
+
+bool ConfigBridge::scanServers()
+{
+    ensureClient();
+
+    logNow("[tip] sync scanServers entered");
+    emit syncMessage(QStringLiteral("sync.scanning"), QString());
+
+    // core 的扫描是阻塞的（内部有总超时，最多两秒左右），与旧工程一样在主线程直接调
+    const std::vector<ServerInfo> servers = s_client_->scanServers();
+    refreshClientServers();
+
+    for (const ServerInfo &s : servers)
+    {
+        logNow(QStringLiteral("[tip] sync scan hit: name=%1 ip=%2 port=%3")
+                   .arg(QString::fromStdString(s.name_))
+                   .arg(QString::fromStdString(s.ip_))
+                   .arg(s.port_)
+                   .toStdString());
+    }
+
+    setTip(QStringLiteral("[tip] sync scan done, servers: %1").arg(servers.size()));
+    logNow(last_error_.toStdString());
+    emit syncMessage(QStringLiteral("sync.scan_done"), QString::number(servers.size()));
+    emit syncStateChanged();
+    return true;
+}
+
+bool ConfigBridge::startDownload(int server_index)
+{
+    ensureClient();
+
+    const std::vector<ServerInfo> &servers = s_client_->getServers();
+
+    // 入口就打点：这一条能直接回答"界面上那一下点击到底有没有进到桥里"
+    logNow(QStringLiteral("[tip] sync startDownload idx=%1 servers=%2 downloading=%3")
+               .arg(server_index)
+               .arg(servers.size())
+               .arg(clientDownloading() ? 1 : 0)
+               .toStdString());
+
+    if (server_index < 0 || static_cast<std::size_t>(server_index) >= servers.size())
+    {
+        reportError(QStringLiteral("[warning] download rejected: no valid device selected, index %1")
+                        .arg(server_index));
+        emit syncMessage(QStringLiteral("sync.no_selection"), QString());
+        return false;
+    }
+
+    const QString device_name = QString::fromStdString(servers[static_cast<std::size_t>(server_index)].name_);
+    emit syncMessage(QStringLiteral("sync.downloading"), device_name);
+
+    // 记下"当前连的是哪一台"：界面据此把这一行的下载按钮灰化
+    connected_server_index_ = server_index;
+
+    s_client_->startDownload(static_cast<std::size_t>(server_index),
+                             [this](bool success, std::error_code e)
+                             {
+                                 // 工作线程回调：只发信号
+                                 if (success)
+                                 {
+                                     const bool queue_empty =
+                                         (e == std::make_error_code(std::errc::no_message_available));
+                                     emit syncMessage(queue_empty
+                                                          ? QStringLiteral("sync.download_empty")
+                                                          : QStringLiteral("sync.download_done"),
+                                                      QString());
+                                 }
+                                 else
+                                 {
+                                     emit syncMessage(QStringLiteral("sync.download_failed"),
+                                                      QString::fromStdString(s_client_ ? s_client_->getLastError() : std::string()));
+                                 }
+                                 emit syncStateChanged();
+                             });
+
+    // 顺序很重要：SyncClient::startDownload 会在返回前**同步**把 is_busy_ 置位，
+    // 所以这个信号必须发在它之后 —— 发在前面的话 QML 读 clientDownloading 还是 false，
+    // 下载按钮就不会变灰，而下一个状态信号要等会话结束才来（整段下载期间都不置灰）。
+    emit syncStateChanged();
+
+    setTip(QStringLiteral("[tip] sync download started from %1").arg(device_name));
+    return true;
+}
+
+void ConfigBridge::clearDownloadRecords()
+{
+    if (!s_client_)
+    {
+        emit syncMessage(QStringLiteral("sync.records_cleared"), QString());
+        return;
+    }
+
+    s_client_->clearDownloadRecords();
+    setTip(QStringLiteral("[tip] sync download records cleared"));
+    emit syncMessage(QStringLiteral("sync.records_cleared"), QString());
+    emit syncStateChanged();
+}
+
+void ConfigBridge::disconnectClient()
+{
+    if (s_client_)
+    {
+        s_client_->disconnect();
+    }
+
+    setTip(QStringLiteral("[tip] sync client disconnected"));
+    emit syncMessage(QStringLiteral("sync.client_disconnected"), QString());
+    emit syncStateChanged();
+}
+
+bool ConfigBridge::setDownloadPath(const QString &url)
+{
+    // 只有没在下载的时候才允许改保存目录
+    if (clientDownloading())
+    {
+        reportError(QStringLiteral("[warning] download path change rejected while downloading"));
+        emit syncMessage(QStringLiteral("sync.change_path_busy"), QString());
+        return false;
+    }
+
+    const std::filesystem::path target = localPathFromUrl(url);
+    if (target.empty())
+    {
+        emit syncMessage(QStringLiteral("sync.dir_invalid"), url);
+        return false;
+    }
+
+    std::error_code ec;
+    const std::filesystem::path abs = std::filesystem::absolute(target, ec);
+    if (ec)
+    {
+        reportError(QStringLiteral("[error] download path normalize failed: %1")
+                        .arg(QString::fromStdString(ec.message())));
+        return false;
+    }
+
+    std::filesystem::create_directories(abs, ec);
+    if (ec)
+    {
+        reportError(QStringLiteral("[error] cannot create download path: %1")
+                        .arg(QString::fromStdString(ec.message())));
+        return false;
+    }
+
+    config_.download_path_ = abs.lexically_normal();
+
+    // 下载路径在 SyncClient 构造时固定，改完必须整个重建；顺手把旧连接的会话断掉
+    if (s_client_)
+    {
+        s_client_->disconnect();
+        s_client_.reset();
+    }
+    client_servers_.clear();
+    emit clientServersChanged();
+
+    if (!persist())
+    {
+        return false;
+    }
+
+    setTip(QStringLiteral("[tip] download path -> %1")
+               .arg(QString::fromStdString(config_.download_path_.string())));
+    emit syncMessage(QStringLiteral("sync.path_changed"),
+                     QString::fromStdString(config_.download_path_.generic_u8string()));
+    emit syncStateChanged();
+    return true;
+}
+
+bool ConfigBridge::addDownloadDirToLibrary()
+{
+    // "具体下载目录" = 下载根目录下的那一层任务目录（core 客户端 TaskReport 里的名字，
+    // 也就是 ./download/<任务名>）；还没下载过就退回下载根目录本身
+    const std::filesystem::path root = std::filesystem::u8path(config_.download_path_.string());
+    std::error_code ec;
+    std::filesystem::path target;
+    QString source_desc;
+
+    // 首选"上一个下载成功的任务目录"：core 客户端每完成一个入队目录会回一个 TaskReport，
+    // 名字就是 downloadPath 下那一层目录（例：./download/音频）
+    if (!last_task_dir_.isEmpty())
+    {
+        target = root / std::filesystem::u8path(last_task_dir_.toUtf8().toStdString());
+        source_desc = QStringLiteral("last task dir");
+    }
+
+    if (target.empty() || !std::filesystem::is_directory(target, ec) || ec)
+    {
+        // 兜底（例如刚重启、还没有 TaskReport）：取下载根目录下**最近修改的子目录**，
+        // 也就是最近一次下载落地的那层。
+        // 注意：绝不退回下载根目录本身 —— 那会把 ./download 整个加进索引（里面还有 records.json）
+        target.clear();
+        source_desc = QStringLiteral("newest subdir of download path");
+
+        std::filesystem::file_time_type newest{};
+        std::error_code iter_ec;
+        for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(root, iter_ec))
+        {
+            std::error_code dir_ec;
+            if (!entry.is_directory(dir_ec) || dir_ec)
+            {
+                continue;
+            }
+
+            const std::filesystem::file_time_type stamp = entry.last_write_time(dir_ec);
+            if (dir_ec)
+            {
+                continue;
+            }
+
+            if (target.empty() || stamp > newest)
+            {
+                newest = stamp;
+                target = entry.path();
+            }
+        }
+    }
+
+    if (target.empty())
+    {
+        reportError(QStringLiteral("[warning] no downloaded folder found under: %1")
+                        .arg(QString::fromStdString(root.u8string())));
+        emit syncMessage(QStringLiteral("sync.download_dir_unknown"), QString());
+        return false;
+    }
+
+    logNow(QStringLiteral("[tip] addDownloadDirToLibrary picked %1: %2")
+               .arg(source_desc)
+               .arg(QString::fromStdString(target.generic_u8string()))
+               .toStdString());
+
+    const std::filesystem::path norm = std::filesystem::absolute(target, ec).lexically_normal();
+
+    // 与「目录」页添加目录同一条路：白名单 + 索引
+    if (!dm_.addDirectory(norm))
+    {
+        reportError(QString::fromUtf8(dm_.getLastError()));
+        return false;
+    }
+
+    if (!ts_.addRoot(norm))
+    {
+        reportError(QString::fromUtf8(ts_.getLastError()));
+        return false;
+    }
+
+    dm_.saveToFile();
+
+    setTip(QStringLiteral("[tip] download dir added to library: %1")
+               .arg(QString::fromStdString(norm.generic_u8string())));
+    emit syncMessage(QStringLiteral("sync.download_dir_added"),
+                     QString::fromStdString(norm.generic_u8string()));
+    emit libraryChanged();
+    return true;
 }

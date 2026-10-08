@@ -1,5 +1,8 @@
 pragma Singleton
 import QtQuick
+// control/ 下的单例（Lang）：子目录不是隐式可见的，必须显式 import。
+// 同步过程的提示由桥发「文案键 + 参数」，在这里用 Lang.t 翻译成文本再弹 Toast
+import "control"
 
 // 纯 UI 态单例：只放"不需要 core 参与"的界面交互状态与展示信号。
 //
@@ -115,14 +118,22 @@ QtObject {
     // 同步页：输入 / 选择态
     // =========================================================================
 
-    // 「服务器名称」输入框与它双向绑定（敲什么写什么）；空名字原样交给 core 兜底成默认应用名
-    property string serverName: ""
+    // 「服务器名称」输入框与它双向绑定（敲什么写什么）。
+    // 默认名 tagmeow：留空时桥也会兜底成这个名字
+    property string serverName: "tagmeow"
 
     // 客户端面板选中的设备行（-1 = 一台都没选）；设备列表本身由桥下行
     property int selectedServerIndex: -1
 
+    // 选中某台设备（纯 UI 态）：点行 / 点该行的下载按钮都走这里。
+    // 注意：这个函数必须存在 —— 页面里是 "Store.selectServer(i); ConfigBridge.startDownload(i)"
+    // 两行连着写，少了它第一行就抛 TypeError，第二行永远执行不到（界面上表现为点了没反应）
+    function selectServer(index) {
+        selectedServerIndex = index
+    }
+
     // =========================================================================
-    // 桥接层的失败提示 -> Toast
+    // 桥接层的提示 -> Toast
     // =========================================================================
 
     // 字号 / 主题 / 语言的真值都在 core（./config/config.json），由 ConfigBridge 暴露给 QML，
@@ -135,6 +146,11 @@ QtObject {
 
         function onErrorOccurred(message) {
             store.toast(message)
+        }
+
+        // 同步过程提示：桥只给文案键 + 一个参数，措辞留在 Lang.qml 一份（Lang.t 取不到键会原样返回键名）
+        function onSyncMessage(messageId, arg) {
+            store.toast(Lang.t(messageId, arg))
         }
     }
 }

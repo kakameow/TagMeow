@@ -4,10 +4,12 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QVariantList>
 #include <QVariantMap>
 
 #include <QtQml/qqmlregistration.h>
 
+#include <memory>
 #include <string>
 #include <unordered_map>
 
@@ -15,6 +17,8 @@
 #include "directory_manager.h"
 #include "language_manager.h"
 #include "log.h"
+#include "sync_client.h"
+#include "sync_server.h"
 #include "tag_serve.h"
 
 // 全局应用桥（QML 侧按类名直接用：ConfigBridge.xxx）。
@@ -73,6 +77,21 @@ class ConfigBridge : public QObject
     // ---------------- 可写：写即改 ConfigLoader 对应条目并落盘 ----------------
     Q_PROPERTY(int fontSize READ fontSize WRITE setFontSize NOTIFY fontSizeChanged)
     Q_PROPERTY(int theme READ theme WRITE setTheme NOTIFY themeChanged)
+
+    // ---------------- 同步（core 的 SyncServer / SyncClient） ----------------
+    // 服务端是否在跑（SyncServer 的 start/stop 由本类管着）
+    Q_PROPERTY(bool serverRunning READ serverRunning NOTIFY syncStateChanged)
+    // 待发送目录快照 [{ name, path }]（SyncServer::getTaskQueue() 的搬运，入队/停服/断开后刷新）
+    Q_PROPERTY(QVariantList serverQueue READ serverQueue NOTIFY serverQueueChanged)
+    // 扫到的局域网设备快照 [{ name, ip, port }]（SyncClient::getServers() 的搬运）
+    Q_PROPERTY(QVariantList clientServers READ clientServers NOTIFY clientServersChanged)
+    // 客户端是否正在下载（下载中不允许改保存目录）
+    Q_PROPERTY(bool clientDownloading READ clientDownloading NOTIFY syncStateChanged)
+    // 当前连接的服务端在 clientServers 里的下标（没连接时 -1）。
+    // 界面据此把"当前连接的那一台"的下载按钮灰化：别的行只是禁用（点了也没用），不做灰化
+    Q_PROPERTY(int connectedServerIndex READ connectedServerIndex NOTIFY syncStateChanged)
+    // 最近一次下载落地的任务目录名（客户端 TaskReport::name_，= downloadPath 下的第一层子目录名）
+    Q_PROPERTY(QString lastTaskDir READ lastTaskDir NOTIFY syncStateChanged)
 
 public:
     // FontSize 的合法区间（与 ConfigLoader::loadConfig 里的校验一致）
@@ -144,6 +163,49 @@ public:
     // 导入标签库：合并另一个 tag.json（类型 / 标签全局唯一，只补充本库没有的）
     Q_INVOKABLE bool importLibrary(const QString &source_url);
 
+    // ---------------- 同步：服务端 ----------------
+
+    bool serverRunning() const;
+    QVariantList serverQueue() const;
+
+    // 开 / 关服务端。server_name 留空时用默认名 "tagmeow"。
+    // 启动用配置里的广播端口，TCP 端口传 0 由系统分配（core 会把实际端口广播出去）
+    Q_INVOKABLE bool toggleServer(const QString &server_name);
+
+    // 把某个目录推进发送队列（服务端没启动 / 目录无效时返回 false 并报错）
+    Q_INVOKABLE bool enqueueServerDir(const QString &dir_path);
+
+    // 断开当前客户端连接并清空队列（随后重新开始广播）
+    Q_INVOKABLE bool disconnectServerClient();
+
+    // ---------------- 同步：客户端 ----------------
+
+    bool clientDownloading() const;
+    // 当前连接的服务端下标（没在连接时 -1）
+    int connectedServerIndex() const;
+    QVariantList clientServers() const;
+    QString lastTaskDir() const;
+
+    // 扫描局域网（core 是阻塞扫描，最多两秒左右）
+    Q_INVOKABLE bool scanServers();
+
+    // 下载指定下标的设备（下标来自 clientServers）
+    Q_INVOKABLE bool startDownload(int server_index);
+
+    // 清除下载记录缓存（不删已下载的文件）
+    Q_INVOKABLE void clearDownloadRecords();
+
+    // 断开当前下载会话
+    Q_INVOKABLE void disconnectClient();
+
+    // 改保存目录：入参是 QML FolderDialog 给的 file:// URL（或本地路径）。
+    // 正在下载时拒绝（core 的 SyncClient 构造时固定下载路径，只能整体重建）
+    Q_INVOKABLE bool setDownloadPath(const QString &url);
+
+    // 把"具体下载目录"（downloadPath/<最近一次下载的任务目录>）加入受管目录并建索引。
+    // 还没下载过任务目录时，退回 downloadPath 本身
+    Q_INVOKABLE bool addDownloadDirToLibrary();
+
     // 最近一次失败说明（成功调用后会清空），失败文案同时通过 errorOccurred 发出
     Q_INVOKABLE QString lastError() const;
 
@@ -155,6 +217,18 @@ signals:
     void themeChanged();
     // 标签库 / 索引变动（条数、模式、导入导出之后）：QML 据此重算显示
     void libraryChanged();
+    // 同步状态变动（服务端启停 / 下载开始结束 / 任务目录更新）
+    void syncStateChanged();
+    // 待发送队列快照变动：QML 据此重建队列列表
+    void serverQueueChanged();
+    // 扫描结果变动：QML 据此重建设备列表
+    void clientServersChanged();
+    // 同步过程提示：只传「文案键 + 一个参数」，由 QML 侧用 Lang.t(key, arg) 翻译后显示
+    //（这样文案仍然只有 Lang.qml 一份，桥不掺和措辞）
+    void syncMessage(const QString &message_id, const QString &arg);
+    // 内部用：工作线程每完成一个入队目录发一次（携带任务目录名）。
+    // 跨线程 auto 连接会排队回主线程，本类在那里把它记成"具体下载目录"
+    void clientTaskReported(const QString &task_dir);
     void errorOccurred(const QString &message);
 
 protected:
@@ -173,11 +247,21 @@ private:
     // 逐个读各类的 error_string_ / getLastError()：空串跳过、与上次相同跳过、变了才落一条
     void collectLogMessages();
     void logOne(const std::string &class_name, const std::string &message);
+    // 立刻落一条（不等下一次鼠标/键盘交互）：同步是异步流程，交互后收集会把最后一次操作留在内存里
+    void logNow(const std::string &message);
 
     // file:// URL 或本地路径 -> core 用的 UTF-8 本地路径
     static std::filesystem::path localPathFromUrl(const QString &url);
     // 记下这一次操作从 core 的 out 参数拿到的数据回报（同时拼好人看的 lastReport 文本）
     void setReport(const QVariantMap &values);
+
+    // ---- 同步：内部 ----
+    // 惰性创建：SyncClient 构造时会绑 UDP 广播端口，没进过同步页就不该占着它
+    void ensureServer();
+    void ensureClient();
+    // 把 SyncServer::getTaskQueue() / SyncClient::getServers() 搬成快照并广播
+    void refreshServerQueue();
+    void refreshClientServers();
 
     // 声明顺序 = 构造顺序：ts_ 要用到 config_ 的存储模式与 dm_ 的有效目录列表，必须排在它们后面
     ConfigLoader config_;
@@ -195,6 +279,18 @@ private:
     Log log_;
     // 各类上次已写入日志的消息（相同消息不重复写）
     std::unordered_map<std::string, std::string> last_logged_;
+
+    // 同步：服务端 / 客户端（与旧工程一样惰性创建，析构里先 stop 再销毁）
+    std::unique_ptr<SyncServer> s_server_;
+    std::unique_ptr<SyncClient> s_client_;
+    // SyncServer 没有"在跑吗"的公开查询，自己记着（stop 成功 / start 成功时更新）
+    bool server_running_flag_ = false;
+    QVariantList server_queue_;
+    QVariantList client_servers_;
+    QString last_task_dir_;
+    // 最近一次发起下载时选中的服务端下标；只在主线程写（startDownload），
+    // 对外由 connectedServerIndex() 在"正在连接/下载"期间才暴露出去
+    int connected_server_index_ = -1;
 };
 
 #endif // CONFIG_BRIDGE_H

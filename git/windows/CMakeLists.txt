@@ -38,7 +38,7 @@ set(CORE_SOURCES
 # 重建后，把对应的 bridge 源文件加到这里即可。
 # ---------------------------------------------------------------------------
 qt_add_executable(TagMeow
-    main.cpp
+    Main.cpp
     config_loader.cpp
     config_loader.h
     log.cpp
