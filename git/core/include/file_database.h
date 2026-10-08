@@ -1,6 +1,8 @@
 #pragma once
 
 #include <set>
+#include <chrono>
+#include <sstream>
 #include <memory>
 #include <vector>
 #include <string>
@@ -13,10 +15,12 @@
 // FileDatabase 数据层从磁盘获取数据 不经过其他模块
 // 自己调用时保证线程安全
 //
-// 成功回报约定：写操作成功时返回 true，同时把"成功了几个"写进 error_string_，
-// 形如 "[tip] <op> <key>=<value> [<key>=<value> ...]"（例："[tip] cleanupInvalid removed=3"）。
-// 上层拿不到结构体返回值，就用 getLastError() 读这串数字去渲染。
-// 失败时 error_string_ 里是 "[warning] ..." 或 "[error] ..."。空串表示这次没有要报的。
+// 结果回报约定（与本工程其它 core 类一致）：
+//   * 写操作只返回 bool 表示成功与否；"成功了几个"这类数据一律走带默认值 nullptr 的 out 参数带出去，
+//     调用方不需要就直接不传（例：cleanupInvalid(&removed)），不改变原有调用的写法。
+//   * error_string_ 只放给人看 / 进日志的说明文字：失败是 "[warning] ..." / "[error] ..."，
+//     成功是可以带数字的 "[tip] ..."（例："[tip] cleanupInvalid removed=3"）。想拿来做判断请用 out 参数，
+//     不要解析 error_string_。
 
 namespace table
 {
@@ -74,16 +78,19 @@ public:
     bool removeFile(const std::filesystem::path &path_utf8);
     // 从数据库移除整个目录的所有记录
     bool removeDirectory(const std::filesystem::path &dir_path_utf8);
-    bool clearRepeat();
+    // 去重：同一路径只留 file_id 最小的那条
+    // removed_count 非空时写入本次删掉的记录条数
+    bool clearRepeat(int *removed_count = nullptr);
     // 清除无效记录：删除 files 表中磁盘上已不存在的文件记录 以磁盘为准 只读磁盘不改磁盘
     // 注意：若某个磁盘/分区临时未挂载 std::filesystem::exists 会返回 false 该记录会被当作失效删除
-    bool cleanupInvalid();
+    // removed_count 非空时写入本次删掉的记录条数
+    bool cleanupInvalid(int *removed_count = nullptr);
 
     // 按标签搜索文件
     std::vector<table::FileInfo> searchByTags(const SearchOptions &opts) const;
     // 获取单个文件信息
     std::optional<table::FileInfo> getFileInfo(const std::filesystem::path &path) const;
-    // files 表的记录条数（数据库只作磁盘缓存 这个数是索引里有多少条记录 含目录记录）
+    // files 表的记录条数（数据库只作磁盘缓存 这就是索引里有多少条记录 含目录记录）；失败返回 -1
     int countFiles() const;
     const std::string &getLastError() const;
 

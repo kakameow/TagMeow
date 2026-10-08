@@ -714,7 +714,7 @@ bool FileDatabase::removeDirectory(const std::filesystem::path &dir_path_utf8)
     return true;
 }
 
-bool FileDatabase::clearRepeat()
+bool FileDatabase::clearRepeat(int *removed_count)
 {
     if (!db_)
     {
@@ -736,12 +736,18 @@ bool FileDatabase::clearRepeat()
         return false;
     }
 
-    // 成功回报：去重删掉了几条（sqlite3_changes = 上一条 DELETE 影响的行数）
-    error_string_ = "[tip] clearRepeat deduped=" + std::to_string(sqlite3_changes(db_));
+    // 数据走 out 参数（sqlite3_changes = 上一条 DELETE 影响的行数）；error_string_ 只留给人看
+    const int removed = sqlite3_changes(db_);
+    if (removed_count != nullptr)
+    {
+        *removed_count = removed;
+    }
+
+    error_string_ = "[tip] clearRepeat deduped=" + std::to_string(removed);
     return true;
 }
 
-bool FileDatabase::cleanupInvalid()
+bool FileDatabase::cleanupInvalid(int *removed_count)
 {
     if (!db_)
     {
@@ -799,7 +805,11 @@ bool FileDatabase::cleanupInvalid()
 
     if (invalid_ids.empty())
     {
-        // 成功也带数据回报：本条只回 bool，条目数从这里读（见 file_database.h 的约定）
+        if (removed_count != nullptr)
+        {
+            *removed_count = 0;
+        }
+
         error_string_ = "[tip] cleanupInvalid removed=0";
         return true;
     }
@@ -842,8 +852,14 @@ bool FileDatabase::cleanupInvalid()
         return false;
     }
 
-    // 成功回报：删掉了几条失效记录
-    error_string_ = "[tip] cleanupInvalid removed=" + std::to_string(invalid_ids.size());
+    // 数据走 out 参数；error_string_ 只留给人看
+    const int removed = static_cast<int>(invalid_ids.size());
+    if (removed_count != nullptr)
+    {
+        *removed_count = removed;
+    }
+
+    error_string_ = "[tip] cleanupInvalid removed=" + std::to_string(removed);
     return true;
 }
 
