@@ -1,4 +1,5 @@
 #include "file_database.h"
+#include "system_error_text.h"
 
 FileDatabase::FileDatabase(const std::filesystem::path &db_path_utf8) : db_path_(db_path_utf8)
 {
@@ -34,7 +35,7 @@ bool FileDatabase::reload(const std::filesystem::path &db_path_utf8)
         {
             if (ec)
             {
-                error_string_ = "[warning] Failed to create database directory: " + ec.message();
+                error_string_ = "[warning] Failed to create database directory: " + systemErrorText(ec);
             }
             else
             {
@@ -308,7 +309,7 @@ bool FileDatabase::insertDirectory(const std::filesystem::path &path_utf8, std::
 
     if (iterator_error)
     {
-        error_string_ = "[warning] Failed to open directory: " + iterator_error.message();
+        error_string_ = "[warning] Failed to open directory: " + systemErrorText(iterator_error);
 
         rollback_and_finalize();
         return false;
@@ -327,7 +328,7 @@ bool FileDatabase::insertDirectory(const std::filesystem::path &path_utf8, std::
                     skipped_files += ' ';
                 }
 
-                skipped_files += "[error: " + iterator_error.message() + "]";
+                skipped_files += "[error: " + systemErrorText(iterator_error) + "]";
             }
 
             iterator_error.clear();

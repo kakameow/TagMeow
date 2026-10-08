@@ -1,4 +1,5 @@
 #include "sync_client.h"
+#include "system_error_text.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -32,7 +33,7 @@ SyncClient::SyncClient(std::uint16_t port, std::string magic_word, const std::fi
     std::error_code ec;
     if (!loadRecords(ec))
     {
-        setError("[tip] failed to load the download cache" + ec.message());
+        setError("[tip] failed to load the download cache" + systemErrorText(ec));
     }
 
     running_ = true;
@@ -71,7 +72,7 @@ std::vector<ServerInfo> SyncClient::scanServers(size_t num_attempts)
         auto servers = receiver_->scan(ec);
         if (ec)
         {
-            setError("[warning] download failed: " + ec.message());
+            setError("[warning] download failed: " + systemErrorText(ec));
             break;
         }
         for (auto &s : servers)
@@ -151,7 +152,7 @@ void SyncClient::clearDownloadRecords()
     std::filesystem::remove(records_path_, ec);
     if (ec)
     {
-        setError("[warning] failed to clear the download cache: " + ec.message());
+        setError("[warning] failed to clear the download cache: " + systemErrorText(ec));
     }
 }
 
@@ -233,7 +234,7 @@ void SyncClient::doDownload(std::size_t index, std::function<void(bool, std::err
             else
             {
                 // 具体错误信息给上层：连接目标与失败原因
-                setError("[warning] download failed: connect " + server.ip_ + ":" + std::to_string(server.port_) + " failed: " + ec.message());
+                setError("[warning] download failed: connect " + server.ip_ + ":" + std::to_string(server.port_) + " failed: " + systemErrorText(ec));
             }
         }
     }
@@ -319,7 +320,7 @@ bool SyncClient::syncReceiveAll(std::error_code &ec)
                 setError("[warning] download failed: connection closed without session-end marker (interrupted)");
                 return false;
             }
-            setError("[warning] download failed: receive file header failed: " + ec.message());
+            setError("[warning] download failed: receive file header failed: " + systemErrorText(ec));
             return false;
         }
 
@@ -331,7 +332,7 @@ bool SyncClient::syncReceiveAll(std::error_code &ec)
             sendReply(true, ack_ec);
             if (ack_ec)
             {
-                setError("[warning] download done but session-end ack failed: " + ack_ec.message());
+                setError("[warning] download done but session-end ack failed: " + systemErrorText(ack_ec));
             }
 
             ec.clear();
@@ -356,7 +357,7 @@ bool SyncClient::syncReceiveAll(std::error_code &ec)
              // '0' 跳过
             if (!sendReply(false, ec))
             {
-                setError("[warning] download failed: skip reply send error: " + ec.message());
+                setError("[warning] download failed: skip reply send error: " + systemErrorText(ec));
                 return false;
             }
             task_files++; // 跳过的文件也属于该任务（字节按 0 计）
@@ -366,7 +367,7 @@ bool SyncClient::syncReceiveAll(std::error_code &ec)
             // '1' 发送文件数据
             if (!sendReply(true, ec))
             {
-                setError("[warning] download failed: reply send error: " + ec.message());
+                setError("[warning] download failed: reply send error: " + systemErrorText(ec));
                 return false;
             }
 
@@ -379,7 +380,7 @@ bool SyncClient::syncReceiveAll(std::error_code &ec)
                 // 未传完的临时文件（save_path + ".part"）已由 receiveFileTo 删除 不留残留
                 setError("[warning] download failed: " + header.parent_dir_ + "/" + header.file_name_ +
                         " (" + std::to_string(bytes_received) + "/" + std::to_string(header.file_size_) +
-                        " bytes): " + ec.message());
+                        " bytes): " + systemErrorText(ec));
                 return false;
             }
 
@@ -409,7 +410,7 @@ bool SyncClient::syncReceiveAll(std::error_code &ec)
             saveRecords(save_ec);
             if (save_ec)
             {
-                setError("[warning] download record save failed: " + save_ec.message());
+                setError("[warning] download record save failed: " + systemErrorText(save_ec));
             }
             received_count++;
             task_files++;
@@ -430,7 +431,7 @@ bool SyncClient::syncReceiveAll(std::error_code &ec)
     }
 
     ec = std::make_error_code(std::errc::operation_canceled);
-    setError("[warning] download aborted: " + ec.message());
+    setError("[warning] download aborted: " + systemErrorText(ec));
     return false;
 }
 

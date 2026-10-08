@@ -1,4 +1,5 @@
 #include "tag_serve.h"
+#include "system_error_text.h"
 
 #include <algorithm>
 #include <cctype>
@@ -166,7 +167,7 @@ bool TagServe::reLoadRoot(std::filesystem::path dir_path_utf8, int *indexed_coun
 
     if (ec)
     {
-        error_string_ = "[warning] Failed to normalize directory path: " + ec.message();
+        error_string_ = "[warning] Failed to normalize directory path: " + systemErrorText(ec);
         return false;
     }
 
@@ -649,7 +650,7 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
         {
             if (ec)
             {
-                error_string_ = "[warning] Iteration error: " + ec.message();
+                error_string_ = "[warning] Iteration error: " + systemErrorText(ec);
                 return false;
             }
             if (iter->path().filename() == ".tag")
@@ -731,7 +732,7 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
         {
             if (ec)
             {
-                error_string_ = "[warning] Iteration error: " + ec.message();
+                error_string_ = "[warning] Iteration error: " + systemErrorText(ec);
                 return false;
             }
             if (iter->path().filename() == ".tag")
