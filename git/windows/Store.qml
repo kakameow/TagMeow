@@ -1,0 +1,140 @@
+pragma Singleton
+import QtQuick
+
+// 纯 UI 态单例：只放"不需要 core 参与"的界面交互状态与展示信号。
+//
+// 为什么有这么个文件（与迁移原则对应）：
+//   QML 只负责「渲染」+「把用户交互用信号发出去」，桥接层（C++）接 core 处理完再通知 QML 重绘。
+//   但有一类交互跟 core 毫无关系 —— 切到哪一页、列表里选中了谁、筛选面板加了哪几条条件、
+//   字号/主题长什么样、要不要弹一条 Toast —— 这些纯粹是"界面当下的样子"，
+//   送进桥接层再绕回来只会白白多一圈往返。它们就留在这里。
+//
+// 本文件不含任何数据，也不碰 core：
+//   * 文件 / 类型 / 标签 / 目录（files / types / tags / dirs）一律由各页面的桥接层下行，
+//     这里不提供，也不缓存。
+//   * 任何需要 core 参与的动作都不在这里：查询与筛选生效（runQuery）、层级进出（enterDir /
+//     goUpLevel / exitBrowse）、目录勾选（dirChoices / toggleDirChoice，要 core 的目录表才能派生）、
+//     标签与类型增删改、导入导出、库刷新、同步启停…… 全部走页面的信号上行。
+//   * 本文件里没有任何写死的业务数据：没有文件名、路径、计数、类型名、标签名、服务端名。
+//
+// 数据源以 core cpp 为准：下面少数几个默认值（fontSize / theme / language）只是
+// "桥还没接上时界面能跑"的兜底，桥接层接上后由 core 的真值下行覆盖。
+// 文案统一走 control/Lang.qml 单例，本文件没有中文字面量。
+
+QtObject {
+    id: store
+
+    // =========================================================================
+    // 纯展示信号（只让界面动起来，不产生数据）
+    // =========================================================================
+
+    // 提示浮条：Main.qml 的 Connections 接 onToastRequested 弹 Toast
+    signal toastRequested(string message)
+
+    // 「标签已赋值」弹窗：由页面的桥在赋值成功后 emit（Main.qml 已接 onTagAssigned）
+    signal tagAssigned(string tag, string fileName, string color)
+
+    // 页面自己弹一条提示（例：点了个还没接 core 的按钮，先给个反馈）
+    function toast(message) {
+        toastRequested(message)
+    }
+
+    // =========================================================================
+    // 页面切换
+    // =========================================================================
+
+    // 取值：browse / dirs / tags / sync / settings
+    // Main.qml 的 StackLayout 按它切 currentIndex，侧栏 NavItem 也按它高亮
+    property string currentPage: "browse"
+
+    function goTo(page) {
+        currentPage = page
+    }
+
+    // =========================================================================
+    // 浏览页：层级浏览的导航态（只有状态，取数据是桥的事）
+    // =========================================================================
+
+    // browsePath 非空 = 正在按目录层级浏览；为空 = 平铺的搜索结果模式
+    // browseParent 为空 = 已经在最上层（界面上不画"返回上层"那一行）
+    property string browsePath: ""
+    property string browseParent: ""
+
+    function setBrowseLevel(path, parent) {
+        browsePath = path
+        browseParent = (parent === undefined || parent === null) ? "" : parent
+    }
+
+    function clearBrowseLevel() {
+        browsePath = ""
+        browseParent = ""
+    }
+
+    // =========================================================================
+    // 浏览页：筛选面板的纯 UI 态
+    // =========================================================================
+
+    // 筛选条件：[{ kind, tag, color }]，kind = include / exclude / only，初始为空（用户点选才加）。
+    // 增删只是改这份列表；真正重新查询由筛选面板去发信号，Store 不碰 core。
+    property var filters: []
+
+    // color 可选：给得出就带着（筛选条上的小圆点），给不出留空
+    function addFilter(kind, tag, color) {
+        var next = filters.slice()
+        next.push({
+            kind: kind,
+            tag: tag,
+            color: (color === undefined || color === null) ? "" : color
+        })
+        filters = next
+    }
+
+    function removeFilter(index) {
+        if (index < 0 || index >= filters.length)
+            return
+        var next = filters.slice()
+        next.splice(index, 1)
+        filters = next
+    }
+
+    function clearFilters() {
+        filters = []
+    }
+
+    // =========================================================================
+    // 列表选中项（标签库页用）
+    // =========================================================================
+
+    property int selectedTypeId: -1
+    property int selectedTagId: -1
+
+    // 新建类型时的默认颜色：这是界面默认值，不是业务数据
+    property string typeColor: "#ffb3c6"
+
+    // =========================================================================
+    // 同步页：输入 / 选择态
+    // =========================================================================
+
+    // 「服务器名称」输入框与它双向绑定（敲什么写什么）；空名字原样交给 core 兜底成默认应用名
+    property string serverName: ""
+
+    // 客户端面板选中的设备行（-1 = 一台都没选）；设备列表本身由桥下行
+    property int selectedServerIndex: -1
+
+    // =========================================================================
+    // 桥接层的失败提示 -> Toast
+    // =========================================================================
+
+    // 字号 / 主题 / 语言的真值都在 core（./config/config.json），由 ConfigBridge 暴露给 QML，
+    // 本文件不存第二份：Theme.baseFontSize 读 ConfigBridge.fontSize、Lang.current 读
+    // ConfigBridge.language、设置页直接写 ConfigBridge.theme / 调 ConfigBridge.setLanguage。
+    // 桥里失败时统一发 errorOccurred，这里转成 toastRequested，由 Main.qml 弹 Toast。
+    // 注意：QtObject 没有 default property，子对象不能裸写，必须挂在一个属性上
+    readonly property Connections bridgeErrorRelay: Connections {
+        target: ConfigBridge
+
+        function onErrorOccurred(message) {
+            store.toast(message)
+        }
+    }
+}
