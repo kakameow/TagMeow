@@ -12,6 +12,11 @@
 // 统一使用 UTF-8
 // FileDatabase 数据层从磁盘获取数据 不经过其他模块
 // 自己调用时保证线程安全
+//
+// 成功回报约定：写操作成功时返回 true，同时把"成功了几个"写进 error_string_，
+// 形如 "[tip] <op> <key>=<value> [<key>=<value> ...]"（例："[tip] cleanupInvalid removed=3"）。
+// 上层拿不到结构体返回值，就用 getLastError() 读这串数字去渲染。
+// 失败时 error_string_ 里是 "[warning] ..." 或 "[error] ..."。空串表示这次没有要报的。
 
 namespace table
 {
@@ -78,6 +83,8 @@ public:
     std::vector<table::FileInfo> searchByTags(const SearchOptions &opts) const;
     // 获取单个文件信息
     std::optional<table::FileInfo> getFileInfo(const std::filesystem::path &path) const;
+    // files 表的记录条数（数据库只作磁盘缓存 这个数是索引里有多少条记录 含目录记录）
+    int countFiles() const;
     const std::string &getLastError() const;
 
 private:

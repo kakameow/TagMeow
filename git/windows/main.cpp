@@ -1,26 +1,19 @@
+#include <QDir>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
+#include <QtQml>
 
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
-#include "bridge.h"
 
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
-
-    Bridge bridge;
     QQmlApplicationEngine engine;
 
-    engine.loadFromModule("windows", "Main");
-    if (engine.rootObjects().isEmpty())
-    {
-        return -1;
-    }
+    QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, []() { QCoreApplication::exit(-1); }, Qt::QueuedConnection);
 
-    bridge.bindTo(engine.rootObjects().first());
+    engine.loadFromModule("windows", "Main");
 
     return QGuiApplication::exec();
 }

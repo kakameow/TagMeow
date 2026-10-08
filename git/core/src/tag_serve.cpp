@@ -136,7 +136,9 @@ bool TagServe::reLoadRoot(std::vector<std::filesystem::path> root_list_utf8)
         return false;
     }
 
-    error_string_.clear();
+    // 成功回报：重扫后索引里有多少条记录、扫了几个根（见 tag_serve.h 的约定）
+    error_string_ = "[tip] reLoadRoot indexed=" + std::to_string(db_.countFiles()) +
+                    " roots=" + std::to_string(root_list_.size());
     return true;
 }
 
@@ -597,6 +599,7 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
 
     // 第一阶段 对所有文件执行 keep_old=true 只写入新格式不删除旧格式
     size_t file_failed_first = 0;
+    size_t file_ok_first = 0;
     size_t root_missing_count = 0;
     std::string error_file_path;
     std::string error_root_path;
@@ -638,6 +641,10 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
                         error_file_path += " the top " + std::to_string(file_failed_first) + " error paths(max = 10): " + iter->path().u8string() + " (" + tag_file_.getLastError() + ")\n";
                     }
                 }
+                else
+                {
+                    file_ok_first++;
+                }
             }
         }
     }
@@ -655,7 +662,9 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
         }
         else
         {
-            error_string_.clear();
+            // 成功回报：转换了几个文件（见 tag_serve.h 的约定）
+            error_string_ = "[tip] convertMode converted=" + std::to_string(file_ok_first) +
+                            " roots=" + std::to_string(root_list_.size());
         }
         tag_file_.setDefaultMode(to_mode);
         rebuildRootsNoLock(); // 转换会改写文件名 -> 数据库整根重建索引
@@ -716,7 +725,9 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
 
     tag_file_.setDefaultMode(to_mode);
     rebuildRootsNoLock(); // 转换会改写文件名 -> 数据库整根重建索引
-    error_string_.clear();
+    // 成功回报：转换了几个文件（见 tag_serve.h 的约定）
+    error_string_ = "[tip] convertMode converted=" + std::to_string(file_ok_first) +
+                    " roots=" + std::to_string(root_list_.size());
     return true;
 }
 
@@ -749,7 +760,17 @@ bool TagServe::mergeTags(const std::filesystem::path &tag_json_path_utf8)
         return false;
     }
 
-    error_string_.clear();
+    // 成功回报：合并后本库有多少个类型 / 标签（TagLibrary 不回新增数，回的是合并后的规模）
+    size_t type_count = 0;
+    size_t tag_count = 0;
+    for (const auto &entry : tag_list_.getTypeTag())
+    {
+        type_count++;
+        tag_count += entry.second.size();
+    }
+
+    error_string_ = "[tip] mergeTags types=" + std::to_string(type_count) +
+                    " tags=" + std::to_string(tag_count);
     return true;
 }
 
@@ -758,6 +779,27 @@ std::filesystem::path TagServe::getTagPath() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     return tag_list_.getLoadPath();
+}
+
+// files 表条数：只读数据库 不改磁盘也不改索引
+int TagServe::getFileCount() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return db_.countFiles();
+}
+
+// 清除失效记录（磁盘上已不存在的文件）：只删数据库记录 磁盘文件一个都不碰
+bool TagServe::cleanupInvalid()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return db_.cleanupInvalid();
+}
+
+// 清除重复记录
+bool TagServe::clearRepeat()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return db_.clearRepeat();
 }
 
 bool TagServe::updateRoots()

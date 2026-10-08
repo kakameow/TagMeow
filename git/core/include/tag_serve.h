@@ -84,12 +84,23 @@ public:
     bool removeFile(const std::filesystem::path &path_utf8);
     std::vector<table::FileInfo> searchByTags(const FileDatabase::SearchOptions &opts) const;
     std::optional<table::FileInfo> getFileInfo(const std::filesystem::path &path) const;
+    // files 表的记录条数（= 索引里有多少条记录 含目录记录）
+    int getFileCount() const;
+    // 清除失效记录：删除 files 表中磁盘上已不存在的记录 以磁盘为准 只读磁盘不改磁盘
+    bool cleanupInvalid();
+    // 清除重复记录
+    bool clearRepeat();
 
     // 最近一次文件标签操作后的真实路径
     // Filename 模式下加/删标签会重命名文件 该值与传入路径可能不同(数据库已按此路径同步)
     const std::filesystem::path &getLastFilePath() const;
 
-    // TagServe 错误信息
+    // ---- 结果回报 ----
+    // 写操作成功时只返回 bool，另外把"成功了几个"写进对应对象自己的 error_string_，
+    // 形如 "[tip] <op> <key>=<value> [<key>=<value> ...]"：
+    //   cleanupInvalid / clearRepeat / reLoadRoot / convertMode / mergeTags 等都遵守
+    // 上层用下面四个 getter 把数字读出来渲染；失败时是 "[warning] ..." / "[error] ..."，空串表示无需上报。
+    // 例："[tip] cleanupInvalid removed=3" / "[tip] reLoadRoot indexed=42 roots=2"
     std::string getLastError() const;
     // FileDatabase 错误信息
     std::string getDBError() const;

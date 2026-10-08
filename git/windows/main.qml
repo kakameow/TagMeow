@@ -1,1159 +1,570 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
-import QtQuick.Dialogs
 import "control"
 
 ApplicationWindow {
     id: window
-    width: 800
-    height: 600
-    minimumWidth: 800
-    minimumHeight: 600
+
+    width: 1280
+    height: 820
+    minimumWidth: 320
+    minimumHeight: 420
     visible: true
-    title: qsTr("TagMeow")
-    color: window.uiColor["page"]
+    title: Lang.t("app.name")
+    color: Theme.bg
 
-    property int fontSize: 12
-    property int theme: 0
-    // 语言字典
-    property var uiText: ({})
-    // 可用语言列表
-    property var languageNames: []
-    // 对应主题填充颜色
-    property var uiColor: ({})
-    // 可用主题颜色列表
-    property var themeNames: []
+    readonly property bool narrow: width < 1180
+    readonly property bool compact: width < 760
+    readonly property int sideWidth: narrow ? Theme.sidebarNarrow : Theme.sidebar
+    readonly property int pad: Theme.padFor(width)
 
-    // 标签库 导出/导入: FileDialog 选中后由 Bridge 处理(导出复制 tag.json / 导入 mergeTags 合并)
-    signal exportFileChosen(string url)
-    signal importFileChosen(string url)
+    // 顶栏
+    Rectangle {
+        id: topbar
+        width: parent.width
+        height: Theme.topH
+        color: Theme.surface
+        z: 20
 
-    // 这个 Item 作为拖拽元素的临时父级 所有放到这里的元素都会显示在最顶层
-    Item {
-        id: dragOverlay
+        Rectangle {
+            anchors.bottom: parent.bottom
+            width: parent.width
+            height: 1
+            color: Theme.line
+        }
+
+        Row {
+            id: brand
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            width: window.compact ? undefined : window.sideWidth
+            spacing: 8
+            leftPadding: 12
+
+            Rectangle {
+                width: 26
+                height: 26
+                radius: 7
+                anchors.verticalCenter: parent.verticalCenter
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#6a81ff" }
+                    GradientStop { position: 1.0; color: "#4263f5" }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "T"
+                    color: "#ffffff"
+                    font.pixelSize: Theme.px(12)
+                    font.weight: Font.ExtraBold
+                    font.family: Theme.fontFamily
+                }
+            }
+
+            Column {
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 1
+
+                Text {
+                    text: Lang.t("app.name")
+                    font.pixelSize: Theme.px(12)
+                    font.weight: Font.Bold
+                    font.family: Theme.fontFamily
+                    color: Theme.text
+                }
+
+                Text {
+                    visible: !window.compact
+                    text: Lang.t("app.tagline")
+                    font.pixelSize: Theme.px(10)
+                    font.family: Theme.fontFamily
+                    color: Theme.text3
+                }
+            }
+        }
+
+        Row {
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 6
+
+            Repeater {
+                model: [
+                    { label: Lang.t("stat.files_prefix"), value: Store.fileCount() },
+                    { label: Lang.t("stat.tags_prefix"), value: Store.tagCount() }
+                ]
+
+                delegate: Rectangle {
+                    required property var modelData
+                    height: 28
+                    width: statRow.implicitWidth + 20
+                    radius: 7
+                    color: statMouse.containsMouse ? Theme.surfaceInsetHover : Theme.surface3
+
+                    Row {
+                        id: statRow
+                        anchors.centerIn: parent
+                        spacing: 5
+
+                        Text {
+                            text: modelData.label
+                            font.pixelSize: Theme.px(12)
+                            font.family: Theme.fontFamily
+                            color: Theme.text3
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        Text {
+                            text: modelData.value
+                            font.pixelSize: Theme.px(12)
+                            font.weight: Font.Bold
+                            font.family: Theme.fontFamily
+                            color: Theme.text
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+
+                    MouseArea {
+                        id: statMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                    }
+                }
+            }
+        }
+    }
+
+    // 侧栏
+    Rectangle {
+        id: sidebar
+        visible: !window.compact
+        width: window.sideWidth
+        anchors.top: topbar.bottom
+        anchors.bottom: parent.bottom
+        color: Theme.surface2
+        z: 10
+
+        Rectangle {
+            anchors.right: parent.right
+            width: 1
+            height: parent.height
+            color: Theme.line
+        }
+
+        Column {
+            id: navColumn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.leftMargin: 8
+            anchors.rightMargin: 8
+            anchors.topMargin: 8
+            spacing: 1
+
+            NavItem {
+                width: navColumn.width
+                glyph: "▦"
+                iconSource: "qrc:/img/file.svg"
+                text: Lang.t("browse.files")
+                count: Store.fileCount()
+                active: Store.currentPage === "browse"
+                onClicked: Store.currentPage = "browse"
+            }
+
+            NavItem {
+                width: navColumn.width
+                glyph: "▱"
+                iconSource: "qrc:/img/folder.svg"
+                text: Lang.t("nav.directory")
+                count: Store.dirs.length
+                active: Store.currentPage === "dirs"
+                onClicked: Store.currentPage = "dirs"
+            }
+
+            NavItem {
+                width: navColumn.width
+                glyph: "◇"
+                iconSource: "qrc:/img/tag.svg"
+                text: Lang.t("tag.library_title")
+                count: Store.tagCount()
+                active: Store.currentPage === "tags"
+                onClicked: Store.currentPage = "tags"
+            }
+
+            Item { width: 1; height: 7 }
+
+            Rectangle {
+                width: navColumn.width - 8
+                x: 4
+                height: 1
+                color: Theme.line
+            }
+
+            Item { width: 1; height: 7 }
+
+            NavItem {
+                width: navColumn.width
+                glyph: "⇄"
+                iconSource: "qrc:/img/monitor-smartphone.svg"
+                text: Lang.t("nav.sync")
+                active: Store.currentPage === "sync"
+                onClicked: Store.currentPage = "sync"
+            }
+
+            NavItem {
+                width: navColumn.width
+                glyph: "⚙"
+                iconSource: "qrc:/img/settings.svg"
+                text: Lang.t("nav.settings")
+                active: Store.currentPage === "settings"
+                onClicked: Store.currentPage = "settings"
+            }
+        }
+    }
+
+    // 窄屏：侧栏变顶栏下方的横向条
+    Rectangle {
+        id: sidebarBar
+        visible: window.compact
+        anchors.top: topbar.bottom
+        width: parent.width
+        height: 42
+        color: Theme.surface2
+
+        Rectangle {
+            anchors.bottom: parent.bottom
+            width: parent.width
+            height: 1
+            color: Theme.line
+        }
+
+        Row {
+            id: navRow
+            anchors.left: parent.left
+            anchors.leftMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 3
+
+            NavItem {
+                compact: true
+                glyph: "▦"
+                iconSource: "qrc:/img/file.svg"
+                text: Lang.t("browse.files")
+                active: Store.currentPage === "browse"
+                onClicked: Store.currentPage = "browse"
+            }
+
+            NavItem {
+                compact: true
+                glyph: "▱"
+                iconSource: "qrc:/img/folder.svg"
+                text: Lang.t("nav.directory")
+                active: Store.currentPage === "dirs"
+                onClicked: Store.currentPage = "dirs"
+            }
+
+            NavItem {
+                compact: true
+                glyph: "◇"
+                iconSource: "qrc:/img/tag.svg"
+                text: Lang.t("tag.library_title")
+                active: Store.currentPage === "tags"
+                onClicked: Store.currentPage = "tags"
+            }
+
+            NavItem {
+                compact: true
+                glyph: "⇄"
+                iconSource: "qrc:/img/monitor-smartphone.svg"
+                text: Lang.t("nav.sync")
+                active: Store.currentPage === "sync"
+                onClicked: Store.currentPage = "sync"
+            }
+
+            NavItem {
+                compact: true
+                glyph: "⚙"
+                iconSource: "qrc:/img/settings.svg"
+                text: Lang.t("nav.settings")
+                active: Store.currentPage === "settings"
+                onClicked: Store.currentPage = "settings"
+            }
+        }
+    }
+
+    // 内容区
+    Flickable {
+        id: contentArea
+        anchors.top: window.compact ? sidebarBar.bottom : topbar.bottom
+        anchors.left: window.compact ? parent.left : sidebar.right
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        // 固定尺寸：页面级不滚动 滚动交给各页内部列表
+        contentWidth: width
+        contentHeight: height
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+
+        Item {
+            id: contentInner
+            width: Math.min(contentArea.width - window.pad * 2, Theme.contentMax)
+            x: Math.max(window.pad, (contentArea.width - width) / 2)
+            y: window.pad
+            height: pageStack.height
+
+            StackLayout {
+                id: pageStack
+                width: parent.width
+
+                // 固定尺寸：页面栈直接吃满内容区高度 各页内部自己做固定比例 + 内部滚动
+                height: Math.max(0, contentArea.height - window.pad * 2)
+                currentIndex: {
+                    switch (Store.currentPage) {
+                    case "dirs": return 1
+                    case "tags": return 2
+                    case "sync": return 3
+                    case "settings": return 4
+                    default: return 0
+                    }
+                }
+
+                PageBrowse { id: pageBrowsePage }
+                PageDirs { id: pageDirsPage }
+                PageTags { id: pageTagsPage }
+                PageSync { id: pageSyncPage }
+                PageSettings { id: pageSettingsPage }
+            }
+        }
+    }
+
+    // Toast
+    Rectangle {
+        id: toastBox
+        z: 60
+        visible: opacity > 0
+        opacity: 0
+        radius: 8
+        color: "#22262c"
+        height: 32
+        width: toastText.implicitWidth + 28
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 18
+
+        Behavior on opacity {
+            NumberAnimation { duration: 200; easing: Easing.OutCubic }
+        }
+
+        Text {
+            id: toastText
+            anchors.centerIn: parent
+            text: ""
+            color: "#ffffff"
+            font.pixelSize: Theme.px(12)
+            font.family: Theme.fontFamily
+        }
+
+        Timer {
+            id: toastTimer
+            interval: 1800
+            onTriggered: toastBox.opacity = 0
+        }
+    }
+
+    function showToast(message) {
+        toastText.text = message
+        toastBox.opacity = 1
+        toastTimer.restart()
+    }
+
+    Connections {
+        target: Store
+        function onToastRequested(message) { window.showToast(message) }
+        function onTagAssigned(tag, fileName, color) { assignModal.open(tag, fileName, color) }
+    }
+
+    // 标签已赋值弹窗
+    Rectangle {
+        id: assignBackdrop
         anchors.fill: parent
-        z: 9999
-        visible: false
-    }
+        z: 40
+        color: "#4a0f1218"
+        visible: opacity > 0
+        opacity: 0
 
-    Window {
-        id: setWindow
-        width: 700
-        height: 500
-        minimumWidth: 700
-        maximumWidth: 700
-        minimumHeight: 500
-        maximumHeight: 500
-        title: ""
-        modality: Qt.ApplicationModal
-        visible: false
-        color: window.uiColor["card"]
+        Behavior on opacity {
+            NumberAnimation { duration: 150 }
+        }
 
-        GridLayout {
+        MouseArea {
             anchors.fill: parent
-            anchors.margins: 10
-            columns: 2
-            rowSpacing: 8
-            columnSpacing: 10
-
-            Label {
-                text: window.uiText["settings.version"]
-                font.pixelSize: window.fontSize
-            }
-            Label {
-                objectName: "versionValue"
-                text: "beta"
-                font.pixelSize: window.fontSize
-            }
-
-            Label {
-                text: window.uiText["settings.port"]
-                font.pixelSize: window.fontSize
-            }
-            Label {
-                objectName: "portValue"
-                text: "11451"
-                font.pixelSize: window.fontSize
-            }
-
-            Label {
-                text: window.uiText["settings.magic"]
-                font.pixelSize: window.fontSize
-            }
-            Label {
-                objectName: "magicValue"
-                text: "0x114514"
-                font.pixelSize: window.fontSize
-            }
-
-            Label {
-                text: window.uiText["settings.tagMode"]
-                font.pixelSize: window.fontSize
-            }
-            Label {
-                objectName: "tagModeValue"
-                text: "Sidecar"
-                font.pixelSize: window.fontSize
-            }
-
-            Label {
-                text: window.uiText["settings.wait"]
-                font.pixelSize: window.fontSize
-            }
-            SpinBox {
-                objectName: "waitSpin"
-                from: 0
-                to: 1440
-                value: 5
-                Layout.fillWidth: true
-                font.pixelSize: window.fontSize
-            }
-
-            Label {
-                text: window.uiText["settings.download"]
-                font.pixelSize: window.fontSize
-            }
-            TextField {
-                objectName: "downloadPath"
-                text: "./download"
-                Layout.fillWidth: true
-                font.pixelSize: window.fontSize
-            }
-
-            Label {
-                text: window.uiText["settings.language"]
-                font.pixelSize: window.fontSize
-            }
-            ComboBox {
-                id: languageCombo
-                objectName: "languageCombo"
-                model: window.languageNames
-                currentIndex: 0
-                Layout.fillWidth: true
-                onCurrentTextChanged: {
-                    // 语言在确认时由 Bridge 读取并保存 重启后生效
-                    console.log("Language selected:", currentText)
-                }
-                font.pixelSize: window.fontSize
-            }
-
-            Label {
-                text: window.uiText["settings.fontSize"]
-                font.pixelSize: window.fontSize
-            }
-            SpinBox {
-                objectName: "fontSizeSetting"
-                from: 10
-                to: 18
-                value: 12
-                Layout.fillWidth: true
-                font.pixelSize: window.fontSize
-                // 修改即生效 刷新渲染(Bridge.onFontSizeChanged)
-            }
-
-            Label {
-                text: window.uiText["settings.theme"]
-                font.pixelSize: window.fontSize
-            }
-            ComboBox {
-                id: themeCombo
-                objectName: "themeCombo"
-                model: window.themeNames
-                currentIndex: 0
-                Layout.fillWidth: true
-                onCurrentTextChanged: {
-                    // 修改即生效 刷新渲染
-                    console.log("themeNames selected:", currentText)
-                }
-                font.pixelSize: window.fontSize
-            }
-
-
-
-            Label {
-                text: window.uiText["settings.tags"]
-                font.pixelSize: window.fontSize
-            }
-            Row {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: 20
-
-                Button {
-                    text: window.uiText["btn.export"]
-                    font.pixelSize: window.fontSize
-                    onClicked: {
-                        exportTagsDialog.open()
-                    }
-                }
-
-                Button {
-                    text: window.uiText["btn.import"]
-                    font.pixelSize: window.fontSize
-                    onClicked: {
-                        importTagsDialog.open()
-                    }
-                }
-            }
-
-            Label {
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                horizontalAlignment: Text.AlignHCenter
-                text: window.uiText["settings.restartTip"]
-                color: window.uiColor["textHint"]
-                font.pixelSize: window.fontSize
-            }
-            Row {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: 20
-
-                Button {
-                    objectName: "saveConfigBtn"
-                    text: window.uiText["btn.ok"]
-                    font.pixelSize: window.fontSize
-                    onClicked: {
-                        // Bridge.onSaveConfigClicked: 读取控件保存 config.json 并退出程序(重启生效)
-                        setWindow.close()
-                    }
-                }
-                Button {
-                    text: window.uiText["btn.cancel"]
-                    font.pixelSize: window.fontSize
-                    onClicked: {
-                        setWindow.close()
-                    }
-                }
-            }
-        }
-
-        // 标签库 导出: 选择保存位置后回传路径给 Bridge(复制 tag.json)
-        FileDialog {
-            id: exportTagsDialog
-            title: window.uiText["btn.export"]
-            fileMode: FileDialog.SaveFile
-            nameFilters: ["JSON (*.json)"]
-            defaultSuffix: "json"
-            onAccepted: window.exportFileChosen(selectedFile)
-        }
-
-        // 标签库 导入: 选择 json 文件后回传路径给 Bridge(TagServe::mergeTags 合并)
-        FileDialog {
-            id: importTagsDialog
-            title: window.uiText["btn.import"]
-            fileMode: FileDialog.OpenFile
-            nameFilters: ["JSON (*.json)"]
-            onAccepted: window.importFileChosen(selectedFile)
-        }
-    }
-
-    Window {
-        id: optionsWindow
-        width: 400
-        height: 200
-        minimumWidth: 400
-        maximumWidth: 400
-        minimumHeight: 200
-        maximumHeight: 200
-        title: ""
-        modality: Qt.ApplicationModal
-        visible: false
-        color: window.uiColor["card"]
-
-        Dialog {
-            id: optionsDialog
-            width: 400
-            height: 200
-            objectName: "optionsDialog"
-            title: window.uiText["options.title"]
-            font.pixelSize: window.fontSize
-            modal: true
-            standardButtons: Dialog.Yes | Dialog.No
-            onAccepted: {
-                // 转换由 Bridge.onConvertModeConfirmed 执行
-                console.log("确认")
-                optionsWindow.close()
-            }
-            onRejected: {
-                console.log("取消")
-                optionsWindow.close()
-            }
-        }
-
-        onVisibleChanged: {
-            if (visible) {
-                optionsDialog.open()
-            }
-        }
-    }
-
-    Window {
-        id: syncWindow
-        objectName: "syncWindow"
-        width: 400
-        height: 300
-        minimumWidth: 400
-        maximumWidth: 400
-        minimumHeight: 300
-        maximumHeight: 300
-        title: ""
-        modality: Qt.NonModal
-        visible: false
-        color: window.uiColor["card"]
-
-        // 由 Bridge(C++) 填充/绑定的数据与操作
-        property var serverList: []   // rect3 局域网设备列表 [{name, ip, port}]
-        property var serverQueue: []  // rect2 待发送目录队列 [路径...]
-
-        Rectangle {
-            id: mainRect
-            anchors.fill: parent
-            color: window.uiColor["card"]
-            visible: true
-
-            RowLayout {
-                anchors.centerIn: parent
-                spacing: 32
-
-                PictureButton {
-                    buttonWidth: 64
-                    buttonHeight: 64
-                    iconWidth: 64
-                    iconHeight: 64
-                    iconSource: "/img/database-plus.svg"
-
-                    ToolTip.visible: hovered
-                    ToolTip.text: window.uiText["sync.share"]
-
-                    onClicked: {
-                        rect2.visible = true
-                        mainRect.visible = false
-                        rect3.visible = false
-                    }
-                }
-
-                PictureButton {
-                    buttonWidth: 64
-                    buttonHeight: 64
-                    iconWidth: 64
-                    iconHeight: 64
-                    iconSource: "/img/download.svg"
-
-                    ToolTip.visible: hovered
-                    ToolTip.text: window.uiText["sync.download"]
-
-                    onClicked: {
-                        rect3.visible = true
-                        mainRect.visible = false
-                        rect2.visible = false
-                    }
-                }
-            }
+            onClicked: assignModal.close()
         }
 
         Rectangle {
-            id: rect2
-            anchors.fill: parent
-            color: window.uiColor["card"]
-            visible: false
+            id: assignCard
+            width: Math.min(480, assignBackdrop.width - 32)
+            height: modalColumn.height
+            anchors.centerIn: parent
+            radius: 12
+            color: Theme.surface
+            border.width: 1
+            border.color: Theme.line2
 
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 10
-                spacing: 8
+            Column {
+                id: modalColumn
+                width: parent.width
 
-                RowLayout {
-                    spacing: 5
+                Item {
+                    width: parent.width
+                    height: 46
 
-                    TextField {
-                        id: serverNameField
-                        objectName: "serverNameField"
-                        placeholderText: window.uiText["sync.serverName"]
-                        font.pixelSize: window.fontSize
-                        Layout.fillWidth: true
+                    Text {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 14
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: Lang.t("file.tag_assigned")
+                        font.pixelSize: Theme.px(13)
+                        font.weight: Font.Bold
+                        font.family: Theme.fontFamily
+                        color: Theme.text
+                    }
+
+                    Text {
+                        anchors.right: parent.right
+                        anchors.rightMargin: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "×"
+                        font.pixelSize: Theme.px(16)
+                        color: Theme.text3
+
+                        MouseArea {
+                            anchors.fill: parent
+                            anchors.margins: -6
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: assignModal.close()
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        width: parent.width
+                        height: 1
+                        color: Theme.line
+                    }
+                }
+
+                Column {
+                    width: parent.width
+                    spacing: 8
+                    topPadding: 14
+                    leftPadding: 14
+                    rightPadding: 14
+
+                    Rectangle {
+                        width: parent.width - 28
+                        height: 40
+                        radius: 8
+                        color: Theme.surface2
+                        border.width: 1
+                        border.color: Theme.line
+
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 8
+
+                            Rectangle {
+                                width: 10
+                                height: 10
+                                radius: 5
+                                color: assignModal.tagColor
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            Text {
+                                text: assignModal.tagName
+                                font.pixelSize: Theme.px(12)
+                                font.weight: Font.Bold
+                                font.family: Theme.fontFamily
+                                color: Theme.text
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            Text {
+                                text: "→"
+                                font.pixelSize: Theme.px(12)
+                                color: Theme.text3
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            Text {
+                                text: assignModal.fileName
+                                font.pixelSize: Theme.px(12)
+                                font.family: Theme.fontFamily
+                                color: Theme.text2
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+                    }
+
+                    Text {
+                        width: parent.width - 28
+                        text: Lang.t("file.tag_assigned_note")
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: Theme.px(12)
+                        font.family: Theme.fontFamily
+                        color: Theme.text2
+                    }
+                }
+
+                Item {
+                    width: parent.width
+                    height: 52
+
+                    Rectangle {
+                        anchors.top: parent.top
+                        width: parent.width
+                        height: 1
+                        color: Theme.line
                     }
 
                     Row {
                         anchors.right: parent.right
-                        spacing: 0
+                        anchors.rightMargin: 14
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 6
 
-                        PictureButton {
-                            objectName: "serverStartBtn"
-                            buttonWidth: 50
-                            buttonHeight: 50
-                            iconWidth: 50
-                            iconHeight: 50
-                            iconSource: "/img/power.svg"
-
-                            ToolTip.visible: hovered
-                            ToolTip.text: window.uiText["sync.start"]
-                        }
-
-                        PictureButton {
-                            objectName: "serverStopBtn"
-                            buttonWidth: 50
-                            buttonHeight: 50
-                            iconWidth: 50
-                            iconHeight: 50
-                            iconSource: "/img/power-off.svg"
-
-                            ToolTip.visible: hovered
-                            ToolTip.text: window.uiText["sync.stop"]
-                        }
-                    }
-                }
-
-                // 第二行：目录 + 添加
-                RowLayout {
-                    spacing: 5
-                    TextField {
-                        id: dirField
-                        objectName: "serverDirField"
-                        placeholderText: window.uiText["sync.dirPath"]
-                        font.pixelSize: window.fontSize
-                        Layout.fillWidth: true
-                    }
-
-                    PictureButton {
-                        objectName: "serverAddDirBtn"
-                        buttonWidth: 50
-                        buttonHeight: 50
-                        iconWidth: 50
-                        iconHeight: 50
-                        iconSource: "/img/folder-plus.svg"
-
-                        ToolTip.visible: hovered
-                        ToolTip.text: window.uiText["sync.addDir"]
-                    }
-                }
-
-                //  每一步操作完成后的提示由下方状态栏给出
-                Item { Layout.fillHeight: true }
-
-                Label {
-                    objectName: "serverStatusLabel"
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 16
-                    color: window.uiColor["textHint"]
-                    horizontalAlignment: Text.AlignHCenter
-                    elide: Text.ElideMiddle
-                    text: ""
-                    font.pixelSize: window.fontSize
-                }
-
-                RowLayout {
-                    Layout.alignment: Qt.AlignHCenter
-
-                    Row {
-                        anchors.centerIn: parent
-                        spacing: 10
-
-                        PictureButton {
-                            objectName: "serverDisconnectBtn"
-                            buttonWidth: 50
-                            buttonHeight: 50
-                            iconWidth: 50
-                            iconHeight: 50
-                            iconSource: "/img/unplug.svg"
-
-                            ToolTip.visible: hovered
-                            ToolTip.text: window.uiText["sync.disconnect"]
-                        }
-
-                        PictureButton {
-                            buttonWidth: 50
-                            buttonHeight: 50
-                            iconWidth: 50
-                            iconHeight: 50
-                            iconSource: "/img/arrow-big-left.svg"
-
-                            ToolTip.visible: hovered
-                            ToolTip.text: window.uiText["sync.back"]
-
-                            onClicked: {
-                                mainRect.visible = true
-                                rect2.visible = false
-                                rect3.visible = false
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Rectangle {
-            id: rect3
-            anchors.fill: parent
-            color: window.uiColor["card"]
-            visible: false
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 8
-                spacing: 6
-
-                // 设备列表(由 Bridge.pushServerList 填充): 单击选中 底部"下载"按钮下载选中设备
-                ListView {
-                    id: serverListView
-                    objectName: "serverListView"
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    model: syncWindow.serverList
-                    clip: true
-
-                    delegate: Rectangle {
-                        width: ListView.view ? ListView.view.width : 0
-                        height: 26
-                        radius: 4
-                        color: serverListView.currentIndex === index ? window.uiColor["onlyBg"] : (index % 2 ? window.uiColor["rowHover"] : "transparent")
-
-                        MouseArea {
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                serverListView.currentIndex = index
-                            }
-                        }
-
-                        Label {
-                            anchors.fill: parent
-                            anchors.leftMargin: 8
-                            verticalAlignment: Text.AlignVCenter
-                            text: modelData.name + "    " + modelData.ip + ":" + modelData.port
-                            elide: Text.ElideMiddle
-                            font.pixelSize: window.fontSize
-                        }
-                    }
-                }
-
-                Label {
-                    objectName: "clientStatusLabel"
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 16
-                    color: window.uiColor["textHint"]
-                    horizontalAlignment: Text.AlignHCenter
-                    elide: Text.ElideMiddle
-                    text: ""
-                    font.pixelSize: window.fontSize
-                }
-
-                Row {
-                    Layout.alignment: Qt.AlignHCenter
-                    spacing: 10
-
-                    PictureButton {
-                        objectName: "clientScanBtn"
-                        buttonWidth: 50
-                        buttonHeight: 50
-                        iconWidth: 50
-                        iconHeight: 50
-                        iconSource: "/img/search.svg"
-
-                        ToolTip.visible: hovered
-                        ToolTip.text: window.uiText["sync.scan"]
-                    }
-
-                    PictureButton {
-                        objectName: "clientDownloadBtn"
-                        buttonWidth: 50
-                        buttonHeight: 50
-                        iconWidth: 50
-                        iconHeight: 50
-                        iconSource: "/img/download.svg"
-
-                        ToolTip.visible: hovered
-                        ToolTip.text: window.uiText["sync.downloadSel"]
-                    }
-
-                    PictureButton {
-                        objectName: "clientClearBtn"
-                        buttonWidth: 50
-                        buttonHeight: 50
-                        iconWidth: 50
-                        iconHeight: 50
-                        iconSource: "/img/trash.svg"
-
-                        ToolTip.visible: hovered
-                        ToolTip.text: window.uiText["sync.clearRecords"]
-                    }
-
-                    PictureButton {
-                        objectName: "clientDisconnectBtn"
-                        buttonWidth: 50
-                        buttonHeight: 50
-                        iconWidth: 50
-                        iconHeight: 50
-                        iconSource: "/img/unplug.svg"
-
-                        ToolTip.visible: hovered
-                        ToolTip.text: window.uiText["sync.disconnect"]
-                    }
-
-                    PictureButton {
-                        buttonWidth: 50
-                        buttonHeight: 50
-                        iconWidth: 50
-                        iconHeight: 50
-                        iconSource: "/img/arrow-big-left.svg"
-
-                        ToolTip.visible: hovered
-                        ToolTip.text: window.uiText["sync.back"]
-
-                        onClicked: {
-                            mainRect.visible = true
-                            rect2.visible = false
-                            rect3.visible = false
-                        }
+                        Btn { text: Lang.t("common.know"); onClicked: assignModal.close() }
+                        Btn { text: Lang.t("common.done"); kind: "primary"; onClicked: assignModal.close() }
                     }
                 }
             }
         }
     }
 
-    ColumnLayout {
-        id: mainLayout
-        anchors.fill: parent
-        spacing: 0
+    QtObject {
+        id: assignModal
 
-        Rectangle {
-            id:titleBar
-            Layout.fillWidth: true
-            Layout.preferredHeight: 32
-            color: window.uiColor["bar"]
+        property string tagName: ""
+        property string fileName: ""
+        property color tagColor: Theme.accent
 
-            PictureButton {
-                id: settingButton
-                anchors.left: parent.left
-                anchors.top: parent.top
-                iconSource: "/img/settings.svg"
-                onClicked: {
-                    setWindow.show()
-                }
-            }
-
-            PictureButton {
-                id: optionsButton
-                anchors.left: settingButton.right
-                anchors.top: parent.top
-                iconSource: "/img/settings-2.svg"
-                onClicked: {
-                    optionsWindow.show()
-                }
-            }
-
-            PictureButton {
-                id: helpButton
-                anchors.left: optionsButton.right
-                anchors.top: parent.top
-                iconSource: "/img/circle-question-mark.svg"
-                onClicked: {
-                    Qt.openUrlExternally("https://github.com/kakameow/TagMeow")
-                }
-            }
-
-            DataDisplayLabel {
-                id: fileLabel
-                anchors.right: tagLabel.left
-                anchors.top: parent.top
-                iconSource: "/img/file.svg"
-                tipText: window.uiText["tip.file"]
-                // 实时显示下方文件列表的文件数量
-                dataText: fileContainer.fileCount
-                fontSize: window.fontSize
-                itemWidth: 36
-            }
-
-            DataDisplayLabel {
-                id: tagLabel
-                anchors.right: parent.right
-                anchors.top: parent.top
-                iconSource: "/img/tag.svg"
-                tipText: window.uiText["tip.tag"]
-                // 实时显示下方标签库的标签总数
-                dataText: libraryTag.totalTagCount
-                fontSize: window.fontSize
-                itemWidth: 32
-            }
+        function open(tag, file, color) {
+            tagName = tag
+            fileName = file
+            tagColor = color
+            assignBackdrop.opacity = 1
         }
 
-
-        Rectangle {
-            id: searchBar
-            Layout.fillWidth: true
-            Layout.preferredHeight: 72
-            color: window.uiColor["page"]
-
-            RowLayout {
-                anchors.fill: parent
-                spacing: 0
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.preferredWidth: 8
-                    color: window.uiColor["page"]
-
-                    RowLayout {
-                        anchors.fill: parent
-                        spacing: 10
-
-                        TagContainer {
-                            id: includeContainer
-                            objectName: "includeContainer"
-                            Layout.fillHeight: true
-                            Layout.preferredWidth: 192
-                            containerName: window.uiText["cnt.include"]
-                            containerTip: window.uiText["cnt.tip"]
-                            borderColor: window.uiColor["includeBorder"]
-                            backgroundColor: window.uiColor["includeBg"]
-                            tagBackgroundColor: window.uiColor["tagBg"]
-                            tagTextColor: window.uiColor["tagText"]
-                            fontSize: window.fontSize
-                        }
-
-                        TagContainer {
-                            id: excludeContainer
-                            objectName: "excludeContainer"
-                            Layout.fillHeight: true
-                            Layout.preferredWidth: 192
-                            containerName: window.uiText["cnt.exclude"]
-                            containerTip: window.uiText["cnt.tip"]
-                            borderColor: window.uiColor["excludeBorder"]
-                            backgroundColor: window.uiColor["excludeBg"]
-                            tagBackgroundColor: window.uiColor["tagBg"]
-                            tagTextColor: window.uiColor["tagText"]
-                            fontSize: window.fontSize
-                        }
-
-                        TagContainer {
-                            id: onlyContainer
-                            objectName: "onlyContainer"
-                            Layout.fillHeight: true
-                            Layout.preferredWidth: 192
-                            containerName: window.uiText["cnt.only"]
-                            containerTip: window.uiText["cnt.tip"]
-                            borderColor: window.uiColor["onlyBorder"]
-                            backgroundColor: window.uiColor["onlyBg"]
-                            tagBackgroundColor: window.uiColor["tagBg"]
-                            tagTextColor: window.uiColor["tagText"]
-                            fontSize: window.fontSize
-                        }
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.preferredWidth: 2
-                    color: "transparent"
-
-                    RowLayout {
-                        anchors.fill: parent
-                        spacing: 0
-
-                        PictureButton {
-                            id: searchButton
-                            objectName: "searchButton"
-                            anchors.right: clearButton.left
-                            buttonWidth: 64
-                            buttonHeight: 64
-                            iconSource: "/img/search.svg"
-
-                            ToolTip.visible: hovered
-                            ToolTip.text: window.uiText["btn.search"]
-                        }
-
-                        PictureButton {
-                            id: clearButton
-                            objectName: "clearButton"
-                            anchors.right: refreshButton.left
-                            buttonWidth: 64
-                            buttonHeight: 64
-                            iconSource: "/img/trash.svg"
-
-                            ToolTip.visible: hovered
-                            ToolTip.text: window.uiText["btn.clear"]
-                        }
-
-                        PictureButton {
-                            id: refreshButton
-                            objectName: "refreshButton"
-                            anchors.right: parent.right
-                            buttonWidth: 64
-                            buttonHeight: 64
-                            iconSource: "/img/rotate-cw.svg"
-
-                            ToolTip.visible: hovered
-                            ToolTip.text: window.uiText["btn.refresh"]
-                        }
-                    }
-                }
-            }
+        function close() {
+            assignBackdrop.opacity = 0
         }
+    }
 
-        Rectangle {
-            id: middleLayout
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            color: window.uiColor["page"]
-
-            RowLayout {
-                anchors.fill: parent
-                spacing: 0
-
-
-                Rectangle {
-                    id: lefttBar
-                    Layout.fillHeight: true
-                    Layout.preferredWidth: 192
-                    color: window.uiColor["page"]
-
-                    ColumnLayout {
-                        anchors.fill: parent
-                        spacing: 0
-
-                        Rectangle {
-                            id: dirList
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.preferredHeight: 2
-                            color: window.uiColor["card"]
-
-                            DirContainer {
-                                id: dirContainer
-                                objectName: "dirContainer"
-                                anchors.fill: parent
-                                iconSource: "/img/folder.svg"
-                                fontSize: window.fontSize
-                                borderColor: window.uiColor["border"]
-                            }
-                        }
-
-                        Rectangle {
-                            id: tagList
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.preferredHeight: 3
-                            color: window.uiColor["card"]
-
-                            LibraryTag {
-                                id: libraryTag
-                                objectName: "libraryTag"
-                                anchors.fill: parent
-                                fontSize: window.fontSize
-                                borderColor: window.uiColor["border"]
-                                tagBackgroundColor: window.uiColor["tagBg"]
-                                tagTextColor: window.uiColor["tagText"]
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    id: rightBar
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    color: window.uiColor["card"]
-
-                    FileContainer {
-                        id: fileContainer
-                        objectName: "fileContainer"
-                        itemWidth: parent.width
-                        fontSize: window.fontSize
-                        fileColor: window.uiColor["rowHover"]
-                        borderColor: window.uiColor["border"]
-                        tagBackgroundColor: window.uiColor["tagBg"]
-                        tagTextColor: window.uiColor["tagText"]
-                    }
-                }
-            }
-        }
-
-        Rectangle {
-            id: optionsBar
-            Layout.fillWidth: true
-            Layout.preferredHeight: 64
-            color: window.uiColor["bar"]
-
-            RowLayout {
-                anchors.fill: parent
-                spacing: 0
-
-                Rectangle {
-                    Layout.preferredWidth: 1
-                    Layout.fillHeight: true
-                    anchors.left: parent.left
-                    color: "transparent"
-
-                    RowLayout {
-                        anchors.fill: parent
-                        spacing: 0
-
-                        Rectangle {
-                            width: 144
-                            height: 64
-                            anchors.left: parent.left
-                            color: "transparent"
-
-                            PictureTextFieldButton {
-                                id: dirInput
-                                objectName: "dirInput"
-                                itemWidth: parent.width
-                                itemHeight: parent.height
-                                iconSource: "/img/folder.svg"
-                            }
-                        }
-
-                        Rectangle {
-                            width: 84
-                            height: 64
-                            anchors.left: dirInput.right
-                            color: "transparent"
-
-                            PictureTextFieldButton {
-                                id: typeInput
-                                objectName: "typeInput"
-                                itemWidth: parent.width
-                                itemHeight: parent.height
-                                iconSource: "/img/funnel.svg"
-                            }
-                        }
-
-                        Rectangle {
-                            width: 84
-                            height: 64
-                            anchors.left: typeInput.right
-                            color: "transparent"
-
-                            PictureTextFieldButton {
-                                id: tagInput
-                                objectName: "tagInput"
-                                itemWidth: parent.width
-                                itemHeight: parent.height
-                                iconSource: "/img/tag.svg"
-                            }
-                        }
-
-
-                        Rectangle {
-                            width: 84
-                            height: 64
-                            anchors.left: tagInput.right
-                            color: "transparent"
-
-                            Rectangle {
-                                id: colorRect
-                                objectName: "colorInput"
-                                anchors.centerIn: parent
-                                width: parent.width * 0.6
-                                height: parent.height * 0.6
-                                radius: 8
-                                color: currentColor
-
-                                property string currentColor: "#FFB6C1"
-                                property string text: currentColor
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: colorDialog.open()
-                                }
-                            }
-
-                            ColorDialog {
-                                id: colorDialog
-                                selectedColor: colorRect.currentColor
-                                onAccepted: {
-                                    colorRect.currentColor = colorDialog.selectedColor
-                                    console.log("选择的颜色:", colorDialog.selectedColor)
-                                }
-                                onRejected: {
-                                    console.log("取消选择")
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    Layout.preferredWidth: 1
-                    Layout.fillHeight: true
-                    anchors.right: parent.right
-                    color: "transparent"
-
-                    RowLayout {
-                        anchors.fill: parent
-                        spacing: 0
-
-
-                        Rectangle {
-                            id: button1
-                            width: 48
-                            height: 64
-                            anchors.right: button2.left
-                            color: "transparent"
-
-                            PictureButton {
-                                objectName: "addDirBtn"
-                                iconSource: "/img/folder-plus.svg"
-                                buttonWidth: parent.width
-                                buttonHeight: parent.height
-                                iconWidth: 48
-                                iconHeight: 48
-
-                                ToolTip.visible: hovered
-                                ToolTip.text: window.uiText["btn.addDir"]
-                            }
-                        }
-
-                        Rectangle {
-                            id: button2
-                            width: 48
-                            height: 64
-                            anchors.right: button3.left
-                            color: "transparent"
-
-                            PictureButton {
-                                objectName: "addTypeBtn"
-                                iconSource: "/img/funnel-plus.svg"
-                                buttonWidth: parent.width
-                                buttonHeight: parent.height
-                                iconWidth: 48
-                                iconHeight: 48
-
-                                ToolTip.visible: hovered
-                                ToolTip.text: window.uiText["btn.addType"]
-                            }
-                        }
-
-                        Rectangle {
-                            id: button3
-                            width: 48
-                            height: 64
-                            anchors.right: button4.left
-                            color: "transparent"
-
-                            PictureButton {
-                                objectName: "addTagBtn"
-                                iconSource: "/img/tag-plus.svg"
-                                buttonWidth: parent.width
-                                buttonHeight: parent.height
-                                iconWidth: 48
-                                iconHeight: 48
-
-                                ToolTip.visible: hovered
-                                ToolTip.text: window.uiText["btn.addTag"]
-                            }
-                        }
-
-
-                        Rectangle {
-                            id: button4
-                            width: 48
-                            height: 64
-                            anchors.right: button5.left
-                            color: "transparent"
-
-                            PictureButton {
-                                objectName: "removeDirBtn"
-                                iconSource: "/img/folder-x.svg"
-                                buttonWidth: parent.width
-                                buttonHeight: parent.height
-                                iconWidth: 48
-                                iconHeight: 48
-
-                                ToolTip.visible: hovered
-                                ToolTip.text: window.uiText["btn.removeDir"]
-                            }
-                        }
-
-                        Rectangle {
-                            id: button5
-                            width: 48
-                            height: 64
-                            anchors.right: button6.left
-                            color: "transparent"
-
-                            PictureButton {
-                                objectName: "removeTypeBtn"
-                                iconSource: "/img/funnel-x.svg"
-                                buttonWidth: parent.width
-                                buttonHeight: parent.height
-                                iconWidth: 48
-                                iconHeight: 48
-
-                                ToolTip.visible: hovered
-                                ToolTip.text: window.uiText["btn.removeType"]
-                            }
-                        }
-
-                        Rectangle {
-                            id: button6
-                            width: 48
-                            height: 64
-                            anchors.right: button7.left
-                            color: "transparent"
-
-                            PictureButton {
-                                objectName: "removeTagBtn"
-                                iconSource: "/img/tag-x.svg"
-                                buttonWidth: parent.width
-                                buttonHeight: parent.height
-                                iconWidth: 48
-                                iconHeight: 48
-
-                                ToolTip.visible: hovered
-                                ToolTip.text: window.uiText["btn.removeTag"]
-                            }
-                        }
-
-                        Rectangle {
-                            id: button7
-                            width: 48
-                            height: 64
-                            anchors.right: endButton.left
-                            color: "transparent"
-
-                            PictureButton {
-                                objectName: "resetTypeColor"
-                                iconSource: "/img/paint-roller.svg"
-                                buttonWidth: parent.width
-                                buttonHeight: parent.height
-                                iconWidth: 48
-                                iconHeight: 48
-
-                                ToolTip.visible: hovered
-                                ToolTip.text: window.uiText["btn.resetColor"]
-                            }
-                        }
-
-                        Rectangle {
-                            id: endButton
-                            width: 48
-                            height: 64
-                            anchors.right: parent.right
-                            color: "transparent"
-
-                            PictureButton {
-                                objectName: "snycWindow"
-                                iconSource: "/img/monitor-smartphone.svg"
-                                buttonWidth: parent.width
-                                buttonHeight: parent.height
-                                iconWidth: 48
-                                iconHeight: 48
-
-                                ToolTip.visible: hovered
-                                ToolTip.text: window.uiText["btn.syncWindow"]
-
-                                onClicked: {
-                                    syncWindow.show()
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    Shortcut {
+        sequence: "Escape"
+        onActivated: assignModal.close()
     }
 }
