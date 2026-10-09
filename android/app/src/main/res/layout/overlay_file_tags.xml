@@ -5,13 +5,13 @@
     android:id="@+id/fileTagOverlay"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#f5f6f8"
+    android:background="@color/page_bg"
     android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="52dp"
-        android:background="#ffffff"
+        android:background="@color/surface"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="8dp"
@@ -25,8 +25,8 @@
             android:gravity="center"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
-            android:text="取消"
-            android:textColor="#59616e"
+            android:text=""
+            android:textColor="@color/text_medium"
             android:textSize="13sp" />
 
         <Space
@@ -38,8 +38,8 @@
             android:id="@+id/tvFileTagTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="添加标签"
-            android:textColor="#20242b"
+            android:text=""
+            android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -56,15 +56,15 @@
             android:gravity="center"
             android:paddingStart="14dp"
             android:paddingEnd="14dp"
-            android:text="保存"
-            android:textColor="#ffffff"
+            android:text=""
+            android:textColor="@color/on_primary_text"
             android:textSize="13sp" />
     </LinearLayout>
 
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="#e2e6ee" />
+        android:background="@color/border" />
 
     <ScrollView
         android:layout_width="match_parent"
@@ -82,10 +82,10 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="#ffffff"
+                app:cardBackgroundColor="@color/surface"
                 app:cardCornerRadius="16dp"
                 app:cardElevation="2dp"
-                app:strokeColor="#e2e6ee"
+                app:strokeColor="@color/border"
                 app:strokeWidth="1dp">
 
                 <LinearLayout
@@ -117,7 +117,7 @@
                             android:layout_height="wrap_content"
                             android:ellipsize="middle"
                             android:maxLines="1"
-                            android:textColor="#20242b"
+                            android:textColor="@color/text_primary"
                             android:textSize="13sp"
                             android:textStyle="bold" />
 
@@ -128,7 +128,7 @@
                             android:layout_marginTop="3dp"
                             android:ellipsize="middle"
                             android:maxLines="1"
-                            android:textColor="#8c939f"
+                            android:textColor="@color/text_secondary"
                             android:textSize="10sp" />
                     </LinearLayout>
                 </LinearLayout>
@@ -139,10 +139,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                app:cardBackgroundColor="#ffffff"
+                app:cardBackgroundColor="@color/surface"
                 app:cardCornerRadius="16dp"
                 app:cardElevation="2dp"
-                app:strokeColor="#e2e6ee"
+                app:strokeColor="@color/border"
                 app:strokeWidth="1dp">
 
                 <LinearLayout
@@ -157,8 +157,8 @@
                         android:layout_height="wrap_content"
                         android:layout_marginStart="2dp"
                         android:layout_marginBottom="8dp"
-                        android:text="当前标签（点标签即可移除）"
-                        android:textColor="#656d79"
+                        android:text=""
+                        android:textColor="@color/text_section"
                         android:textSize="12sp"
                         android:textStyle="bold" />
 
@@ -176,10 +176,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                app:cardBackgroundColor="#ffffff"
+                app:cardBackgroundColor="@color/surface"
                 app:cardCornerRadius="16dp"
                 app:cardElevation="2dp"
-                app:strokeColor="#e2e6ee"
+                app:strokeColor="@color/border"
                 app:strokeWidth="1dp">
 
                 <LinearLayout
@@ -195,12 +195,31 @@
                         android:paddingStart="12dp"
                         android:paddingEnd="12dp">
 
+                        <!-- 标签搜索：按名字过滤下面的标签库 -->
+                        <EditText
+                            android:id="@+id/editTagSearch"
+                            android:layout_width="match_parent"
+                            android:layout_height="36dp"
+                            android:layout_marginStart="10dp"
+                            android:layout_marginTop="8dp"
+                            android:layout_marginEnd="10dp"
+                            android:background="@drawable/bg_mini"
+                            android:hint=""
+                            android:imeOptions="actionSearch"
+                            android:inputType="text"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:singleLine="true"
+                            android:textColor="@color/text_primary"
+                            android:textColorHint="@color/text_faint"
+                            android:textSize="12sp" />
+
                         <TextView
                             android:id="@+id/tvFileTagLibraryTitle"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="从标签库选择"
-                            android:textColor="#20242b"
+                            android:text=""
+                            android:textColor="@color/text_primary"
                             android:textSize="12sp"
                             android:textStyle="bold" />
 
@@ -213,15 +232,15 @@
                             android:id="@+id/tvFileTagLibraryHint"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="点击添加 · 再点取消"
-                            android:textColor="#8c939f"
+                            android:text=""
+                            android:textColor="@color/text_secondary"
                             android:textSize="11sp" />
                     </LinearLayout>
 
                     <View
                         android:layout_width="match_parent"
                         android:layout_height="1dp"
-                        android:background="#edf0f3" />
+                        android:background="@color/divider" />
 
                     <LinearLayout
                         android:id="@+id/fileTagLibrary"

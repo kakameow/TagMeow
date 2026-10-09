@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <!-- 主题配色：语义名 -> 颜色。同名在 values-night/colors.xml 里有夜间值 -->
+    <color name="page_bg">#202124</color>
+    <color name="surface">#292A2D</color>
+    <color name="segmented_bg">#303134</color>
+    <color name="inset_bg">#303134</color>
+    <color name="divider">#35363A</color>
+    <color name="border">#3C3D40</color>
+    <color name="border_soft">#3C3D40</color>
+    <color name="text_primary">#E8EAED</color>
+    <color name="text_secondary">#A9AAAD</color>
+    <color name="text_medium">#C4C7CC</color>
+    <color name="text_section">#B4B7BC</color>
+    <color name="text_faint">#8E9196</color>
+    <color name="text_button">#C4C7CC</color>
+    <color name="text_button_2">#B4B7BC</color>
+    <color name="text_hint_strong">#7E8186</color>
+    <color name="on_primary_text">#20242B</color>
+    <color name="primary_button_bg">#E8EAED</color>
+    <color name="danger_text">#FF8A95</color>
+    <color name="filter_include_bg">#1B2A36</color>
+    <color name="filter_include_border">#3E6C8E</color>
+    <color name="filter_exclude_bg">#2E2024</color>
+    <color name="filter_exclude_border">#8E4C50</color>
+    <color name="filter_only_bg">#262341</color>
+    <color name="filter_only_border">#5B4E8E</color>
+</resources>

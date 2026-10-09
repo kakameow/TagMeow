@@ -5,13 +5,13 @@
     android:id="@+id/searchTagOverlay"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#f5f6f8"
+    android:background="@color/page_bg"
     android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="52dp"
-        android:background="#ffffff"
+        android:background="@color/surface"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="8dp"
@@ -25,8 +25,8 @@
             android:gravity="center"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
-            android:text="取消"
-            android:textColor="#59616e"
+            android:text=""
+            android:textColor="@color/text_medium"
             android:textSize="13sp" />
 
         <Space
@@ -38,8 +38,8 @@
             android:id="@+id/tvSearchTagTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="选择筛选标签"
-            android:textColor="#20242b"
+            android:text=""
+            android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -56,15 +56,15 @@
             android:gravity="center"
             android:paddingStart="14dp"
             android:paddingEnd="14dp"
-            android:text="确认"
-            android:textColor="#ffffff"
+            android:text=""
+            android:textColor="@color/on_primary_text"
             android:textSize="13sp" />
     </LinearLayout>
 
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="#e2e6ee" />
+        android:background="@color/border" />
 
     <ScrollView
         android:layout_width="match_parent"
@@ -84,19 +84,134 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
                 android:layout_marginBottom="8dp"
-                android:text="点下面的容器可以切换「当前容器」，标签库的标签会加进当前容器"
-                android:textColor="#8c939f"
+                android:text=""
+                android:textColor="@color/text_secondary"
                 android:textSize="11sp" />
+
+            <!-- 搜索目录多选容器：默认全选 默认折叠（点标题栏展开） -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                app:cardBackgroundColor="@color/surface"
+                app:cardCornerRadius="14dp"
+                app:cardElevation="0dp"
+                app:strokeColor="@color/border"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="10dp">
+
+                    <LinearLayout
+                        android:id="@+id/searchDirHead"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="?attr/selectableItemBackground"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/tvSearchDirTitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text=""
+                            android:textColor="@color/text_primary"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <Space
+                            android:layout_width="0dp"
+                            android:layout_height="1dp"
+                            android:layout_weight="1" />
+
+                        <TextView
+                            android:id="@+id/tvSearchDirSummary"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text=""
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11sp" />
+
+                        <TextView
+                            android:id="@+id/tvSearchDirToggle"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:layout_marginStart="4dp"
+                            android:gravity="center"
+                            android:text="▾"
+                            android:textColor="@color/text_faint"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/searchDirBody"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:id="@+id/tvSearchDirHint"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text=""
+                                android:textColor="@color/text_secondary"
+                                android:textSize="10sp" />
+
+                            <TextView
+                                android:id="@+id/btnSearchDirAll"
+                                android:layout_width="wrap_content"
+                                android:layout_height="28dp"
+                                android:layout_marginStart="6dp"
+                                android:background="@drawable/bg_mini"
+                                android:gravity="center"
+                                android:paddingStart="12dp"
+                                android:paddingEnd="12dp"
+                                android:text=""
+                                android:textColor="@color/text_button"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/searchDirList"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:orientation="vertical" />
+
+                        <TextView
+                            android:id="@+id/tvSearchDirEmpty"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text=""
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11sp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
             <!-- 包含 -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/groupInclude"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="#eef8ff"
+                app:cardBackgroundColor="@color/filter_include_bg"
                 app:cardCornerRadius="14dp"
                 app:cardElevation="0dp"
-                app:strokeColor="#8ec8f7"
+                app:strokeColor="@color/filter_include_border"
                 app:strokeWidth="1dp">
 
                 <LinearLayout
@@ -115,8 +230,8 @@
                             android:id="@+id/titleInclude"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="＋ 包含标签　0"
-                            android:textColor="#59616e"
+                            android:text=""
+                            android:textColor="@color/text_medium"
                             android:textSize="11sp"
                             android:textStyle="bold" />
                     </LinearLayout>
@@ -137,10 +252,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                app:cardBackgroundColor="#fff2f2"
+                app:cardBackgroundColor="@color/filter_exclude_bg"
                 app:cardCornerRadius="14dp"
                 app:cardElevation="0dp"
-                app:strokeColor="#f2a2a2"
+                app:strokeColor="@color/filter_exclude_border"
                 app:strokeWidth="1dp">
 
                 <LinearLayout
@@ -159,8 +274,8 @@
                             android:id="@+id/titleExclude"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="－ 排除标签　0"
-                            android:textColor="#59616e"
+                            android:text=""
+                            android:textColor="@color/text_medium"
                             android:textSize="11sp"
                             android:textStyle="bold" />
                     </LinearLayout>
@@ -181,10 +296,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                app:cardBackgroundColor="#f3f0ff"
+                app:cardBackgroundColor="@color/filter_only_bg"
                 app:cardCornerRadius="14dp"
                 app:cardElevation="0dp"
-                app:strokeColor="#b9a8ff"
+                app:strokeColor="@color/filter_only_border"
                 app:strokeWidth="1dp">
 
                 <LinearLayout
@@ -203,8 +318,8 @@
                             android:id="@+id/titleOnly"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="◉ 仅匹配　0"
-                            android:textColor="#59616e"
+                            android:text=""
+                            android:textColor="@color/text_medium"
                             android:textSize="11sp"
                             android:textStyle="bold" />
                     </LinearLayout>
@@ -224,10 +339,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                app:cardBackgroundColor="#ffffff"
+                app:cardBackgroundColor="@color/surface"
                 app:cardCornerRadius="16dp"
                 app:cardElevation="2dp"
-                app:strokeColor="#e2e6ee"
+                app:strokeColor="@color/border"
                 app:strokeWidth="1dp">
 
                 <LinearLayout
@@ -243,12 +358,31 @@
                         android:paddingStart="12dp"
                         android:paddingEnd="12dp">
 
+                        <!-- 标签搜索：按名字过滤下面的标签库 -->
+                        <EditText
+                            android:id="@+id/editTagSearch"
+                            android:layout_width="match_parent"
+                            android:layout_height="36dp"
+                            android:layout_marginStart="10dp"
+                            android:layout_marginTop="8dp"
+                            android:layout_marginEnd="10dp"
+                            android:background="@drawable/bg_mini"
+                            android:hint=""
+                            android:imeOptions="actionSearch"
+                            android:inputType="text"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:singleLine="true"
+                            android:textColor="@color/text_primary"
+                            android:textColorHint="@color/text_faint"
+                            android:textSize="12sp" />
+
                         <TextView
                             android:id="@+id/tvSearchTagLibraryTitle"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="从标签库选择"
-                            android:textColor="#20242b"
+                            android:text=""
+                            android:textColor="@color/text_primary"
                             android:textSize="12sp"
                             android:textStyle="bold" />
 
@@ -261,15 +395,15 @@
                             android:id="@+id/tvSearchTagCurrentGroup"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="当前容器：包含"
-                            android:textColor="#8c939f"
+                            android:text=""
+                            android:textColor="@color/text_secondary"
                             android:textSize="11sp" />
                     </LinearLayout>
 
                     <View
                         android:layout_width="match_parent"
                         android:layout_height="1dp"
-                        android:background="#edf0f3" />
+                        android:background="@color/divider" />
 
                     <LinearLayout
                         android:id="@+id/searchTagLibrary"

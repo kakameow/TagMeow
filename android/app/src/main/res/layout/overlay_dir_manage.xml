@@ -5,13 +5,13 @@
     android:id="@+id/dirManageOverlay"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#f5f6f8"
+    android:background="@color/page_bg"
     android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="52dp"
-        android:background="#ffffff"
+        android:background="@color/surface"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="8dp"
@@ -25,8 +25,8 @@
             android:gravity="center"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
-            android:text="返回"
-            android:textColor="#59616e"
+            android:text=""
+            android:textColor="@color/text_medium"
             android:textSize="13sp" />
 
         <Space
@@ -38,8 +38,8 @@
             android:id="@+id/tvDirManageTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="目录管理"
-            android:textColor="#20242b"
+            android:text=""
+            android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -56,7 +56,7 @@
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="#e2e6ee" />
+        android:background="@color/border" />
 
     <ScrollView
         android:layout_width="match_parent"
@@ -82,8 +82,8 @@
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:padding="30dp"
-                android:text="暂无目录，先去『目录』里添加一个"
-                android:textColor="#8c939f"
+                android:text=""
+                android:textColor="@color/text_secondary"
                 android:textSize="12sp"
                 android:visibility="gone" />
         </LinearLayout>
@@ -93,7 +93,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="60dp"
-        android:background="#ffffff"
+        android:background="@color/surface"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="12dp"
@@ -106,8 +106,8 @@
             android:layout_weight="1"
             android:background="@drawable/bg_mini_primary"
             android:gravity="center"
-            android:text="打开"
-            android:textColor="#ffffff"
+            android:text=""
+            android:textColor="@color/on_primary_text"
             android:textSize="14sp" />
 
         <TextView
@@ -118,8 +118,8 @@
             android:layout_weight="1"
             android:background="@drawable/bg_mini"
             android:gravity="center"
-            android:text="刷新"
-            android:textColor="#20242b"
+            android:text=""
+            android:textColor="@color/text_primary"
             android:textSize="14sp" />
 
         <TextView
@@ -130,8 +130,8 @@
             android:layout_weight="1"
             android:background="@drawable/bg_danger"
             android:gravity="center"
-            android:text="删除"
-            android:textColor="#df6876"
+            android:text=""
+            android:textColor="@color/danger_text"
             android:textSize="14sp" />
     </LinearLayout>
 </LinearLayout>

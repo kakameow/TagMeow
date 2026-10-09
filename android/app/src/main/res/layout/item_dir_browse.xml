@@ -35,7 +35,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="middle"
             android:maxLines="1"
-            android:textColor="#20242b"
+            android:textColor="@color/text_primary"
             android:textSize="13sp"
             android:textStyle="bold" />
 
@@ -46,7 +46,7 @@
             android:layout_marginTop="2dp"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#8c939f"
+            android:textColor="@color/text_secondary"
             android:textSize="10sp" />
     </LinearLayout>
 
@@ -56,6 +56,6 @@
         android:layout_height="wrap_content"
         android:layout_marginStart="6dp"
         android:text="›"
-        android:textColor="#8c939f"
+        android:textColor="@color/text_secondary"
         android:textSize="16sp" />
 </LinearLayout>

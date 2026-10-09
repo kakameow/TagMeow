@@ -4,13 +4,13 @@
     android:id="@+id/syncDownloadOverlay"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#f5f6f8"
+    android:background="@color/page_bg"
     android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="52dp"
-        android:background="#ffffff"
+        android:background="@color/surface"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="8dp"
@@ -24,8 +24,8 @@
             android:gravity="center"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
-            android:text="返回"
-            android:textColor="#59616e"
+            android:text=""
+            android:textColor="@color/text_medium"
             android:textSize="13sp" />
 
         <Space
@@ -37,8 +37,8 @@
             android:id="@+id/tvSyncDownloadTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="从其他设备下载"
-            android:textColor="#20242b"
+            android:text=""
+            android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -55,7 +55,7 @@
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="#e2e6ee" />
+        android:background="@color/border" />
 
     <ScrollView
         android:layout_width="match_parent"
@@ -73,8 +73,8 @@
                 android:id="@+id/tvSyncPathLabel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="保存到"
-                android:textColor="#8c939f"
+                android:text=""
+                android:textColor="@color/text_secondary"
                 android:textSize="11sp" />
 
             <TextView
@@ -82,15 +82,15 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:background="#ffffff"
+                android:background="@color/surface"
                 android:ellipsize="middle"
                 android:maxLines="2"
                 android:paddingStart="10dp"
                 android:paddingTop="9dp"
                 android:paddingEnd="10dp"
                 android:paddingBottom="9dp"
-                android:text="/storage/emulated/0/TagMeow/download"
-                android:textColor="#20242b"
+                android:text=""
+                android:textColor="@color/text_primary"
                 android:textSize="12sp" />
 
             <LinearLayout
@@ -106,8 +106,8 @@
                     android:layout_weight="1"
                     android:background="@drawable/bg_mini"
                     android:gravity="center"
-                    android:text="更改保存目录"
-                    android:textColor="#20242b"
+                    android:text=""
+                    android:textColor="@color/text_primary"
                     android:textSize="13sp" />
 
                 <TextView
@@ -118,8 +118,8 @@
                     android:layout_weight="1"
                     android:background="@drawable/bg_mini_primary"
                     android:gravity="center"
-                    android:text="加入管理目录"
-                    android:textColor="#ffffff"
+                    android:text=""
+                    android:textColor="@color/on_primary_text"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -128,8 +128,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="局域网设备"
-                android:textColor="#8c939f"
+                android:text=""
+                android:textColor="@color/text_secondary"
                 android:textSize="11sp" />
 
             <LinearLayout
@@ -137,7 +137,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:background="#ffffff"
+                android:background="@color/surface"
                 android:orientation="vertical" />
 
             <TextView
@@ -146,8 +146,8 @@
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:padding="22dp"
-                android:text="还没有扫描到设备"
-                android:textColor="#8c939f"
+                android:text=""
+                android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
             <TextView
@@ -155,8 +155,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="下载记录：已经成功下载过的文件会被跳过；清除记录后下次会全部重下（不会删除已下载的文件）"
-                android:textColor="#8c939f"
+                android:text=""
+                android:textColor="@color/text_secondary"
                 android:textSize="11sp" />
         </LinearLayout>
     </ScrollView>
@@ -165,13 +165,13 @@
         android:id="@+id/tvSyncClientProgress"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#ffffff"
+        android:background="@color/surface"
         android:gravity="center"
         android:maxLines="1"
         android:paddingStart="12dp"
         android:paddingTop="6dp"
         android:paddingEnd="12dp"
-        android:textColor="#59616e"
+        android:textColor="@color/text_medium"
         android:textSize="11sp"
         android:visibility="gone" />
 
@@ -179,7 +179,7 @@
         android:id="@+id/tvSyncClientStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#ffffff"
+        android:background="@color/surface"
         android:ellipsize="middle"
         android:gravity="center"
         android:maxLines="2"
@@ -187,13 +187,13 @@
         android:paddingTop="8dp"
         android:paddingEnd="12dp"
         android:text=""
-        android:textColor="#8c939f"
+        android:textColor="@color/text_secondary"
         android:textSize="11sp" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="60dp"
-        android:background="#ffffff"
+        android:background="@color/surface"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="10dp"
@@ -206,8 +206,8 @@
             android:layout_weight="1"
             android:background="@drawable/bg_mini_primary"
             android:gravity="center"
-            android:text="搜索设备"
-            android:textColor="#ffffff"
+            android:text=""
+            android:textColor="@color/on_primary_text"
             android:textSize="12sp" />
 
         <TextView
@@ -218,8 +218,8 @@
             android:layout_weight="1"
             android:background="@drawable/bg_mini"
             android:gravity="center"
-            android:text="下载选中"
-            android:textColor="#20242b"
+            android:text=""
+            android:textColor="@color/text_primary"
             android:textSize="12sp" />
 
         <TextView
@@ -230,8 +230,8 @@
             android:layout_weight="1"
             android:background="@drawable/bg_mini"
             android:gravity="center"
-            android:text="清除记录"
-            android:textColor="#20242b"
+            android:text=""
+            android:textColor="@color/text_primary"
             android:textSize="12sp" />
 
         <TextView
@@ -242,8 +242,8 @@
             android:layout_weight="1"
             android:background="@drawable/bg_danger"
             android:gravity="center"
-            android:text="断开"
-            android:textColor="#df6876"
+            android:text=""
+            android:textColor="@color/danger_text"
             android:textSize="12sp" />
     </LinearLayout>
 </LinearLayout>
