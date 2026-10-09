@@ -433,7 +433,11 @@ public final class TagServe {
         }
 
         boolean same_file = TagFileManager.removeFilenameTagsPath(written)
-                .equals(TagFileManager.removeFilenameTagsPath(requested));
+                .equals(TagFileManager.removeFilenameTagsPath(requested))
+                // 整名作用域的文件（{[test]}.mp4）没有能用的身份键
+                // 去掉作用域之后剩下的是 .mp4 这种没意义的名字 材料化补时间戳改名之后新旧名字也对不上
+                // 这种情况只能认「最后一次写入」：它就发生在这之前 而且是把原路径改没的那次
+                || TagFileManager.isWholeNameTagBlock(requested.getName());
 
         return same_file ? written : requested;
     }
@@ -653,30 +657,51 @@ public final class TagServe {
     // 刷新指定 root
     public boolean refreshRoot(String root_id) {
 
+        Objects.requireNonNull(root_id);
+
         synchronized (lock) {
-            DirectoryConfigManager.Directory directory = directory_manager.getDirectory(root_id);
+            if (directory_manager.getDirectory(root_id) == null) {
+                error_string = "[warning] Root not found: " + root_id;
+                return false;
+            }
+        }
+
+        return refreshDirectory(new FileRef(root_id, ""));
+    }
+
+    // 单目录刷新：只重扫这一个目录(含子目录) 不动其它记录 也不改受管理目录列表
+    // 先删这个目录的旧记录再按磁盘重扫插入 -> 磁盘上删掉/改名的文件不会残留在库里
+    public boolean refreshDirectory(FileRef dir) {
+
+        Objects.requireNonNull(dir);
+
+        synchronized (lock) {
+            DirectoryConfigManager.Directory directory = directory_manager.getDirectory(dir.getRootId());
 
             if (directory == null) {
-                error_string = "[warning] Root not found: " + root_id;
+                error_string = "[warning] Root not found: " + dir.getRootId();
                 return false;
             }
 
             storage.addRoot(directory.getId(), locatorOf(directory.getUri()));
 
-            FileRef root = new FileRef(directory.getId(), "");
+            if (!storage.exists(dir) || !storage.isDirectory(dir)) {
+                error_string = "[warning] Directory does not exist or not a directory: " + dir;
+                return false;
+            }
 
-            // 单个 root 的刷新：先把它自己的记录删掉 再按磁盘重扫写入
-            if (!file_database.removeDirectory(root)) {
+            if (!file_database.removeDirectory(dir)) {
                 error_string = "Failed to remove directory from database: " + file_database.getLastError();
                 return false;
             }
 
-            if (!file_database.insertDirectory(root, extractor())) {
-                error_string = "Failed to update database for root: " + file_database.getLastError();
+            if (!file_database.insertDirectory(dir, extractor())) {
+                error_string = "Failed to update database for directory: " + file_database.getLastError();
                 return false;
             }
 
-            error_string = "";
+            // insertDirectory 的 "[tip] N entry(ies) were skipped" 之类的提示也要带出去
+            error_string = file_database.getLastError();
             return true;
         }
     }

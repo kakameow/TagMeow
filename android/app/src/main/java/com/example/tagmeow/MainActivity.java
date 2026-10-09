@@ -27,8 +27,12 @@ import android.util.Log;
 import android.util.LruCache;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewParent;
 import android.view.ViewGroup;
 import android.webkit.MimeTypeMap;
+import android.media.MediaMetadataRetriever;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
@@ -46,6 +50,9 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatDelegate;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.Insets;
@@ -74,6 +81,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 // TagMeow 主界面
 
@@ -83,7 +91,7 @@ import java.util.concurrent.Executors;
 // - 目录：受管理目录的增删与索引刷新
 // - 标签：标签库（组 -> 标签 带颜色）
 // - 设置：设置
-// - 同步：占位
+// - 同步：局域网同步
 
 // 线程约定：
 // - 所有模块调用都在 worker 单线程上执行
@@ -98,6 +106,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String PROJECT_URL = "https://github.com/kakameow/TagMeow";
 
     private static final String PREFS_NAME = "tagmeow";
+    private static final String KEY_NIGHT_THEME = "night_theme";
     private static final String KEY_DEFAULT_MODE = "default_mode";
     private static final String KEY_LANGUAGE = "language";
 
@@ -133,11 +142,16 @@ public class MainActivity extends AppCompatActivity {
     // 所以现在只拿「手里真有授权、且现在读得到」的目录当种子，
     // 一个都没有时不传初始位置，让系统开它自己的默认视图
 
-    // 内容展示的颜色固定：列表、卡片、文字、边框都不跟主题走
-    private static final int COLOR_TEXT = 0xFF20242B;
-    private static final int COLOR_MUTED = 0xFF8C939F;
-    private static final int COLOR_BORDER = 0xFFE0E3E7;
-    private static final int COLOR_ACTIVE_BG = 0xFFF0F2F5;
+    private static int COLOR_TEXT;
+    private static int COLOR_MUTED;
+    private static int COLOR_BORDER;
+    private static int COLOR_ACTIVE_BG;
+    private static int COLOR_MEDIUM;
+    private static int COLOR_MEDIUM_2;
+    private static int COLOR_BADGE_BG;
+    private static int COLOR_BADGE_BORDER;
+    private static int COLOR_SURFACE;
+    private static int COLOR_DIVIDER;
 
     // 类型没设颜色时的兜底色（标签自己的颜色也不属于界面主题）
     private static final int COLOR_PINK = 0xFFFFC0CB;
@@ -160,7 +174,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int THUMB_SIZE = 96;
 
     // 一次列表最多取多少张缩略图（超出的显示类型图标 防止大文件夹把内存吃光）
-    private static final int THUMB_LIMIT = 300;
+    private static final int THUMB_LIMIT = 1024;
 
     // 缩略图缓存上限（KB）：reload() 会重画整个列表 缓存住就不用反复解码
     // 缩略图缓存：解码后统一缩到 THUMB_SIZE（96×96×4B ≈ 36KB）
@@ -272,6 +286,8 @@ public class MainActivity extends AppCompatActivity {
     // 缩略图代次：renderFiles 每跑一次 +1 上一轮没跑完的任务自动作废
     private int thumb_generation = 0;
 
+    // （缩略图改成「行被绑定时才取」见 bindFileRow：RecyclerView 只会绑定可视行）
+
     // 正在解码的缩略图 key（主线程排队 工作线程收尾 所以用并发集合）
     private final Set<String> thumb_inflight = ConcurrentHashMap.newKeySet();
 
@@ -336,7 +352,8 @@ public class MainActivity extends AppCompatActivity {
 
     private TextView btn_up;
 
-    private LinearLayout files_list;
+    // 文件列表：RecyclerView 只绑定可视行
+    private RecyclerView files_list;
 
     private LinearLayout dir_list;
 
@@ -344,6 +361,23 @@ public class MainActivity extends AppCompatActivity {
     private View dir_manage_overlay;
 
     private LinearLayout dir_manage_list;
+
+    // 搜索目录多选容器（在搜索标签子界面里 默认折叠）
+    private LinearLayout search_dir_list;
+
+    private LinearLayout search_dir_body;
+
+    private TextView tv_search_dir_hint;
+
+    private TextView tv_search_dir_empty;
+
+    private TextView tv_search_dir_summary;
+
+    private TextView tv_search_dir_toggle;
+
+    private TextView btn_search_dir_all;
+
+    private boolean search_dir_expanded = false;
 
     private TextView tv_dir_manage_empty;
 
@@ -357,7 +391,21 @@ public class MainActivity extends AppCompatActivity {
 
     private LinearLayout dir_browser_crumb_row;
 
-    private LinearLayout dir_browser_list;
+    // 目录浏览列表：RecyclerView 只渲染可视行
+    private RecyclerView dir_browser_list;
+
+    private final List<File> dir_browse_items = new ArrayList<>();
+
+    private DirBrowseAdapter dir_browse_adapter;
+
+    private final List<FileDatabase.FileInfo> file_items = new ArrayList<>();
+
+    private FileListAdapter file_adapter;
+
+    // 浏览页自己的滚动位置（首个可见行 + 行内偏移
+    private int browse_scroll_position = 0;
+
+    private int browse_scroll_offset = 0;
 
     private View dir_browser_empty;
 
@@ -478,6 +526,21 @@ public class MainActivity extends AppCompatActivity {
 
     private String search_summary = "";
 
+    // 每个页签各自的滚动位置
+    private final int[] tab_scroll = new int[TAB_LABEL_KEYS.length];
+    private int active_tab = 0;
+    // 换目录 / 搜索之后要回到顶部 不还原旧位置
+    private boolean scroll_to_top = false;
+    private ScrollView content_scroll;
+
+    // 标签库搜索框里的文字 搜索子界面 / 文件标签子界面共用
+    private String tag_query = "";
+    private EditText edit_tag_search;
+
+    // 搜索目录范围：这里存的是「被取消勾选的目录」空集合 = 默认全选
+    // 用「取消集合」而不是「选中集合」 以后新加的目录自动就在搜索范围里
+    private final Set<String> search_dirs_off = new LinkedHashSet<>();
+
     private final List<FileDatabase.FileInfo> current_files = new ArrayList<>();
 
     private final List<DirectoryConfigManager.Directory> current_roots = new ArrayList<>();
@@ -491,8 +554,15 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle saved_instance_state) {
         super.onCreate(saved_instance_state);
+
+        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        applyStoredTheme();
+
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
+
+        // 配色从资源表读：values/colors.xml 或 values-night/colors.xml
+        loadPalette();
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
             Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
@@ -568,7 +638,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
 
-        worker.execute(() -> {
+        submit(worker, () -> {
             if (serve != null) {
                 serve.getFileDatabase().close();
             }
@@ -589,6 +659,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void bindViews() {
+        content_scroll = findViewById(R.id.contentScroll);
         tv_stat_files = findViewById(R.id.tvStatFiles);
         tv_stat_tags = findViewById(R.id.tvStatTags);
         tv_files_title = findViewById(R.id.tvFilesTitle);
@@ -596,6 +667,11 @@ public class MainActivity extends AppCompatActivity {
         tv_files_empty = findViewById(R.id.tvFilesEmpty);
         btn_up = findViewById(R.id.btnUp);
         files_list = findViewById(R.id.filesList);
+        files_list.setLayoutManager(new LinearLayoutManager(this));
+        // 关掉动画
+        files_list.setItemAnimator(null);
+        file_adapter = new FileListAdapter();
+        files_list.setAdapter(file_adapter);
         dir_list = findViewById(R.id.dirList);
         tv_dir_empty = findViewById(R.id.tvDirEmpty);
         type_list = findViewById(R.id.typeList);
@@ -622,6 +698,7 @@ public class MainActivity extends AppCompatActivity {
         edit_exclude.setOnClickListener(v -> showSearchTagOverlay(1));
         edit_only.setOnClickListener(v -> showSearchTagOverlay(2));
 
+        // 搜索目录多选容器在搜索标签子界面里 视图到那边去取
         renderSearchChips();
         applyStaticTexts();
 
@@ -635,11 +712,29 @@ public class MainActivity extends AppCompatActivity {
 
         findViewById(R.id.btnSearch).setOnClickListener(v -> doSearch());
         findViewById(R.id.btnClearSearch).setOnClickListener(v -> clearSearch());
-        findViewById(R.id.btnRefresh).setOnClickListener(v -> runAction(Lang.get("dir.action_refresh"), () -> {
-            boolean ok = serve.refreshAll();
-            toast(ok ? Lang.f("dir.refresh_done_count", serve.getFileDatabase().countFiles())
-                    : Lang.get("common.refresh_failed") + serve.getLastError());
-        }));
+        // 单目录刷新：在某个目录里就刷这个目录 在根列表上就把所有目录排队依次刷
+        // 「全部目录一把刷」只在设置里的「刷新索引」（那边走 refreshAll）
+        findViewById(R.id.btnRefresh).setOnClickListener(v -> {
+            final FileRef only_dir = current_directory;
+            final List<FileRef> all_dirs = rootRefsOf(current_roots);
+
+            runAction(Lang.get("dir.action_refresh"), () -> {
+                int done = only_dir != null
+                        ? (serve.refreshDirectory(only_dir) ? 1 : 0)
+                        : refreshOneByOne(all_dirs);
+                int total = only_dir != null ? 1 : all_dirs.size();
+                long refreshed = only_dir != null
+                        ? serve.getFileDatabase().countFiles(only_dir)
+                        : serve.getFileDatabase().countFiles(all_dirs);
+
+                toast(done == total
+                        ? (total > 1
+                                ? Lang.f("dir.refresh_done_dirs", done, total, refreshed)
+                                : Lang.f("dir.refresh_done_one", refreshed))
+                        : Lang.get("common.refresh_failed") + done + "/" + total
+                                + " " + serve.getLastError());
+            });
+        });
 
         btn_up.setOnClickListener(v -> openParentDirectory());
 
@@ -686,6 +781,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectTab(int index) {
+        // 离开当前页签之前记录滚动位置
+        if (active_tab != index) {
+            if (active_tab == 0) {
+                saveBrowseScroll();
+            } else if (content_scroll != null) {
+                tab_scroll[active_tab] = content_scroll.getScrollY();
+            }
+        }
+
+        active_tab = index;
+
         for (int i = 0; i < tab_views.length; i++) {
             tab_views[i].setVisibility(i == index ? View.VISIBLE : View.GONE);
 
@@ -694,19 +800,67 @@ public class MainActivity extends AppCompatActivity {
             background.setColor(i == index ? COLOR_ACTIVE_BG : Color.TRANSPARENT);
             nav_items[i].setBackground(background);
 
-            int color = i == index ? COLOR_TEXT : (i == 2 ? COLOR_ACCENT : 0xFF626A75);
+            int color = i == index ? COLOR_TEXT : (i == 2 ? COLOR_ACCENT : COLOR_MEDIUM_2);
             setIconTint(nav_icons[i], color);
             nav_labels[i].setTextColor(color);
         }
 
+        // 浏览页在根布局里和 contentScroll 平级 而且声明在它前面
+        if (content_scroll != null) {
+            content_scroll.setVisibility(index == 0 ? View.GONE : View.VISIBLE);
+        }
+
         reload();
 
-        // 同步页的状态行（是否正在分享 / 保存目录在哪）
+        // 同步页的状态行
         renderSyncTabStatus();
+
+        // 切回来时还原这一页的滚动位置
+        restoreTabScroll(index);
+    }
+
+    // 还原某个页签的滚动位置
+    private void restoreTabScroll(final int index) {
+        if (content_scroll == null || index < 0 || index >= tab_scroll.length) {
+            return;
+        }
+
+        // 浏览页滚的是自己的 RecyclerView（位置 + 行内偏移）其余页签滚共用 ScrollView
+        if (index == 0) {
+            if (files_list != null && files_list.getLayoutManager() instanceof LinearLayoutManager) {
+                ((LinearLayoutManager) files_list.getLayoutManager())
+                        .scrollToPositionWithOffset(browse_scroll_position, browse_scroll_offset);
+            }
+
+            return;
+        }
+
+        final int target = tab_scroll[index];
+
+        content_scroll.post(() -> content_scroll.scrollTo(0, target));
+    }
+
+    // 记下浏览页文件列表滚到哪了（首个可见行 + 行内偏移）
+    private void saveBrowseScroll() {
+        if (files_list == null) {
+            return;
+        }
+
+        View first = files_list.getChildAt(0);
+
+        if (first == null) {
+            browse_scroll_position = 0;
+            browse_scroll_offset = 0;
+
+            return;
+        }
+
+        browse_scroll_position = files_list.getChildAdapterPosition(first);
+        browse_scroll_offset = first.getTop() - files_list.getPaddingTop();
     }
 
     private void initEngine() {
-        worker.execute(() -> {
+        submit(worker, () -> {
             try {
                 // logcat 诊断：本应用当前持有的持久化授权
                 // 授权被系统/厂商回收时这里会少掉对应的目录
@@ -762,6 +916,8 @@ public class MainActivity extends AppCompatActivity {
         options.exclude.addAll(exclude_tags);
         options.only.addAll(only_tags);
 
+        options.dirs.addAll(searchDirRefs());
+
         return options;
     }
 
@@ -769,7 +925,7 @@ public class MainActivity extends AppCompatActivity {
     private void reload() {
         final FileDatabase.SearchOptions search_options = currentSearchOptions();
 
-        worker.execute(() -> {
+        submit(worker, () -> {
             TagServe current = serve;
 
             if (current == null) {
@@ -833,6 +989,8 @@ public class MainActivity extends AppCompatActivity {
                 tv_stat_tags.setText(Lang.get("stat.tags_prefix") + tagCount);
                 status_text = info;
                 renderSettings();
+                // 目录列表可能改变搜索目录容器跟着刷新
+                renderSearchDirList();
 
                 collectLogMessages();
 
@@ -847,12 +1005,26 @@ public class MainActivity extends AppCompatActivity {
                 String stamp = browseStampOf(search_mode, target, access, types, colors, file_count,
                         search_mode ? current_files : entries);
 
-                if (!stamp.equals(browse_stamp) || files_list.getChildCount() == 0) {
+                if (!stamp.equals(browse_stamp) || file_adapter == null || file_adapter.getItemCount() == 0) {
                     browse_stamp = stamp;
+
+                    // 重画会把滚动位置顶回开头 画完再还原
+                    if (scroll_to_top) {
+                        tab_scroll[active_tab] = 0;
+                        browse_scroll_position = 0;
+                        browse_scroll_offset = 0;
+
+                        if (active_tab == 0 && files_list != null) {
+                            files_list.scrollToPosition(0);
+                        }
+
+                        scroll_to_top = false;
+                    }
 
                     renderDirectories();
                     renderTagLibrary();
                     renderFiles(search_mode ? current_files : entries);
+                    restoreTabScroll(active_tab);
                 }
 
                 // 编辑器子界面开着的时候 也要跟着最新标签库刷新
@@ -937,69 +1109,108 @@ public class MainActivity extends AppCompatActivity {
 
         tv_files_empty.setVisibility(empty ? View.VISIBLE : View.GONE);
 
-        int thumbBudget = THUMB_LIMIT;
+        // 交给 RecyclerView：只绑定可视行
+        file_items.clear();
+        file_items.addAll(files);
 
-        for (FileDatabase.FileInfo info : files) {
-            View row = getLayoutInflater().inflate(R.layout.item_file, files_list, false);
-
-            ImageView icon = row.findViewById(R.id.fileIcon);
-            TextView name = row.findViewById(R.id.fileName);
-            TextView path = row.findViewById(R.id.filePath);
-            LinearLayout tags = row.findViewById(R.id.fileTags);
-            TextView moreLabel = row.findViewById(R.id.fileMoreLabel);
-
-            moreLabel.setText(Lang.get("tag.row_label"));
-
-            bindFileIcon(icon, info, dp(7));
-
-            if (wantsThumbnail(info, thumbBudget)) {
-                thumbBudget--;
-                loadThumbnail(icon, info, generation);
-            }
-
-            name.setText(info.file_ref.isRoot() ? "(root)" : info.file_ref.getName());
-
-            String parent = info.file_ref.getParentPath();
-            path.setText(info.file_ref.getRootId() + (parent.isEmpty() ? "" : " / " + parent) + (info.is_directory ? Lang.get("browse.dir_suffix") : "  ·  " + formatSize(info.file_size)));
-
-            List<String> infoTags = info.tags == null ? new ArrayList<>() : info.tags;
-
-            if (!infoTags.isEmpty()) {
-                // 标签自适应换行：一行放不下就换到下一行 全部显示 不再用 ＋N 折叠
-                FlowLayout tag_flow = new FlowLayout(this, dp(6), dp(4));
-                tag_flow.setLayoutParams(new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-                tags.addView(tag_flow);
-
-                for (String tag : infoTags) {
-                    tag_flow.addView(buildTagChip(tag, colorOfTag(tag)));
-                }
-            }
-
-            row.setOnClickListener(v -> onFileClicked(info));
-
-            // 右侧 2/10 区域：打开这个文件的标签修改界面
-            row.findViewById(R.id.fileMore).setOnClickListener(v -> showFileTagOverlay(info));
-
-            files_list.addView(row);
+        if (file_adapter != null) {
+            file_adapter.submit(file_items);
         }
+    }
+
+    // 文件列表适配器
+    private final class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.Holder> {
+
+        private final List<FileDatabase.FileInfo> items = new ArrayList<>();
+
+        void submit(List<FileDatabase.FileInfo> files) {
+            items.clear();
+            items.addAll(files);
+            notifyDataSetChanged();
+        }
+
+        @Override
+        public Holder onCreateViewHolder(ViewGroup parent, int view_type) {
+            return new Holder(getLayoutInflater().inflate(R.layout.item_file, parent, false));
+        }
+
+        @Override
+        public void onBindViewHolder(Holder holder, int position) {
+            bindFileRow(holder.itemView, items.get(position));
+        }
+
+        @Override
+        public int getItemCount() {
+            return items.size();
+        }
+
+        final class Holder extends RecyclerView.ViewHolder {
+            Holder(View row) {
+                super(row);
+            }
+        }
+    }
+
+    // 绑定一行文件
+    // 行会被回收复用：标签容器每次都要清空重建 图标也要先恢复成类型图标再考虑缩略图
+    private void bindFileRow(View row, FileDatabase.FileInfo info) {
+        ImageView icon = row.findViewById(R.id.fileIcon);
+        TextView name = row.findViewById(R.id.fileName);
+        TextView path = row.findViewById(R.id.filePath);
+        LinearLayout tags = row.findViewById(R.id.fileTags);
+        TextView moreLabel = row.findViewById(R.id.fileMoreLabel);
+
+        moreLabel.setText(Lang.get("tag.row_label"));
+
+        bindFileIcon(icon, info, dp(7));
+
+        // 缩略图：只有可视行会被绑定 缓存命中就直接显示
+        if (wantsThumbnail(info)) {
+            loadThumbnail(icon, info, thumb_generation);
+        }
+
+        name.setText(info.file_ref.isRoot() ? "(root)" : info.file_ref.getName());
+
+        String parent = info.file_ref.getParentPath();
+        path.setText(info.file_ref.getRootId() + (parent.isEmpty() ? "" : " / " + parent) + (info.is_directory ? Lang.get("browse.dir_suffix") : "  ·  " + formatSize(info.file_size)));
+
+        tags.removeAllViews();
+
+        List<String> infoTags = info.tags == null ? new ArrayList<>() : info.tags;
+
+        if (!infoTags.isEmpty()) {
+            // 标签自适应换行：一行放不下就换到下一行 全部显示 不再用 ＋N 折叠
+            FlowLayout tag_flow = new FlowLayout(this, dp(6), dp(4));
+            tag_flow.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            tags.addView(tag_flow);
+
+            for (String tag : infoTags) {
+                tag_flow.addView(buildTagChip(tag, colorOfTag(tag)));
+            }
+        }
+
+        row.setOnClickListener(v -> onFileClicked(info));
+
+        // 右侧 2/10 区域：打开这个文件的标签修改界面
+        row.findViewById(R.id.fileMore).setOnClickListener(v -> showFileTagOverlay(info));
     }
 
     // 先按类型画矢量图 图片 / 视频再由调用方决定要不要去取缩略图
     private void bindFileIcon(ImageView icon, FileDatabase.FileInfo info, int padding) {
         icon.setImageResource(iconResOf(info));
-        icon.setImageTintList(ColorStateList.valueOf(0xFF59616E));
+        icon.setImageTintList(ColorStateList.valueOf(COLOR_MEDIUM));
         icon.setPadding(padding, padding, padding, padding);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         icon.setBackground(rounded(COLOR_ACTIVE_BG, 9, 0, 0));
     }
 
-    // 能取缩略图、而且还在这次列表的预算之内
-    private boolean wantsThumbnail(FileDatabase.FileInfo info, int budget) {
-        return budget > 0 && !info.is_directory && FileTypes.hasThumbnail(info.file_ref.getName());
+    // 这个条目能不能取缩略图
+    private boolean wantsThumbnail(FileDatabase.FileInfo info) {
+        return !info.is_directory && FileTypes.hasThumbnail(info.file_ref.getName());
     }
 
-    // 缩略图在后台取：失败（格式不支持 / 太大 / 没权限）就保持矢量图不动
+    // 缩略图在后台取：失败就保持矢量图
     private void loadThumbnail(final ImageView icon, final FileDatabase.FileInfo info, final int generation) {
         final String key = info.file_ref.getRootId() + ":" + info.file_ref.getRelativePath()
                 + ":" + info.file_mtime;
@@ -1011,15 +1222,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // 同一张图这轮已经在解了：不重复排队（一张图可能在列表里出现多次）
+        // 不重复排队
         if (!thumb_inflight.add(key)) {
             return;
         }
 
-        thumb_worker.execute(() -> {
+        submit(thumb_worker, () -> {
             try {
-                // 又重画过一轮了：这个任务作废 直接丢掉 别占着线程池
-                // 少了这一步 来回切页面时上一轮的任务会一直堆在队列里 越切越慢
+                // 又重画过一轮了：这个任务作废 直接丢掉 不占着线程池
                 if (generation != thumb_generation) {
                     return;
                 }
@@ -1036,7 +1246,7 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                Bitmap bitmap = loadThumbnailBitmap(locator);
+                Bitmap bitmap = loadThumbnailBitmap(locator, info.file_ref.getName());
 
                 if (bitmap == null) {
                     return;
@@ -1072,10 +1282,40 @@ public class MainActivity extends AppCompatActivity {
         return scaled;
     }
 
-    // 缩略图只有一个来源了：绝对路径（所有文件访问模式）
-    // 原来 SAF 的 ContentResolver.loadThumbnail 分支跟着系统选择器一起砍了
-    private Bitmap loadThumbnailBitmap(String locator) {
+    // 缩略图来源：绝对路径（所有文件访问模式）
+    private Bitmap loadThumbnailBitmap(String locator, String file_name) {
+        // 视频 BitmapFactory 解不了：用 MediaMetadataRetriever 抓一帧
+        if (FileTypes.isVideo(file_name)) {
+            return decodeVideoFrame(locator);
+        }
+
         return decodeScaledThumbnail(locator);
+    }
+
+    // 视频缩略图：抓第一帧（同步帧）抓不到就返回 null 保持类型图标
+    private static Bitmap decodeVideoFrame(String path) {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+
+        try {
+            retriever.setDataSource(path);
+
+            Bitmap frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+
+            if (frame == null) {
+                // 有的编码第一帧取不到：往后挪 1 秒再试一次
+                frame = retriever.getFrameAtTime(1000000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            }
+
+            return frame == null ? null : scaleToThumb(frame);
+        } catch (RuntimeException error) {
+            return null;
+        } finally {
+            try {
+                retriever.release();
+            } catch (Exception ignored) {
+                // release 失败没什么可做的（新 SDK 上它会抛 IOException）
+            }
+        }
     }
 
     // 自己缩放解码（开两次：先量尺寸、再按 inSampleSize 解）
@@ -1158,6 +1398,7 @@ public class MainActivity extends AppCompatActivity {
         if (info.is_directory) {
             current_directory = info.file_ref;
             search_mode = false;
+            scroll_to_top = true;
             reload();
             return;
         }
@@ -1173,6 +1414,7 @@ public class MainActivity extends AppCompatActivity {
 
         current_directory = current_directory.getParent();
         search_mode = false;
+        scroll_to_top = true;
         reload();
     }
 
@@ -1268,7 +1510,7 @@ public class MainActivity extends AppCompatActivity {
         chip.setOrientation(LinearLayout.HORIZONTAL);
         chip.setGravity(Gravity.CENTER_VERTICAL);
         chip.setPadding(dp(6), 0, dp(6), 0);
-        chip.setBackground(rounded(Color.WHITE, 7, COLOR_BORDER, 1));
+        chip.setBackground(rounded(COLOR_SURFACE, 7, COLOR_BORDER, 1));
 
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, dp(24));
@@ -1387,6 +1629,20 @@ public class MainActivity extends AppCompatActivity {
         return drawable;
     }
 
+    // 统一走这里提交后台任务：Activity 重建（切主题 / 转屏）会关掉这几个池
+    // 旧界面迟到的回调再往里丢任务会抛 RejectedExecutionException 直接把 App 崩掉
+    private static void submit(ExecutorService pool, Runnable task) {
+        if (pool == null || pool.isShutdown()) {
+            return;
+        }
+
+        try {
+            pool.execute(task);
+        } catch (RejectedExecutionException error) {
+            // 刚好在这一刻被关掉：这个任务丢掉就行
+        }
+    }
+
     private int dp(int value) {
         return Math.round(getResources().getDisplayMetrics().density * value);
     }
@@ -1411,12 +1667,16 @@ public class MainActivity extends AppCompatActivity {
         final List<String> include = new ArrayList<>(include_tags);
         final List<String> exclude = new ArrayList<>(exclude_tags);
         final List<String> only = new ArrayList<>(only_tags);
+        final List<FileRef> dirs = searchDirRefs();
+        final String dir_note = searchDirSummary();
 
         runAction(Lang.get("browse.search"), () -> {
             FileDatabase.SearchOptions options = new FileDatabase.SearchOptions();
             options.include.addAll(include);
             options.exclude.addAll(exclude);
             options.only.addAll(only);
+
+            options.dirs.addAll(dirs);
 
             final List<FileDatabase.FileInfo> result = new ArrayList<>(serve.searchByTags(options));
 
@@ -1430,12 +1690,16 @@ public class MainActivity extends AppCompatActivity {
             if (!only.isEmpty()) {
                 summary.append(summary.length() > 0 ? "　" : "").append(Lang.get("browse.summary_only")).append(only);
             }
+            if (!dir_note.isEmpty()) {
+                summary.append(summary.length() > 0 ? "　" : "").append(dir_note);
+            }
 
             final String label = summary.length() == 0 ? Lang.get("browse.summary_none") : summary.toString();
 
             runOnUiThread(() -> {
                 search_mode = true;
                 search_summary = label;
+                scroll_to_top = true;
                 current_files.clear();
                 current_files.addAll(result);
 
@@ -1449,10 +1713,13 @@ public class MainActivity extends AppCompatActivity {
         include_tags.clear();
         exclude_tags.clear();
         only_tags.clear();
+        // 目录范围也跟着回到默认全选
+        search_dirs_off.clear();
         renderSearchChips();
 
         search_mode = false;
         search_summary = "";
+        scroll_to_top = true;
         reload();
     }
 
@@ -1469,6 +1736,145 @@ public class MainActivity extends AppCompatActivity {
         edit_only.setText(only_tags.isEmpty()
                 ? Lang.get("browse.only_placeholder")
                 : Lang.get("browse.only_prefix") + String.join("、", only_tags));
+
+        renderSearchDirList();
+    }
+
+    // 搜索目录多选容器：默认全选 取消勾选 = 那个目录不参与搜索
+    private void renderSearchDirList() {
+        if (search_dir_list == null) {
+            return;
+        }
+
+        search_dir_list.removeAllViews();
+
+        int total = current_roots.size();
+        boolean has_root = total > 0;
+        int picked = 0;
+
+        for (DirectoryConfigManager.Directory directory : current_roots) {
+            if (!search_dirs_off.contains(directory.getId())) {
+                picked++;
+            }
+        }
+
+        // 默认折叠
+        search_dir_body.setVisibility(search_dir_expanded ? View.VISIBLE : View.GONE);
+        tv_search_dir_toggle.setText(search_dir_expanded ? "▴" : "▾");
+        tv_search_dir_summary.setText(has_root ? picked + "/" + total : "");
+
+        tv_search_dir_empty.setVisibility(has_root ? View.GONE : View.VISIBLE);
+        btn_search_dir_all.setVisibility(has_root ? View.VISIBLE : View.GONE);
+
+        tv_search_dir_hint.setText(allSearchDirsOff()
+                ? Lang.get("browse.dir_scope_none")
+                : Lang.get("browse.dir_scope_hint"));
+
+        for (final DirectoryConfigManager.Directory directory : current_roots) {
+            final boolean checked = !search_dirs_off.contains(directory.getId());
+            boolean granted = Boolean.TRUE.equals(root_access.get(directory.getId()));
+
+            View row = getLayoutInflater().inflate(R.layout.item_dir_manage, search_dir_list, false);
+
+            TextView select = row.findViewById(R.id.dirSelect);
+            select.setText(checked ? "✓" : "");
+            select.setBackground(rounded(
+                    checked ? COLOR_TEXT : COLOR_SURFACE,
+                    7,
+                    checked ? COLOR_TEXT : COLOR_BORDER,
+                    2));
+
+            ImageView icon = row.findViewById(R.id.dirManageIcon);
+            icon.setImageResource(R.drawable.folder);
+            icon.setImageTintList(ColorStateList.valueOf(COLOR_MEDIUM));
+            icon.setBackground(rounded(COLOR_ACTIVE_BG, 10, 0, 0));
+
+            TextView name = row.findViewById(R.id.dirManageName);
+            name.setText(directory.getDisplayName());
+
+            TextView path = row.findViewById(R.id.dirManagePath);
+            path.setText(displayPathOf(directory));
+
+            TextView badge = row.findViewById(R.id.dirBadge);
+            badge.setText(granted ? Lang.get("dir.badge_valid") : Lang.get("dir.badge_invalid"));
+            badge.setTextColor(granted ? 0xFF4E93C8 : COLOR_MUTED);
+            badge.setBackground(rounded(
+                    granted ? COLOR_BADGE_BG : COLOR_ACTIVE_BG,
+                    6,
+                    granted ? COLOR_BADGE_BORDER : COLOR_BORDER,
+                    1));
+
+            row.findViewById(R.id.dirManageMore).setVisibility(View.GONE);
+
+            row.setOnClickListener(v -> {
+                if (search_dirs_off.contains(directory.getId())) {
+                    search_dirs_off.remove(directory.getId());
+                } else {
+                    search_dirs_off.add(directory.getId());
+                }
+
+                renderSearchDirList();
+            });
+
+            search_dir_list.addView(row);
+        }
+    }
+
+    // 被取消勾选的目录已经覆盖了全部受管理目录
+    private boolean allSearchDirsOff() {
+        if (current_roots.isEmpty()) {
+            return false;
+        }
+
+        for (DirectoryConfigManager.Directory directory : current_roots) {
+            if (!search_dirs_off.contains(directory.getId())) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // 搜索范围：全选返回空（等于不限制） 否则返回勾上的那些根
+    // 一个都没勾 -> 给一个匹配不到任何行的空根键（搜索结果为 0 而不是「变成搜全部」）
+    private List<FileRef> searchDirRefs() {
+        List<FileRef> refs = new ArrayList<>();
+
+        if (current_roots.isEmpty() || search_dirs_off.isEmpty()) {
+            return refs;
+        }
+
+        if (allSearchDirsOff()) {
+            refs.add(new FileRef("", ""));
+
+            return refs;
+        }
+
+        for (DirectoryConfigManager.Directory directory : current_roots) {
+            if (!search_dirs_off.contains(directory.getId())) {
+                refs.add(new FileRef(directory.getId(), ""));
+            }
+        }
+
+        return refs;
+    }
+
+    private String searchDirSummary() {
+        int total = current_roots.size();
+
+        if (total == 0 || search_dirs_off.isEmpty()) {
+            return "";
+        }
+
+        int picked = 0;
+
+        for (DirectoryConfigManager.Directory directory : current_roots) {
+            if (!search_dirs_off.contains(directory.getId())) {
+                picked++;
+            }
+        }
+
+        return Lang.get("browse.summary_dir") + picked + "/" + total;
     }
 
     // 搜索筛选标签
@@ -1495,6 +1901,27 @@ public class MainActivity extends AppCompatActivity {
         group_exclude = search_tag_overlay.findViewById(R.id.groupExclude);
         group_only = search_tag_overlay.findViewById(R.id.groupOnly);
 
+        // 搜索目录多选容器
+        search_dir_list = search_tag_overlay.findViewById(R.id.searchDirList);
+        search_dir_body = search_tag_overlay.findViewById(R.id.searchDirBody);
+        tv_search_dir_hint = search_tag_overlay.findViewById(R.id.tvSearchDirHint);
+        tv_search_dir_empty = search_tag_overlay.findViewById(R.id.tvSearchDirEmpty);
+        tv_search_dir_summary = search_tag_overlay.findViewById(R.id.tvSearchDirSummary);
+        tv_search_dir_toggle = search_tag_overlay.findViewById(R.id.tvSearchDirToggle);
+        btn_search_dir_all = search_tag_overlay.findViewById(R.id.btnSearchDirAll);
+
+        search_dir_expanded = false;
+
+        search_tag_overlay.findViewById(R.id.searchDirHead).setOnClickListener(v -> {
+            search_dir_expanded = !search_dir_expanded;
+            renderSearchDirList();
+        });
+
+        btn_search_dir_all.setOnClickListener(v -> {
+            search_dirs_off.clear();
+            renderSearchDirList();
+        });
+
         // 点容器标题 -> 切换「当前容器」
         search_tag_overlay.findViewById(R.id.headInclude).setOnClickListener(v -> setActiveFilterGroup(0));
         search_tag_overlay.findViewById(R.id.headExclude).setOnClickListener(v -> setActiveFilterGroup(1));
@@ -1507,8 +1934,15 @@ public class MainActivity extends AppCompatActivity {
             toast(Lang.get("filter.updated"));
         });
 
+        // 标签搜索框：每次打开都清空
+        edit_tag_search = search_tag_overlay.findViewById(R.id.editTagSearch);
+        tag_query = "";
+        edit_tag_search.setText("");
+        bindTagSearch(edit_tag_search, 1);
+
         applyOverlayTexts();
         renderFilterGroups();
+        renderSearchDirList();
         renderLibraryInto(search_tag_library, 1);
     }
 
@@ -1583,16 +2017,24 @@ public class MainActivity extends AppCompatActivity {
 
         title.setText(filterGroupName(group) + Lang.get("filter.tags_suffix") + tags.size());
 
+        // 每个容器自己的边框色 没选中时恢复颜色
+        int own_border = group == 1
+                ? getColor(R.color.filter_exclude_border)
+                : (group == 2 ? getColor(R.color.filter_only_border) : getColor(R.color.filter_include_border));
+
         if (group == active_filter_group) {
             title.setTextColor(COLOR_TEXT);
             card.setStrokeWidth(dp(2));
+            // 被选中的容器：黑色描边
+            card.setStrokeColor(0xFF000000);
         } else {
-            title.setTextColor(0xFF59616E);
+            title.setTextColor(COLOR_MEDIUM);
             card.setStrokeWidth(dp(1));
+            card.setStrokeColor(own_border);
         }
 
         // 用矢量图标代替
-        setCompoundIcon(title, group == 0 ? R.drawable.funnel_plus : (group == 1 ? R.drawable.funnel_x : R.drawable.funnel), group == active_filter_group ? COLOR_TEXT : 0xFF59616E, 12);
+        setCompoundIcon(title, group == 0 ? R.drawable.funnel_plus : (group == 1 ? R.drawable.funnel_x : R.drawable.funnel), group == active_filter_group ? COLOR_TEXT : COLOR_MEDIUM, 12);
 
         container.removeAllViews();
 
@@ -1631,9 +2073,25 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        // 标签搜索框：按名字过滤（不分大小写 子串匹配）
+        final String query = tag_query == null ? "" : tag_query.trim().toLowerCase(Locale.getDefault());
+
         for (Map.Entry<String, List<String>> entry : tag_types.entrySet()) {
             final String type = entry.getKey();
-            final List<String> tags = entry.getValue();
+            final List<String> all_tags = entry.getValue();
+            final List<String> tags = new ArrayList<>();
+
+            for (String tag : all_tags) {
+                if (query.isEmpty() || tag.toLowerCase(Locale.getDefault()).contains(query)) {
+                    tags.add(tag);
+                }
+            }
+
+            // 没有匹配的标签的类型 不画类型
+            if (tags.isEmpty()) {
+                continue;
+            }
+
             final int color = colorOfType(type);
 
             View card = getLayoutInflater().inflate(R.layout.item_type, container, false);
@@ -1680,6 +2138,36 @@ public class MainActivity extends AppCompatActivity {
 
             container.addView(card);
         }
+
+        // 没有匹配的结果
+        if (container.getChildCount() == 0) {
+            container.addView(buildHint(Lang.get("filter.search_empty")));
+        }
+    }
+
+    // 标签搜索框：输入即按名字过滤标签库
+    private void bindTagSearch(EditText input, final int mode) {
+        if (input == null) {
+            return;
+        }
+
+        input.setHint(Lang.get("filter.search_hint"));
+        input.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence text, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence text, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable text) {
+                tag_query = text == null ? "" : text.toString();
+
+                renderLibraryInto(mode == 0 ? file_tag_library : search_tag_library, mode);
+            }
+        });
     }
 
     private void hideOverlay() {
@@ -1688,6 +2176,13 @@ public class MainActivity extends AppCompatActivity {
 
         file_tag_overlay = null;
         search_tag_overlay = null;
+        search_dir_list = null;
+        search_dir_body = null;
+        tv_search_dir_hint = null;
+        tv_search_dir_empty = null;
+        tv_search_dir_summary = null;
+        tv_search_dir_toggle = null;
+        btn_search_dir_all = null;
         tag_editor_overlay = null;
         dir_manage_overlay = null;
         dir_manage_list = null;
@@ -1758,6 +2253,9 @@ public class MainActivity extends AppCompatActivity {
         dir_browser_crumbs = dir_browser_overlay.findViewById(R.id.dirBrowserCrumbs);
         dir_browser_crumb_row = dir_browser_overlay.findViewById(R.id.dirBrowserCrumbRow);
         dir_browser_list = dir_browser_overlay.findViewById(R.id.dirBrowserList);
+        dir_browser_list.setLayoutManager(new LinearLayoutManager(this));
+        dir_browse_adapter = new DirBrowseAdapter();
+        dir_browser_list.setAdapter(dir_browse_adapter);
         dir_browser_empty = dir_browser_overlay.findViewById(R.id.dirBrowserEmpty);
 
         dir_browser_overlay.findViewById(R.id.btnDirBrowserBack).setOnClickListener(v -> hideOverlay());
@@ -1814,7 +2312,8 @@ public class MainActivity extends AppCompatActivity {
         TextView current = dir_browser_overlay.findViewById(R.id.tvDirBrowserCurrent);
         current.setText(Lang.get("dir.browser_current") + dir_browser_path.getAbsolutePath());
 
-        dir_browser_list.removeAllViews();
+        // 读不出来 / 空目录时列表必须是空的
+        dir_browse_adapter.submit(new ArrayList<File>());
 
         File[] children = dir_browser_path.listFiles();
 
@@ -1844,42 +2343,77 @@ public class MainActivity extends AppCompatActivity {
             return left.getName().compareToIgnoreCase(right.getName());
         });
 
-        // 不过滤任何目录
-        for (final File child : children) {
-            boolean directory = child.isDirectory();
-            View row = getLayoutInflater().inflate(R.layout.item_dir_browse, dir_browser_list, false);
+        // 交给 RecyclerView：只渲染可视行 几千个文件也不卡
+        dir_browse_items.clear();
+        dir_browse_items.addAll(Arrays.asList(children));
+        dir_browse_adapter.submit(dir_browse_items);
+    }
 
-            ImageView icon = row.findViewById(R.id.dirBrowseIcon);
-            TextView name = row.findViewById(R.id.dirBrowseName);
-            TextView meta = row.findViewById(R.id.dirBrowseMeta);
-            TextView arrow = row.findViewById(R.id.dirBrowseArrow);
+    // 一行目录 / 文件（目录统一 folder 图标 文件统一 file 图标 都不取缩略图）
+    private void bindDirBrowseRow(View row, final File child) {
+        ImageView icon = row.findViewById(R.id.dirBrowseIcon);
+        TextView name = row.findViewById(R.id.dirBrowseName);
+        TextView meta = row.findViewById(R.id.dirBrowseMeta);
+        TextView arrow = row.findViewById(R.id.dirBrowseArrow);
 
-            name.setText(child.getName());
+        name.setText(child.getName());
 
-            if (directory) {
-                // 统一风格：跟目录页 / 文件列表一样 中性色图标 + 浅底
-                icon.setImageResource(R.drawable.folder);
-                icon.setImageTintList(ColorStateList.valueOf(0xFF59616E));
-                icon.setBackground(rounded(COLOR_ACTIVE_BG, 11, 0, 0));
+        if (child.isDirectory()) {
+            icon.setImageResource(R.drawable.folder);
+            icon.setImageTintList(ColorStateList.valueOf(COLOR_MEDIUM));
+            icon.setBackground(rounded(COLOR_ACTIVE_BG, 11, 0, 0));
 
-                File[] inner = child.listFiles();
-                meta.setText(Lang.f("dir.browser_items", inner == null ? 0 : inner.length)
-                        + " · " + formatDate(child.lastModified()));
+            // 不再对每个子目录 listFiles() 数条目
+            meta.setText(formatDate(child.lastModified()));
+            arrow.setVisibility(View.VISIBLE);
+            row.setAlpha(1f);
 
-                row.setOnClickListener(v -> {
-                    dir_browser_path = child;
-                    renderDirBrowser();
-                });
-            } else {
-                icon.setImageResource(R.drawable.file_text);
-                icon.setImageTintList(ColorStateList.valueOf(COLOR_MUTED));
-                icon.setBackground(rounded(COLOR_ACTIVE_BG, 11, 0, 0));
-                meta.setText(formatSize(child.length()) + " · " + formatDate(child.lastModified()));
-                arrow.setVisibility(View.GONE);
-                row.setAlpha(0.55f);
+            row.setOnClickListener(v -> {
+                dir_browser_path = child;
+                renderDirBrowser();
+            });
+        } else {
+            icon.setImageResource(R.drawable.file);
+            icon.setImageTintList(ColorStateList.valueOf(COLOR_MUTED));
+            icon.setBackground(rounded(COLOR_ACTIVE_BG, 11, 0, 0));
+            meta.setText(formatSize(child.length()) + " · " + formatDate(child.lastModified()));
+            arrow.setVisibility(View.GONE);
+            row.setAlpha(0.55f);
+
+            row.setOnClickListener(null);
+        }
+    }
+
+    // 目录浏览列表适配器
+    private final class DirBrowseAdapter extends RecyclerView.Adapter<DirBrowseAdapter.Holder> {
+
+        private final List<File> items = new ArrayList<>();
+
+        void submit(List<File> children) {
+            items.clear();
+            items.addAll(children);
+            notifyDataSetChanged();
+        }
+
+        @Override
+        public Holder onCreateViewHolder(ViewGroup parent, int view_type) {
+            return new Holder(getLayoutInflater().inflate(R.layout.item_dir_browse, parent, false));
+        }
+
+        @Override
+        public void onBindViewHolder(Holder holder, int position) {
+            bindDirBrowseRow(holder.itemView, items.get(position));
+        }
+
+        @Override
+        public int getItemCount() {
+            return items.size();
+        }
+
+        final class Holder extends RecyclerView.ViewHolder {
+            Holder(View row) {
+                super(row);
             }
-
-            dir_browser_list.addView(row);
         }
     }
 
@@ -2009,7 +2543,6 @@ public class MainActivity extends AppCompatActivity {
 
             return;
         }
-
 
         addFilesRoot(target);
     }
@@ -2287,7 +2820,7 @@ public class MainActivity extends AppCompatActivity {
 
         dir_manage_overlay.findViewById(R.id.btnDirManageBack).setOnClickListener(v -> hideOverlay());
         dir_manage_overlay.findViewById(R.id.btnDirManageOpen).setOnClickListener(v -> openSelectedRoot());
-        dir_manage_overlay.findViewById(R.id.btnDirManageRefresh).setOnClickListener(v -> refreshAllRoots());
+        dir_manage_overlay.findViewById(R.id.btnDirManageRefresh).setOnClickListener(v -> refreshSelectedRoots());
         dir_manage_overlay.findViewById(R.id.btnDirManageDelete).setOnClickListener(v -> deleteSelectedRoots());
 
         applyOverlayTexts();
@@ -2312,14 +2845,14 @@ public class MainActivity extends AppCompatActivity {
             TextView select = row.findViewById(R.id.dirSelect);
             select.setText(selected ? "✓" : "");
             select.setBackground(rounded(
-                    selected ? COLOR_TEXT : Color.WHITE,
+                    selected ? COLOR_TEXT : COLOR_SURFACE,
                     7,
                     selected ? COLOR_TEXT : COLOR_BORDER,
                     2));
 
             ImageView icon = row.findViewById(R.id.dirManageIcon);
             icon.setImageResource(R.drawable.folder);
-            icon.setImageTintList(ColorStateList.valueOf(0xFF59616E));
+            icon.setImageTintList(ColorStateList.valueOf(COLOR_MEDIUM));
             icon.setBackground(rounded(COLOR_ACTIVE_BG, 10, 0, 0));
 
             TextView name = row.findViewById(R.id.dirManageName);
@@ -2333,9 +2866,9 @@ public class MainActivity extends AppCompatActivity {
             badge.setText(granted ? Lang.get("dir.badge_valid") : Lang.get("dir.badge_invalid"));
             badge.setTextColor(granted ? 0xFF4E93C8 : COLOR_MUTED);
             badge.setBackground(rounded(
-                    granted ? 0xFFEEF8FF : COLOR_ACTIVE_BG,
+                    granted ? COLOR_BADGE_BG : COLOR_ACTIVE_BG,
                     6,
-                    granted ? 0xFF8EC8F7 : COLOR_BORDER,
+                    granted ? COLOR_BADGE_BORDER : COLOR_BORDER,
                     1));
 
             row.setOnClickListener(v -> {
@@ -2387,14 +2920,55 @@ public class MainActivity extends AppCompatActivity {
         selectTab(0);
     }
 
-    // 刷新：重扫全部受管理目录
-    private void refreshAllRoots() {
+    // 刷新：一个目录接一个目录地刷（单目录刷新）
+    // 选中多个就入队依次刷 一个都没选先提示选目录
+    private void refreshSelectedRoots() {
+        if (selected_root_ids.isEmpty()) {
+            toast(Lang.get("dir.refresh_selected_hint"));
+            return;
+        }
+
+        final List<FileRef> dirs = new ArrayList<>();
+
+        for (String id : selected_root_ids) {
+            dirs.add(new FileRef(id, ""));
+        }
+
         runAction(Lang.get("dir.action_refresh"), () -> {
-            boolean ok = serve.refreshAll();
-            toast(ok
-                    ? Lang.f("dir.refresh_done_count", serve.getFileDatabase().countFiles())
-                    : Lang.get("common.refresh_failed") + serve.getLastError());
+            int done = refreshOneByOne(dirs);
+
+            // 报本次刷新的这些目录下有多少条
+            long refreshed = serve.getFileDatabase().countFiles(dirs);
+
+            toast(done == dirs.size()
+                    ? Lang.f("dir.refresh_done_dirs", done, dirs.size(), refreshed)
+                    : Lang.get("common.refresh_failed") + done + "/" + dirs.size()
+                            + " " + serve.getLastError());
         });
+    }
+
+    // 受管理目录 -> root 引用
+    private static List<FileRef> rootRefsOf(List<DirectoryConfigManager.Directory> roots) {
+        List<FileRef> refs = new ArrayList<>();
+
+        for (DirectoryConfigManager.Directory directory : roots) {
+            refs.add(new FileRef(directory.getId(), ""));
+        }
+
+        return refs;
+    }
+
+    // 一个接一个地刷新（单目录刷新）返回成功的个数
+    private int refreshOneByOne(List<FileRef> dirs) {
+        int done = 0;
+
+        for (FileRef dir : dirs) {
+            if (serve.refreshDirectory(dir)) {
+                done++;
+            }
+        }
+
+        return done;
     }
 
     // 删除：确认后只摘掉管理关系 不动真实文件
@@ -2464,7 +3038,10 @@ public class MainActivity extends AppCompatActivity {
                     } else if (which == 1) {
                         runAction(Lang.get("dir.action_refresh_one"), () -> {
                             boolean ok = serve.refreshRoot(directory.getId());
-                            toast(ok ? Lang.get("dir.refresh_done") : Lang.get("common.refresh_failed") + serve.getLastError());
+                            toast(ok
+                                    ? Lang.f("dir.refresh_done_one", serve.getFileDatabase().countFiles(
+                                            new FileRef(directory.getId(), "")))
+                                    : Lang.get("common.refresh_failed") + serve.getLastError());
                         });
                     } else {
                         runAction(Lang.get("dir.action_remove"), () -> {
@@ -2592,11 +3169,11 @@ public class MainActivity extends AppCompatActivity {
 
         tv_editor_title.setText(isType ? Lang.get("editor.title_type") : Lang.get("editor.title_tag"));
 
-        seg_type.setBackground(isType ? rounded(Color.WHITE, 10, 0, 0) : null);
-        seg_tag.setBackground(isType ? null : rounded(Color.WHITE, 10, 0, 0));
+        seg_type.setBackground(isType ? rounded(COLOR_SURFACE, 10, 0, 0) : null);
+        seg_tag.setBackground(isType ? null : rounded(COLOR_SURFACE, 10, 0, 0));
 
-        seg_type.setTextColor(isType ? COLOR_TEXT : 0xFF626A75);
-        seg_tag.setTextColor(isType ? 0xFF626A75 : COLOR_TEXT);
+        seg_type.setTextColor(isType ? COLOR_TEXT : COLOR_MEDIUM_2);
+        seg_tag.setTextColor(isType ? COLOR_MEDIUM_2 : COLOR_TEXT);
 
         seg_type.setTypeface(null, isType ? Typeface.BOLD : Typeface.NORMAL);
         seg_tag.setTypeface(null, isType ? Typeface.NORMAL : Typeface.BOLD);
@@ -2638,7 +3215,7 @@ public class MainActivity extends AppCompatActivity {
             item.setGravity(Gravity.CENTER_VERTICAL);
             item.setPadding(dp(10), dp(7), dp(10), dp(7));
             item.setBackground(rounded(
-                    active ? COLOR_ACTIVE_BG : Color.WHITE,
+                    active ? COLOR_ACTIVE_BG : COLOR_SURFACE,
                     10,
                     active ? COLOR_TEXT : COLOR_BORDER,
                     active ? 2 : 1));
@@ -2683,7 +3260,7 @@ public class MainActivity extends AppCompatActivity {
             option.setOrientation(LinearLayout.HORIZONTAL);
             option.setGravity(Gravity.CENTER_VERTICAL);
             option.setPadding(dp(12), dp(10), dp(12), dp(10));
-            option.setBackgroundColor(active ? COLOR_ACTIVE_BG : Color.WHITE);
+            option.setBackgroundColor(active ? COLOR_ACTIVE_BG : COLOR_SURFACE);
 
             View dot = new View(this);
             dot.setLayoutParams(new LinearLayout.LayoutParams(dp(9), dp(9)));
@@ -3181,7 +3758,7 @@ public class MainActivity extends AppCompatActivity {
         ImageView icon = file_tag_overlay.findViewById(R.id.fileTagIcon);
         bindFileIcon(icon, info, dp(10));
 
-        if (wantsThumbnail(info, 1)) {
+        if (wantsThumbnail(info)) {
             loadThumbnail(icon, info, thumb_generation);
         }
 
@@ -3196,6 +3773,12 @@ public class MainActivity extends AppCompatActivity {
 
         file_tag_overlay.findViewById(R.id.btnFileTagCancel).setOnClickListener(v -> hideOverlay());
         file_tag_overlay.findViewById(R.id.btnFileTagSave).setOnClickListener(v -> saveFileTags());
+
+        // 标签搜索框：每次打开都清空
+        edit_tag_search = file_tag_overlay.findViewById(R.id.editTagSearch);
+        tag_query = "";
+        edit_tag_search.setText("");
+        bindTagSearch(edit_tag_search, 0);
 
         applyOverlayTexts();
         renderFileTagCurrent();
@@ -3314,7 +3897,9 @@ public class MainActivity extends AppCompatActivity {
                 buildValue("›"),
                 () -> runAction(Lang.get("dir.action_refresh"), () -> {
                     boolean ok = serve.refreshAll();
-                    toast(ok ? Lang.get("dir.refresh_done") : Lang.get("common.refresh_failed") + serve.getLastError());
+                    toast(ok
+                            ? Lang.f("dir.refresh_done_count", serve.getFileDatabase().countFiles())
+                            : Lang.get("common.refresh_failed") + serve.getLastError());
                 })));
 
         addRow(data_group, buildRow(R.drawable.brush_cleaning, Lang.get("settings.cleanup"), Lang.get("settings.cleanup_desc"),
@@ -3602,7 +4187,7 @@ public class MainActivity extends AppCompatActivity {
     // 受管理目录一键入队
     // Windows 端只能手打绝对路径（serverDirField）这里多给一条捷径，但同样不做授权校验以外的限制
     private void renderSyncRoots() {
-        worker.execute(() -> {
+        submit(worker, () -> {
             final List<String> names = new ArrayList<>();
             final List<String> paths = new ArrayList<>();
 
@@ -3649,14 +4234,31 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onSyncEnqueue(final File dir) {
-        sync_worker.execute(() -> {
-            syncServer().enqueueDirectory(dir);
+        if (!ensureServerStarted()) {
+            return;
+        }
+
+        submit(sync_worker, () -> {
+            final boolean added = syncServer().enqueueDirectory(dir);
 
             runOnUiThread(() -> {
-                setSyncShareStatus(Lang.f("status.server.enqueued", dir.getAbsolutePath()));
+                setSyncShareStatus(added
+                        ? Lang.f("status.server.enqueued", dir.getAbsolutePath())
+                        : Lang.f("status.server.duplicate", dir.getAbsolutePath()));
                 renderSyncQueue();
             });
         });
+    }
+
+    // 只有服务器开着才允许往队列里加目录
+    private boolean ensureServerStarted() {
+        if (SyncEngine.hasServer() && SyncEngine.server().isStarted()) {
+            return true;
+        }
+
+        setSyncShareStatus(Lang.get("status.server.notStarted"));
+
+        return false;
     }
 
     private void onSyncAddDir(EditText path_field) {
@@ -3676,15 +4278,26 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        sync_worker.execute(() -> {
+        // 只有服务器开着才能加目录
+        if (!ensureServerStarted()) {
+            return;
+        }
+
+        submit(sync_worker, () -> {
             // 去掉末尾分隔符 否则 core 的 parent_dir 首段（入队目录名）会变成空串
             final File target = new File(StorageAccess.normalizePath(dir.getAbsolutePath()));
-
-            syncServer().enqueueDirectory(target);
+            final boolean added = syncServer().enqueueDirectory(target);
 
             runOnUiThread(() -> {
-                path_field.setText("");
-                setSyncShareStatus(Lang.f("status.server.enqueued", target.getAbsolutePath()));
+                setSyncShareStatus(added
+                        ? Lang.f("status.server.enqueued", target.getAbsolutePath())
+                        : Lang.f("status.server.duplicate", target.getAbsolutePath()));
+
+                // 重复保留输入框留
+                if (added) {
+                    path_field.setText("");
+                }
+
                 renderSyncQueue();
             });
         });
@@ -3695,7 +4308,7 @@ public class MainActivity extends AppCompatActivity {
 
         prefs.edit().putString(KEY_SYNC_SERVER_NAME, name).apply();
 
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             final SyncServer server = syncServer();
 
             // 回调在工作线程上：先排队到主线程再改 View
@@ -3722,7 +4335,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onSyncServerStop() {
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             SyncEngine.closeServer();
 
             runOnUiThread(() -> {
@@ -3735,7 +4348,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onSyncServerDisconnect() {
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             if (SyncEngine.hasServer()) {
                 SyncEngine.server().disconnect();
             }
@@ -3787,8 +4400,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 下载 / 连接进行中把「更改保存目录」压暗做视觉提示
-        // （不禁用点击：点了要给出明确原因 而不是点了没反应）
+        // 下载 / 连接进行中把「更改保存目录」压暗
         if (btn_sync_path_change != null) {
             btn_sync_path_change.setAlpha(downloading ? 0.45f : 1.0f);
         }
@@ -3808,7 +4420,7 @@ public class MainActivity extends AppCompatActivity {
         sync_progress_handler.removeCallbacks(sync_progress_tick);
     }
 
-    // 人类可读的字节数（进度行和完成提示共用）
+    // 字节数（进度行和完成提示共用）
     private static String formatBytes(long bytes) {
         if (bytes < 1024L) {
             return bytes + " B";
@@ -3944,7 +4556,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onSyncScan() {
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             final SyncClient client;
 
             try {
@@ -3976,7 +4588,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             final SyncClient client;
 
             try {
@@ -4003,7 +4615,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onSyncClearRecords() {
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             final SyncClient client;
 
             try {
@@ -4021,7 +4633,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onSyncClientDisconnect() {
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             if (SyncEngine.hasClient()) {
                 SyncEngine.client().disconnect();
             }
@@ -4035,7 +4647,7 @@ public class MainActivity extends AppCompatActivity {
     private void refreshDownloadRootIfManaged() {
         final File dir = syncDownloadDir();
 
-        worker.execute(() -> {
+        submit(worker, () -> {
             TagServe current = serve;
 
             if (current == null) {
@@ -4086,7 +4698,7 @@ public class MainActivity extends AppCompatActivity {
             View divider = new View(this);
             divider.setLayoutParams(new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
-            divider.setBackgroundColor(0xFFF0F2F4);
+            divider.setBackgroundColor(COLOR_DIVIDER);
             group.addView(divider);
         }
 
@@ -4147,11 +4759,87 @@ public class MainActivity extends AppCompatActivity {
         return row;
     }
 
-    // 主题：占位行
+    // 主题配色：两个色块按钮 选中的那个用黑色描边
     private View buildThemeRow() {
         return buildRow(R.drawable.palette, Lang.get("settings.theme"),
-                Lang.get("settings.theme_placeholder"),
-                buildBadge(Lang.get("common.reserved")), null);
+                themeName(),
+                buildThemeSwatches(), null);
+    }
+
+    private View buildThemeSwatches() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        row.addView(buildThemeSwatch(false));
+        row.addView(buildThemeSwatch(true));
+
+        return row;
+    }
+
+    // 色块本身就是按钮：白色 / 日间 用页面底色 灰色 / 夜间 用 #202124
+    // 选中的那个加 2dp 黑色描边（没选中只有 1dp 的主题边框）
+    private View buildThemeSwatch(final boolean night) {
+        boolean picked = isNightTheme() == night;
+
+        View swatch = new View(this);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(26), dp(26));
+        params.setMargins(dp(8), 0, 0, 0);
+        swatch.setLayoutParams(params);
+        swatch.setBackground(rounded(
+                night ? 0xFF202124 : 0xFFFFFFFF,
+                7,
+                picked ? 0xFF000000 : (night ? 0xFF3C3D40 : 0xFFE2E6EE),
+                picked ? 2 : 1));
+        swatch.setOnClickListener(v -> switchTheme(night));
+
+        return swatch;
+    }
+
+    // 存下来的主题选择（没有就是日间）
+    private boolean isNightTheme() {
+        return prefs != null && prefs.getBoolean(KEY_NIGHT_THEME, false);
+    }
+
+    private String themeName() {
+        return Lang.get(isNightTheme() ? "theme.gray_night" : "theme.white_day");
+    }
+
+    // 启动时按存下来的选择定日夜：要在 inflate 布局之前调用
+    private void applyStoredTheme() {
+        AppCompatDelegate.setDefaultNightMode(
+                isNightTheme() ? AppCompatDelegate.MODE_NIGHT_YES : AppCompatDelegate.MODE_NIGHT_NO);
+    }
+
+    // 切主题：存下来 -> 换日夜模式 -> 重建界面（配色全部从资源表重读）
+    private void switchTheme(boolean night) {
+        if (night == isNightTheme()) {
+            return;
+        }
+
+        prefs.edit().putBoolean(KEY_NIGHT_THEME, night).apply();
+
+        toast(Lang.get("settings.theme_changed_prefix")
+                + Lang.get(night ? "theme.gray_night" : "theme.white_day"));
+
+        AppCompatDelegate.setDefaultNightMode(
+                night ? AppCompatDelegate.MODE_NIGHT_YES : AppCompatDelegate.MODE_NIGHT_NO);
+
+        recreate();
+    }
+
+    // 把当前这套配色读进内存（列表、卡片、文字、边框都从这里取）
+    private void loadPalette() {
+        COLOR_TEXT = getColor(R.color.text_primary);
+        COLOR_MUTED = getColor(R.color.text_secondary);
+        COLOR_BORDER = getColor(R.color.border_soft);
+        COLOR_ACTIVE_BG = getColor(R.color.inset_bg);
+        COLOR_MEDIUM = getColor(R.color.text_medium);
+        COLOR_MEDIUM_2 = getColor(R.color.text_button_2);
+        COLOR_BADGE_BG = getColor(R.color.filter_include_bg);
+        COLOR_BADGE_BORDER = getColor(R.color.filter_include_border);
+        COLOR_SURFACE = getColor(R.color.surface);
+        COLOR_DIVIDER = getColor(R.color.divider);
     }
 
     private View buildValue(String text) {
@@ -4232,16 +4920,15 @@ public class MainActivity extends AppCompatActivity {
     // 布局里的静态文案
     // XML 里的中文只是默认值（方便布局预览）实际显示一律查语言表
     private void applyStaticTexts() {
-        // 卡片标题前面挂个小图标（矢量图）
         setTitleIcon(R.id.tvFilesTitle, R.drawable.text_align_justify);
         setTitleIcon(R.id.tvDirTitle, R.drawable.folder);
         setTitleIcon(R.id.tvTagTitle, R.drawable.tag);
         setTitleIcon(R.id.tvSyncTitle, R.drawable.arrow_right_left);
 
-        // 顶栏统计用矢量图标（原来的 ▧ / ◈ 是文字符号）
         setCompoundIcon(findViewById(R.id.tvStatFiles), R.drawable.file, COLOR_MUTED, 13);
         setCompoundIcon(findViewById(R.id.tvStatTags), R.drawable.tag, COLOR_MUTED, 13);
 
+        setText(R.id.tvAppName, "app.name");
         setText(R.id.tvFilterTitle, "browse.filter_title");
         setText(R.id.btnUp, "browse.up");
         setText(R.id.tvDirTitle, "dir.title");
@@ -4308,7 +4995,7 @@ public class MainActivity extends AppCompatActivity {
         view.setCompoundDrawablesRelative(icon, null, null, null);
     }
 
-    // 子界面里的静态文案（子界面每次打开都会重新 inflate 所以每次都要刷一遍）
+    // 子界面里的静态文案
     private void applyOverlayTexts() {
         applySyncOverlayTexts();
         if (file_tag_overlay != null) {
@@ -4329,6 +5016,10 @@ public class MainActivity extends AppCompatActivity {
             setText(search_tag_overlay, R.id.btnSearchTagConfirm, "common.confirm");
             setText(search_tag_overlay, R.id.tvSearchTagHint, "filter.picker_hint");
             setText(search_tag_overlay, R.id.tvSearchTagLibraryTitle, "filter.pick_from_library");
+
+            setText(search_tag_overlay, R.id.tvSearchDirTitle, "browse.dir_scope_title");
+            setText(search_tag_overlay, R.id.btnSearchDirAll, "browse.dir_scope_all");
+            setText(search_tag_overlay, R.id.tvSearchDirEmpty, "browse.dir_scope_empty");
         }
 
         if (dir_browser_overlay != null) {
@@ -4411,9 +5102,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // 导出 / 导入标签库
-
-    // 导出：每次都走系统「保存到…」对话框
-    // 默认导出目录那套要 SAF tree 授权 跟着系统选择器一起砍了
     private void exportTags() {
         export_picker.launch(EXPORT_FILE_NAME);
     }
@@ -4716,7 +5404,7 @@ public class MainActivity extends AppCompatActivity {
         setSyncExportStatus(Lang.f("status.export.zipping", source.getName()));
         setSyncExportProgress(Lang.f("status.export.progress", 0, formatBytes(0L)));
 
-        sync_worker.execute(() -> {
+        submit(sync_worker, () -> {
             try {
                 DirectoryZipper.Result result = DirectoryZipper.zip(source, zip_file,
                         (entry_name, file_count, byte_count) -> runOnUiThread(
@@ -4821,7 +5509,7 @@ public class MainActivity extends AppCompatActivity {
     // 基础设施
     // 在 worker 上执行模块操作 完成后自动重画
     private void runAction(String label, Runnable task) {
-        worker.execute(() -> {
+        submit(worker, () -> {
             try {
                 if (serve == null) {
                     toast(label + Lang.get("run.engine_not_ready"));

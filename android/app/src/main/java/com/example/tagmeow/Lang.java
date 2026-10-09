@@ -2,23 +2,31 @@ package com.example.tagmeow;
 
 import android.content.Context;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 // 语言门面：UI 只调用 Lang.get("key") / Lang.f("key", args)
 
-// 语言文件只放一个位置：<filesDir>/language/*.json
-// - 内置语言（assets/language/*.json）第一次启动时铺进去
+// 语言文件只放一个位置：Android/data/<包名>/files/language/*.json（应用的外部私有目录 用户能直接改）
+// - 内置语言（assets/language/*.json）：目录为空（或少了某个语言文件）时整个铺进去
+// - 已经在的语言文件只补「内置里有、它没有」的键 用户改过的文案不会被应用更新冲掉
 // - 外部导入的语言（Lang.importLanguage）也复制到这里
 // 之后只扫这一个目录，内置与导入完全同构
+// 拿不到外部私有目录（存储没挂载 / 被系统拒绝）时退回内部的 files/language
 
 // 缺键 / 未知 key 一律返回 LanguageManager.MISSING_STRING
 // 没有系统语言检测：兜底就是硬编码的 zh_CN
@@ -67,6 +75,12 @@ public final class Lang {
         }
 
         if (manager.loadLanguage(code)) {
+            current_code = code;
+            return true;
+        }
+
+        // 语言目录里那份读不动（被改坏 / 少了 content）：先从 assets 复原再试一次
+        if (restoreBuiltInLanguage(code) && manager.loadLanguage(code)) {
             current_code = code;
             return true;
         }
@@ -166,15 +180,19 @@ public final class Lang {
     }
 
     private static File languageDirectory() {
+        File external = context.getExternalFilesDir(null);
+
+        if (external != null) {
+            return new File(external, LANGUAGE_DIR);
+        }
+
+        // 存储没挂载 / 被系统拒绝：退回内部目录 至少内置语言还能用
         return new File(context.getFilesDir(), LANGUAGE_DIR);
     }
 
-    // 把内置语言铺到内部目录
-    // 铺完之后所有语言都从内部目录读 内置 / 导入同构
-    // 判定标准是「和 assets 里的内容一样不一样」而不是「文件在不在」：
-    // 只按存在性铺的话 加了新文案的版本装到老设备上 手里那份 json 永远不会更新
-    // 新 key 会一直显示 MISSING_STRING（同步进度那几条就踩过这个坑）
-    // 代价：同名的外部导入语言会被内置的盖掉 —— 内置语言由应用负责维护 这是有意的
+    // 把内置语言铺到语言目录
+    // 1. 语言目录为空（或者少了这个语言文件）-> 从 assets 整个复制过去
+    // 2. 文件在 但少了内置里有的键 -> 只把缺的键补进去
     private static void seedBuiltInLanguages(File directory) {
         if (!directory.isDirectory() && !directory.mkdirs()) {
             return;
@@ -194,29 +212,109 @@ public final class Lang {
 
                 File target = new File(directory, name);
 
-                if (target.isFile() && sameAsAsset(ASSET_DIR + "/" + name, target)) {
+                if (!target.isFile()) {
+                    copyAsset(ASSET_DIR + "/" + name, target);
                     continue;
                 }
 
-                copyAsset(ASSET_DIR + "/" + name, target);
+                fillMissingKeys(ASSET_DIR + "/" + name, target);
             }
         } catch (IOException error) {
             // assets 里没有语言目录时忽略
         }
     }
 
-    // 内部那份和 assets 里的内置语言是不是同一份内容
-    // 比内容而不是记版本号：不会出现「改了文案忘了把版本号加一」这种坑
-    private static boolean sameAsAsset(String asset_path, File target) {
+    private static void fillMissingKeys(String asset_path, File target) {
         if (context == null) {
+            return;
+        }
+
+        try {
+            String asset_text = new String(
+                    readAll(context.getAssets().open(asset_path)), StandardCharsets.UTF_8);
+            String local_text = new String(Files.readAllBytes(target.toPath()), StandardCharsets.UTF_8);
+
+            JSONArray asset_items = new JSONObject(asset_text).optJSONArray("text");
+            JSONObject local_json = new JSONObject(local_text);
+            JSONArray local_items = local_json.optJSONArray("text");
+
+            if (asset_items == null || local_items == null) {
+                return;
+            }
+
+            Set<String> have = new HashSet<>();
+
+            for (int i = 0; i < local_items.length(); i++) {
+                JSONObject item = local_items.optJSONObject(i);
+
+                if (item != null) {
+                    have.add(item.optString("id", ""));
+                }
+            }
+
+            boolean changed = false;
+
+            for (int i = 0; i < asset_items.length(); i++) {
+                JSONObject item = asset_items.optJSONObject(i);
+
+                if (item == null) {
+                    continue;
+                }
+
+                String id = item.optString("id", "");
+
+                if (id.isEmpty() || have.contains(id)) {
+                    continue;
+                }
+
+                local_items.put(item);
+                changed = true;
+            }
+
+            if (changed) {
+                Files.write(target.toPath(),
+                        (local_json.toString(4) + "\n").getBytes(StandardCharsets.UTF_8));
+            }
+        } catch (IOException error) {
+            // 读不动就保持原样
+        } catch (JSONException error) {
+            // 本地那份不是合法 json：不动它 载入失败时 select 会从 assets 复原
+        }
+    }
+
+    // 把某个内置语言从 assets 整个复制回语言目录（语言目录里那份读不动时用）
+    private static boolean restoreBuiltInLanguage(String code) {
+        if (context == null || code == null || code.isEmpty()) {
             return false;
         }
 
-        try (InputStream input = context.getAssets().open(asset_path)) {
-            return Arrays.equals(readAll(input), Files.readAllBytes(target.toPath()));
+        File directory = languageDirectory();
+
+        if (!directory.isDirectory() && !directory.mkdirs()) {
+            return false;
+        }
+
+        String file_name = code + ".json";
+
+        try {
+            String[] names = context.getAssets().list(ASSET_DIR);
+
+            if (names == null) {
+                return false;
+            }
+
+            for (String candidate : names) {
+                if (candidate.equals(file_name)) {
+                    copyAsset(ASSET_DIR + "/" + file_name, new File(directory, file_name));
+
+                    return true;
+                }
+            }
         } catch (IOException error) {
             return false;
         }
+
+        return false;
     }
 
     private static byte[] readAll(InputStream input) throws IOException {

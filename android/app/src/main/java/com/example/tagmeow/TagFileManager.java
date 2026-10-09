@@ -142,7 +142,8 @@ public final class TagFileManager {
                 return true;
             }
 
-            error_string = "[warning] removal failed";
+            // 带上具体原因 不然界面只看到「删除失败」不知道为什么
+            error_string = "[warning] removal failed: " + error_string;
             return false;
         }
 
@@ -190,7 +191,7 @@ public final class TagFileManager {
                 return true;
             }
 
-            error_string = "[warning] removal failed";
+            error_string = "[warning] removal failed: " + error_string;
             return false;
         }
 
@@ -237,7 +238,7 @@ public final class TagFileManager {
         FileRef current = last_written_path == null ? file : last_written_path;
 
         if (!keep_old && !removeModeTags(current, from_mode)) {
-            error_string = "[warning] remove old tags failed";
+            error_string = "[warning] remove old tags failed: " + error_string;
             return false;
         }
 
@@ -254,7 +255,17 @@ public final class TagFileManager {
         Objects.requireNonNull(mode);
 
         if (mode == StoreMode.FILENAME) {
-            FileRef clean_path = removeFilenameTagsPath(file);
+            // 整个名字就是一个 {[..]} 作用域（例如 {[test]}.mp4）：去掉作用域之后连名字都没了
+            // 先在名字前面补一个毫秒时间戳当名字部分（原名称原样跟在后面）再照常去作用域
+            // 只有真要改名字时才补 纯读取 / 索引一个字节都不动
+            FileRef target = file;
+            String materialized = materializeWholeNameBlock(file.getName());
+
+            if (!materialized.equals(file.getName())) {
+                target = file.getParent().child(materialized);
+            }
+
+            FileRef clean_path = removeFilenameTagsPath(target);
 
             if (!clean_path.equals(file)
                     && !storage.rename(file, clean_path.getName())) {
@@ -337,6 +348,37 @@ public final class TagFileManager {
     // 构建"无标签"侧车文件路径 先去除文件名中的标签块再定位侧车
     public static FileRef buildCleanSidecarPath(FileRef file) {
         return buildSidecarPath(removeFilenameTagsPath(file));
+    }
+
+    // 整个名字（扩展名之前）就是一个 {[..]} 作用域 例如 {[test]}.mp4
+    // 这种名字「去掉结尾作用域」之后什么都不剩 改名就等于把原文件名删掉
+    public static boolean isWholeNameTagBlock(String file_name) {
+        if (file_name == null || file_name.isEmpty()) {
+            return false;
+        }
+
+        int index = extensionIndex(file_name);
+        String stem = index < 0 ? file_name : file_name.substring(0, index);
+
+        return !stem.isEmpty() && removeTagsFromFilename(stem).isEmpty();
+    }
+
+    // 整名作用域的文件没有能当"名字"的部分：{[test]}.mp4 去掉作用域就什么都不剩
+    // 这种在真的要改名字的时候补一个毫秒时间戳前缀： <毫秒时间戳> + 原名称
+    // 原名称一个字符都不丢 只是前面多了一段能当名字的东西
+    // 前缀只能加在最前面：作用域必须留在名字结尾 加在后面以后就再也去不掉了
+    // 纯读取 / 索引 / 同步扫描都不会走到这里 文件不会因为"被读了一下"就改名
+    public static String materializeWholeNameBlock(String file_name) {
+        return materializeWholeNameBlock(file_name, System.currentTimeMillis());
+    }
+
+    // 时间戳由调用方给（测试用 免得断言依赖真实时间）
+    static String materializeWholeNameBlock(String file_name, long millis) {
+        if (!isWholeNameTagBlock(file_name)) {
+            return file_name;
+        }
+
+        return millis + file_name;
     }
 
     // 从文件路径中去除文件名里的标签块
@@ -456,7 +498,9 @@ public final class TagFileManager {
             return true;
         }
 
-        String name = file.getName();
+        // 整名作用域：本来就没有名字部分 先补一个毫秒时间戳前缀再写标签
+        // （前缀只能加在最前面 作用域必须留在名字结尾 加在后面以后就再也去不掉了）
+        String name = materializeWholeNameBlock(file.getName());
         int index = extensionIndex(name);
         String stem = index < 0 ? name : name.substring(0, index);
         String extension = index < 0 ? "" : name.substring(index);
