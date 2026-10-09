@@ -14,13 +14,11 @@
 // 统一使用 UTF-8
 // FileDatabase 数据层从磁盘获取数据 不经过其他模块
 // 自己调用时保证线程安全
-//
-// 结果回报约定（与本工程其它 core 类一致）：
-//   * 写操作只返回 bool 表示成功与否；"成功了几个"这类数据一律走带默认值 nullptr 的 out 参数带出去，
-//     调用方不需要就直接不传（例：cleanupInvalid(&removed)），不改变原有调用的写法。
-//   * error_string_ 只放给人看 / 进日志的说明文字：失败是 "[warning] ..." / "[error] ..."，
-//     成功是可以带数字的 "[tip] ..."（例："[tip] cleanupInvalid removed=3"）。想拿来做判断请用 out 参数，
-//     不要解析 error_string_。
+
+
+// 写操作只返回 bool 表示成功与否 "成功了几个"这类数据一律走带默认值 nullptr 的 out 参数带出去
+// 调用方不需要就直接不传（例：cleanupInvalid(&removed)） 不改变原有调用的写法
+
 
 namespace table
 {
@@ -54,7 +52,7 @@ public:
         std::vector<std::string> only_;
         // 至少包含其中一个
         std::vector<std::string> include_;
-        // 只在这些目录(含子目录)内搜索；为空(空指针/空目录)表示全部目录
+        // 只在这些目录(含子目录)内搜索 为空(空指针/空目录)表示全部目录
         std::vector<std::filesystem::path> dirs_;
     };
 
@@ -90,7 +88,7 @@ public:
     std::vector<table::FileInfo> searchByTags(const SearchOptions &opts) const;
     // 获取单个文件信息
     std::optional<table::FileInfo> getFileInfo(const std::filesystem::path &path) const;
-    // files 表的记录条数（数据库只作磁盘缓存 这就是索引里有多少条记录 含目录记录）；失败返回 -1
+    // files 表的记录条数（数据库只作磁盘缓存 这就是索引里有多少条记录 含目录记录）失败返回 -1
     int countFiles() const;
     const std::string &getLastError() const;
 

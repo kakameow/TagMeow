@@ -737,7 +737,7 @@ bool FileDatabase::clearRepeat(int *removed_count)
         return false;
     }
 
-    // 数据走 out 参数（sqlite3_changes = 上一条 DELETE 影响的行数）；error_string_ 只留给人看
+    // 数据走 out 参数（sqlite3_changes = 上一条 DELETE 影响的行数）error_string_ 只留给人看
     const int removed = sqlite3_changes(db_);
     if (removed_count != nullptr)
     {
@@ -864,9 +864,8 @@ bool FileDatabase::cleanupInvalid(int *removed_count)
     return true;
 }
 
-// files 表的记录条数：给上层显示"索引了多少项"用。
-// 注意不能用 searchByTags(全空的 SearchOptions) 代替 —— 三个标签容器全空时它返回的是
-// "没有标签的文件"（见下面的语义），数出来的是待整理收件箱而不是全库
+// files 表的记录条数：给上层显示"索引了多少项"用
+// "没有标签的文件"（见下面的语义）数出来的是待整理收件箱而不是全库
 int FileDatabase::countFiles() const
 {
     if (!db_)
