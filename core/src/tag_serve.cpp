@@ -1,4 +1,5 @@
 #include "tag_serve.h"
+#include "system_error_text.h"
 
 #include <algorithm>
 #include <cctype>
@@ -105,7 +106,7 @@ bool TagServe::removeRoot(std::filesystem::path root_path_utf8)
     return true;
 }
 
-bool TagServe::reLoadRoot(std::vector<std::filesystem::path> root_list_utf8)
+bool TagServe::reLoadRoot(std::vector<std::filesystem::path> root_list_utf8, int *indexed_count, int *root_count)
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -136,13 +137,132 @@ bool TagServe::reLoadRoot(std::vector<std::filesystem::path> root_list_utf8)
         return false;
     }
 
-    error_string_.clear();
+    // 数据走 out 参数；error_string_ 只留给人看
+    const int indexed = db_.countFiles();
+    const int roots = static_cast<int>(root_list_.size());
+
+    if (indexed_count != nullptr)
+    {
+        *indexed_count = indexed;
+    }
+
+    if (root_count != nullptr)
+    {
+        *root_count = roots;
+    }
+
+    error_string_ = "[tip] reLoadRoot indexed=" + std::to_string(indexed) +
+                    " roots=" + std::to_string(roots);
     return true;
 }
 
-bool TagServe::reLoadRoot(std::filesystem::path root_list_utf8)
+// 单目录刷新：只重扫这一个目录(含子目录) 不动其它根的记录 也不改根列表
+// 先删这个目录的旧记录再按磁盘重扫插入 -> 磁盘上删掉/改名的文件不会残留在库里
+bool TagServe::reLoadRoot(std::filesystem::path dir_path_utf8, int *indexed_count)
 {
-    return reLoadRoot(std::vector<std::filesystem::path>{root_list_utf8});
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::error_code ec;
+    const std::filesystem::path absolute_path = std::filesystem::absolute(dir_path_utf8, ec);
+
+    if (ec)
+    {
+        error_string_ = "[warning] Failed to normalize directory path: " + systemErrorText(ec);
+        return false;
+    }
+
+    // 与库里存的写法对齐 正斜杠 + 去尾斜杠
+    std::string dir_str = absolute_path.lexically_normal().generic_u8string();
+
+    while (dir_str.size() > 1 && dir_str.back() == '/')
+    {
+        dir_str.pop_back();
+    }
+
+    const std::filesystem::path dir_path = std::filesystem::u8path(dir_str);
+
+    if (!std::filesystem::is_directory(dir_path, ec) || ec)
+    {
+        error_string_ = "[warning] Directory does not exist or not a directory: " + dir_str;
+        return false;
+    }
+
+    auto extractor = [this](const std::filesystem::path &p)
+    {
+        return tag_file_.extractTags(p);
+    };
+
+    if (!db_.removeDirectory(dir_path))
+    {
+        error_string_ = "Failed to remove directory from database: " + db_.getLastError();
+        return false;
+    }
+
+    if (!db_.insertDirectory(dir_path, extractor))
+    {
+        error_string_ = "Failed to insert directory into database: " + db_.getLastError();
+        return false;
+    }
+
+    const std::string dir_key = normalizePathKey(dir_path);
+    bool is_root = false;
+
+    for (const auto &root : root_list_)
+    {
+        if (normalizePathKey(root) == dir_key)
+        {
+            is_root = true;
+            break;
+        }
+    }
+
+    if (!is_root)
+    {
+        table::FileInfo info;
+        info.path_ = dir_str;
+        info.rel_path_ = dir_path.filename().u8string();
+        info.tags_ = extractor(dir_path);
+        info.file_version_ = 1;
+
+        for (const auto &root : root_list_)
+        {
+            std::string root_str = root.lexically_normal().generic_u8string();
+
+            while (root_str.size() > 1 && root_str.back() == '/')
+            {
+                root_str.pop_back();
+            }
+
+            const std::string prefix = root_str + '/';
+
+            if (dir_str.size() > prefix.size() && dir_str.compare(0, prefix.size(), prefix) == 0)
+            {
+                info.rel_path_ = dir_str.substr(prefix.size());
+                break;
+            }
+        }
+
+        if (!db_.updateFile(info))
+        {
+            error_string_ = "Failed to update directory row: " + db_.getLastError();
+            return false;
+        }
+    }
+
+    // 数据走 out 参数；error_string_ 保留 insertDirectory 的提示（"[tip] N entry(ies) were skipped" 之类）
+    const int indexed = db_.countFiles();
+    if (indexed_count != nullptr)
+    {
+        *indexed_count = indexed;
+    }
+
+    error_string_ = db_.getLastError();
+    if (error_string_.empty())
+    {
+        error_string_ = "[tip] reLoadRoot indexed=" + std::to_string(indexed) + " dir=" + dir_str;
+    }
+
+    return true;
 }
 
 bool TagServe::reLoadDB(std::filesystem::path db_path_utf8)
@@ -494,7 +614,8 @@ bool TagServe::removeFileTag(const std::filesystem::path &file_path_utf8, const 
     return true;
 }
 
-bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::StoreMode to_mode, bool keep_old)
+bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::StoreMode to_mode, bool keep_old,
+                           int *converted_count, int *failed_count)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     if (from_mode == to_mode)
@@ -505,6 +626,7 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
 
     // 第一阶段 对所有文件执行 keep_old=true 只写入新格式不删除旧格式
     size_t file_failed_first = 0;
+    size_t file_ok_first = 0;
     size_t root_missing_count = 0;
     std::string error_file_path;
     std::string error_root_path;
@@ -528,7 +650,7 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
         {
             if (ec)
             {
-                error_string_ = "[warning] Iteration error: " + ec.message();
+                error_string_ = "[warning] Iteration error: " + systemErrorText(ec);
                 return false;
             }
             if (iter->path().filename() == ".tag")
@@ -546,6 +668,10 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
                         error_file_path += " the top " + std::to_string(file_failed_first) + " error paths(max = 10): " + iter->path().u8string() + " (" + tag_file_.getLastError() + ")\n";
                     }
                 }
+                else
+                {
+                    file_ok_first++;
+                }
             }
         }
     }
@@ -557,14 +683,26 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
             error_string_ = "[warning] " + std::to_string(file_failed_first) + " file(s) failed to write new format. " + error_file_path;
             return false;
         }
+        if (converted_count != nullptr)
+        {
+            *converted_count = static_cast<int>(file_ok_first);
+        }
+
+        if (failed_count != nullptr)
+        {
+            *failed_count = static_cast<int>(file_failed_first);
+        }
+
         if (root_missing_count > 0)
         {
             error_string_ = "[warning] " + std::to_string(root_missing_count) + " root(s) missing, but other roots processed." + error_root_path;
         }
         else
         {
-            error_string_.clear();
+            error_string_ = "[tip] convertMode converted=" + std::to_string(file_ok_first) +
+                            " roots=" + std::to_string(root_list_.size());
         }
+
         tag_file_.setDefaultMode(to_mode);
         rebuildRootsNoLock(); // 转换会改写文件名 -> 数据库整根重建索引
         return true;
@@ -594,7 +732,7 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
         {
             if (ec)
             {
-                error_string_ = "[warning] Iteration error: " + ec.message();
+                error_string_ = "[warning] Iteration error: " + systemErrorText(ec);
                 return false;
             }
             if (iter->path().filename() == ".tag")
@@ -624,7 +762,19 @@ bool TagServe::convertMode(TagFileManager::StoreMode from_mode, TagFileManager::
 
     tag_file_.setDefaultMode(to_mode);
     rebuildRootsNoLock(); // 转换会改写文件名 -> 数据库整根重建索引
-    error_string_.clear();
+
+    if (converted_count != nullptr)
+    {
+        *converted_count = static_cast<int>(file_ok_first);
+    }
+
+    if (failed_count != nullptr)
+    {
+        *failed_count = static_cast<int>(file_failed_second);
+    }
+
+    error_string_ = "[tip] convertMode converted=" + std::to_string(file_ok_first) +
+                    " roots=" + std::to_string(root_list_.size());
     return true;
 }
 
@@ -641,7 +791,7 @@ const TagFileManager::StoreMode TagServe::getDefaultMode() const
 }
 
 // 标签库导入: 合并另一个 tag.json(类型/标签全局唯一 只补充本库没有的) 成功后立即写盘
-bool TagServe::mergeTags(const std::filesystem::path &tag_json_path_utf8)
+bool TagServe::mergeTags(const std::filesystem::path &tag_json_path_utf8, int *type_count, int *tag_count)
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -657,7 +807,27 @@ bool TagServe::mergeTags(const std::filesystem::path &tag_json_path_utf8)
         return false;
     }
 
-    error_string_.clear();
+    // 数据走 out 参数：TagLibrary 不回"新增了几个" 所以报合并后本库的规模
+    int types = 0;
+    int tags = 0;
+    for (const auto &entry : tag_list_.getTypeTag())
+    {
+        types++;
+        tags += static_cast<int>(entry.second.size());
+    }
+
+    if (type_count != nullptr)
+    {
+        *type_count = types;
+    }
+
+    if (tag_count != nullptr)
+    {
+        *tag_count = tags;
+    }
+
+    error_string_ = "[tip] mergeTags types=" + std::to_string(types) +
+                    " tags=" + std::to_string(tags);
     return true;
 }
 
@@ -666,6 +836,27 @@ std::filesystem::path TagServe::getTagPath() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     return tag_list_.getLoadPath();
+}
+
+// files 表条数：只读数据库 不改磁盘也不改索引
+int TagServe::getFileCount() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return db_.countFiles();
+}
+
+// 清除失效记录（磁盘上已不存在的文件）：只删数据库记录 磁盘文件一个都不碰
+bool TagServe::cleanupInvalid(int *removed_count)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return db_.cleanupInvalid(removed_count);
+}
+
+// 去重
+bool TagServe::clearRepeat(int *removed_count)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return db_.clearRepeat(removed_count);
 }
 
 bool TagServe::updateRoots()

@@ -1,4 +1,5 @@
 #include "language_manager.h"
+#include "system_error_text.h"
 
 LanguageManager::LanguageManager(const std::filesystem::path &language_directory_utf8)
 {
@@ -80,7 +81,7 @@ bool LanguageManager::loadLanguageList(const std::filesystem::path &directory_pa
     {
         if (ec)
         {
-            error_string_ = "[warning] Error iterating directory: " + ec.message();
+            error_string_ = "[warning] Error iterating directory: " + systemErrorText(ec);
             return false;
         }
 

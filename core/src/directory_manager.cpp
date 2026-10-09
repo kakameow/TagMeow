@@ -1,4 +1,5 @@
 #include "directory_manager.h"
+#include "system_error_text.h"
 
 DirectoryConfigManager::DirectoryConfigManager(const std::filesystem::path &config_path_utf8) : config_path_(config_path_utf8)
 {
@@ -114,7 +115,7 @@ bool DirectoryConfigManager::saveToFile()
     std::filesystem::rename(temp_path, config_path_, ec);
     if (ec)
     {
-        error_string_ = "[warning] Failed to rename temporary file to config file: " + ec.message();
+        error_string_ = "[warning] Failed to rename temporary file to config file: " + systemErrorText(ec);
         std::filesystem::remove(temp_path, ec);
         return false;
     }

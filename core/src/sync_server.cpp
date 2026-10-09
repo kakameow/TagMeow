@@ -3,6 +3,7 @@
 #endif
 
 #include "sync_server.h"
+#include "system_error_text.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -45,14 +46,14 @@ bool SyncServer::start(std::string server_name, std::uint16_t port, std::error_c
     acceptor_.open(asio::ip::tcp::v4(), ec);
     if (ec)
     {
-        setError("[warning] failed to start listening: " + ec.message());
+        setError("[warning] failed to start listening: " + systemErrorText(ec));
         return false;
     }
     acceptor_.set_option(asio::socket_base::reuse_address(true));
     acceptor_.bind(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port), ec);
     if (ec)
     {
-        setError("[warning] failed to bing the port: " + ec.message());
+        setError("[warning] failed to bing the port: " + systemErrorText(ec));
         std::error_code close_ec;
         acceptor_.close(close_ec);
         return false;
@@ -61,7 +62,7 @@ bool SyncServer::start(std::string server_name, std::uint16_t port, std::error_c
     acceptor_.listen(asio::socket_base::max_listen_connections, ec);
     if (ec)
     {
-        setError("[warning] failed to start listening:" + ec.message());
+        setError("[warning] failed to start listening:" + systemErrorText(ec));
         std::error_code close_ec;
         acceptor_.close(close_ec);
         return false;
@@ -299,7 +300,7 @@ void SyncServer::workerLoop(std::function<void(bool, std::error_code)> cb)
             broadcastMessage(b_ec);
             if (b_ec)
             {
-                setError("[Warning] Broadcast failed : " + b_ec.message());
+                setError("[Warning] Broadcast failed : " + systemErrorText(b_ec));
             }
         }
 
@@ -312,7 +313,7 @@ void SyncServer::workerLoop(std::function<void(bool, std::error_code)> cb)
         }
         if (a_ec)
         {
-            setError("[Warning] Failed to accept connection: " + a_ec.message());
+            setError("[Warning] Failed to accept connection: " + systemErrorText(a_ec));
         }
 
         // 短暂休眠避免忙等 同时使 stop() 可及时返回
