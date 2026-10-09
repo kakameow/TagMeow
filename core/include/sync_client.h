@@ -122,7 +122,7 @@ private:
     void doDownload(std::size_t index, std::function<void(bool success, std::error_code ec)> cb);
     // 连接服务器（同步内部调用）
     bool syncConnect(const ServerInfo &server, std::error_code &ec);
-    // 接收整个会话：文件头 -> 比对记录 -> 回复 -> 接收数据 循环；
+    // 接收整个会话：文件头 -> 比对记录 -> 回复 -> 接收数据 循环
     // 服务器发送队列为空主动断开时返回 errc::no_message_available
     bool syncReceiveAll(std::error_code &ec);
     // 检查文件是否已有成功下载记录且磁盘上确实存在同样大小的文件
@@ -132,7 +132,7 @@ private:
     bool isFileAlreadyExists(const FileHeader &header) const;
     // 任务完成回调：拷贝回调后在锁外调用（不持锁执行上层代码）
     void notifyTask(const TaskReport &report);
-    // 发送回复字节：true -> '1'(发送文件)，false -> '0'(跳过)
+    // 发送回复字节：true -> '1'(发送文件) false -> '0'(跳过)
     bool sendReply(bool should_send, std::error_code &ec);
     // 下载记录读写（加载失败不致命 仅记录错误信息）
     bool loadRecords(std::error_code &ec);

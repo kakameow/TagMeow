@@ -811,8 +811,7 @@ bool TagFileManager::convertMode(const std::filesystem::path &file_path_utf8, St
         return false;
     }
 
-    // 写入可能改了文件名（Filename 模式）-> 删旧格式要用改名之后的路径
-    const std::filesystem::path written_path = (to_mode == StoreMode::Filename && !tags.empty()) ? buildTaggedPath(file_path_utf8, tags) : file_path_utf8;
+    const std::filesystem::path written_path = (to_mode == StoreMode::Filename) ? buildTaggedPath(file_path_utf8, tags) : file_path_utf8;
 
     if (!keep_old)
     {
@@ -866,7 +865,7 @@ bool TagFileManager::removeModeTags(const std::filesystem::path &file_path_utf8,
     }
     else
     {
-        // 侧车按真实文件名定位（与读取端一致）；名字刚被改过时旧数据可能还在"无标签名"的位置 兜底一起清
+        // 侧车按真实文件名定位（与读取端一致）名字刚被改过时旧数据可能还在"无标签名"的位置 兜底一起清
         const std::filesystem::path sidecar_path = buildSidecarPath(file_path_utf8);
         const std::filesystem::path clean_sidecar_path = buildCleanSidecarPath(file_path_utf8);
 
@@ -992,7 +991,7 @@ std::vector<std::string> TagFileManager::parseFromFilename(const std::filesystem
     std::string filename = file_name.filename().u8string();
 
     // 读取宽松：名字里任意位置的 {[..]} 都算作用域（可以出现多个）
-    // 但必须是 { + [ + 内容 + ] + } 双重包裹；单层的 {} / [] / {] 之类一律不算标签
+    // 但必须是 { + [ + 内容 + ] + } 双重包裹 单层的 {} / [] / {] 之类一律不算标签
     std::regex pattern(R"(\{\[([^\]\}]*)\]\})");
     std::smatch match;
     std::string::const_iterator search_start(filename.cbegin());
@@ -1269,12 +1268,6 @@ bool TagFileManager::writeTagsToFile(const std::filesystem::path &file_path, con
     }
     else
     {
-        // 标签为空时不动文件名：转换时"源里没标签"是正常情况 不能顺手把名字里原有的内容抹掉
-        if (tags.empty())
-        {
-            return true;
-        }
-
         // 整名作用域：本来就没有名字部分 先补一个毫秒时间戳前缀再写标签
         // （前缀只能加在最前面 作用域必须留在名字结尾 加在后面以后就再也去不掉了）
         const std::filesystem::path target_path = file_path.parent_path() / materializeWholeNameBlock(file_path);

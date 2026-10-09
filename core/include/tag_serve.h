@@ -36,7 +36,7 @@ public:
     // indexed_count 非空时写入重扫后索引里的记录条数
     bool reLoadRoot(std::filesystem::path dir_path_utf8, int *indexed_count = nullptr);
     // 替换根目录列表 并同步更新数据库 删除旧目录数据插入新目录数据
-    // indexed_count 非空时写入重扫后索引里的记录条数；root_count 非空时写入本次扫了几个根
+    // indexed_count 非空时写入重扫后索引里的记录条数 root_count 非空时写入本次扫了几个根
     bool reLoadRoot(std::vector<std::filesystem::path> root_list_utf8, int *indexed_count = nullptr, int *root_count = nullptr);
     // 更换数据库文件路径 但不自动同步文件系统 需要手动调用 updateRoots
     bool reLoadDB(std::filesystem::path db_path_utf8);
@@ -70,7 +70,7 @@ public:
     bool removeFileTag(const std::filesystem::path &file_path_utf8, const std::string &tag);
     bool removeFileTag(const std::filesystem::path &file_path_utf8, const std::vector<std::string> &tags);
     // 转换 root 目录列表内的全部文件 如果某文件失败将跳过该文件 如果 keep_old 为 false 只有在全部文件转换成功才删除 如果成功会将默认模式设置为 to_mode
-    // converted_count 非空时写入转换成功的文件数；failed_count 非空时写入失败的文件数
+    // converted_count 非空时写入转换成功的文件数 failed_count 非空时写入失败的文件数
     bool convertMode(TagFileManager::StoreMode from_mode, TagFileManager::StoreMode to_mode, bool keep_old = false,
                      int *converted_count = nullptr, int *failed_count = nullptr);
     void setDefaultMode(const TagFileManager::StoreMode mode);
@@ -90,7 +90,7 @@ public:
     bool removeFile(const std::filesystem::path &path_utf8);
     std::vector<table::FileInfo> searchByTags(const FileDatabase::SearchOptions &opts) const;
     std::optional<table::FileInfo> getFileInfo(const std::filesystem::path &path) const;
-    // files 表的记录条数（= 索引里有多少条记录 含目录记录）；失败返回 -1
+    // files 表的记录条数（= 索引里有多少条记录 含目录记录）失败返回 -1
     int getFileCount() const;
     // 清除失效记录（磁盘上已不存在的文件）：只删数据库记录 磁盘文件一个都不碰
     // removed_count 非空时写入删掉的记录条数
@@ -102,12 +102,6 @@ public:
     // Filename 模式下加/删标签会重命名文件 该值与传入路径可能不同(数据库已按此路径同步)
     const std::filesystem::path &getLastFilePath() const;
 
-    // ---- 结果回报 ----
-    // 写操作只返回 bool；"成功了几个"这类数据一律走上面那些带 nullptr 默认值的 out 参数带出去
-    //（例：reLoadRoot(roots, &indexed, &root_count) / convertMode(from, to, false, &converted)）。
-    // 下面四个 getter 只提供给人看 / 进日志的说明文字：失败是 "[warning] ..." / "[error] ..."，
-    // 成功是可以带数字的 "[tip] ..."（例："[tip] reLoadRoot indexed=42 roots=2"），空串表示无需上报。
-    // 想拿来做判断请用 out 参数，不要解析这些字符串。
     std::string getLastError() const;
     // FileDatabase 错误信息
     std::string getDBError() const;
