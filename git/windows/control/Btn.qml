@@ -1,4 +1,3 @@
-// 参考稿 .btn 及其变体 primary / secondary / danger（sm-btn、微型按钮用 small/tiny）
 import QtQuick
 import QtQuick.Controls.Basic
 
@@ -8,7 +7,6 @@ Button {
     property string kind: "secondary"   // primary | secondary | danger | ghost
     property bool small: false
     property bool tiny: false
-    // 可选图标（qrc:/img/xxx.svg）：留空就还是纯文字按钮，布局与原来完全一致
     property string iconSource: ""
     property int iconSize: control.tiny ? 12 : (control.small ? 14 : 16)
 
@@ -34,7 +32,7 @@ Button {
         border.color: control.kind === "danger" ? Theme.dangerLine : Theme.line2
     }
 
-    // 内容：图标（可选）+ 文字。整行居中，无图标时与原来的纯文字内容项等价
+    // 内容：图标（可选）+ 文字 整行居中 无图标时与原来的纯文字内容项等价
     contentItem: Item {
         implicitWidth: contentRow.implicitWidth
         implicitHeight: contentRow.implicitHeight

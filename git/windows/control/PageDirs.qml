@@ -1,36 +1,34 @@
-// 目录页（参考稿 #page-dirs：HTML 1239-1299 行 + CSS .dir-panel / .dir-row / .status-dot / .dir-path）
-// 只做简单增删（不接后端、不持久化），数据全部来自 Store 单例
-
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 import QtQuick.Dialogs
 import QtCore
 
+// 目录页面
+
 Item {
     id: page
 
-    // 参考稿 @media (max-width:760px)：.dir-row 允许换行、.dir-path max-width 放开
     readonly property bool stackRows: width < 760
 
     // 固定尺寸：窗口锁 1280x820 -> 内容区高 740（与其它页一致）
     readonly property int contentH: 740
     implicitHeight: page.contentH
 
-    // 危险操作确认：页级只放一个弹窗，待执行的动作与目标行存在 pendingAction / pendingIndex 里
+    // 危险操作确认：页级只放一个弹窗 待执行的动作与目标行存在 pendingAction / pendingIndex 里
     property string pendingAction: ""
     property int pendingIndex: -1
 
-    // 目录有效性由 core 判定（DirectoryConfigManager::loadFromFile() 会按磁盘真实情况重算 dir.valid），
-    // 页面出现时再核一次；界面只负责渲染 dir.valid，不再有「标记失效 / 标记有效」的按钮
-    Component.onCompleted: Store.revalidateDirs()
+    // 目录有效性由 core 判定（DirectoryConfigManager::loadFromFile() 会按磁盘真实情况重算 dir.valid）
+    // 页面出现时再核一次 界面只负责渲染 dir.valid 不再有「标记失效 / 标记有效」的按钮
+    Component.onCompleted: ConfigBridge.revalidateDirs()
 
     Column {
         id: col
         width: parent.width
         spacing: 10
 
-        // ---------- 页头 ----------
+        // 页头
         PageHeader {
             id: head
             width: col.width
@@ -41,7 +39,6 @@ Item {
             actionsRightMargin: 0           // 贴到最右边（与下方卡片右边缘齐平）
             actionsAlignToTitle: true       // 右上角按钮与左侧文字行（h1「目录」）垂直居中对齐
 
-            // 参考稿 head-actions：添加目录（打开系统目录选择框）
             Btn {
                 text: Lang.t("btn.addDir")
                 kind: "primary"
@@ -50,12 +47,10 @@ Item {
             }
         }
 
-        // ---------- 卡片 .dir-panel（白底 / 1px Theme.line / 圆角 10 / padding 12）----------
         Rectangle {
             id: panel
             width: col.width
             clip: true
-            // 固定尺寸：吃掉页头之外的剩余高度，列表在卡片内部滚动
             height: Math.max(200, page.contentH - head.height - col.spacing)
             radius: 10
             color: Theme.surface
@@ -69,7 +64,6 @@ Item {
                 width: parent.width - 24
                 spacing: 4   // .panel-title{margin-bottom:4px}
 
-                // .panel-title：12px / 700，后面的数量用 .muted（10.5px / Theme.text3）
                 Row {
                     id: panelTitle
                     spacing: 6
@@ -86,7 +80,7 @@ Item {
                     }
 
                     Text {
-                        text: Store.dirs.length + Lang.t("common.count_suffix")
+                        text: ConfigBridge.dirs.length + Lang.t("common.count_suffix")
                         height: 17
                         verticalAlignment: Text.AlignVCenter
                         font.pixelSize: Theme.px(10)
@@ -96,8 +90,9 @@ Item {
                     }
                 }
 
-                // 目录行：model 绑 Store.dirs.length，行内用 Store.dirs[index] 取值（保证增删实时刷新）
-                // 容器固定高度 + 内部滚动（超出才滚，滚动条隐藏）
+                // 目录行：model 绑 ConfigBridge.dirs.length，行内用 ConfigBridge.dirs[index] 取值
+                //（桥在目录增删 / 刷新 / 有效性重算后发 dirsChanged 列表与文件数就实时跟着变）
+                // 容器固定高度 + 内部滚动（超出才滚 滚动条隐藏）
                 Flickable {
                     id: rowsFlick
                     width: parent.width
@@ -116,7 +111,7 @@ Item {
                     Text {
                         x: Math.max(0, (rowsFlick.width - width) / 2)
                         y: Math.max(0, (rowsFlick.height - height) / 2)
-                        visible: Store.dirs.length === 0
+                        visible: ConfigBridge.dirs.length === 0
                         text: Lang.t("dir.empty")
                         font.pixelSize: Theme.px(11)
                         font.family: Theme.fontFamily
@@ -129,19 +124,16 @@ Item {
                         spacing: 0
 
                     Repeater {
-                        model: Store.dirs.length
+                        model: ConfigBridge.dirs.length
                         delegate: Item {
                             id: dirRow
 
                             required property int index
-
-                            readonly property var dir: Store.dirs[index]
-                            readonly property bool lastRow: dirRow.index === Store.dirs.length - 1
-                            // 参考稿 <760 的换行：用行宽自身判断，避免 delegate 里引用外部 id
+                            readonly property var dir: ConfigBridge.dirs[index]
+                            readonly property bool lastRow: dirRow.index === ConfigBridge.dirs.length - 1
                             readonly property bool stacked: dirRow.width < 760
                             readonly property real padTop: 9
                             readonly property real padBottom: dirRow.lastRow ? 2 : 9
-                            // 宽屏时路径可用的横向空间（.dir-left 是 flex:1）
                             readonly property real pathAvail: Math.max(48, dirRow.width - leftBox.width - actionsRow.width - 24)
 
                             width: parent.width
@@ -149,15 +141,15 @@ Item {
                                     ? (dirRow.padTop + leftBox.height + 6 + pathBox.height + 6 + actionsRow.height + dirRow.padBottom)
                                     : (Math.max(leftBox.height, pathBox.height, actionsRow.height) + dirRow.padTop + dirRow.padBottom)
 
-                            // 双击目录行 = 源工程的 onDirDoubleClicked：进入该目录（这里=进层级浏览并切到文件页）。
-                            // 放在最底层：行内按钮（刷新/打开/删除）声明在后面，点击不会被它抢走
                             MouseArea {
                                 anchors.fill: parent
                                 acceptedButtons: Qt.LeftButton
-                                onDoubleClicked: Store.openDirInBrowse(dirRow.index)
+                                onDoubleClicked: {
+                                    if (ConfigBridge.openDir(dirRow.index))
+                                        Store.goTo("browse")
+                                }
                             }
 
-                            // .dir-row{border-bottom:1px solid #eff1f3}，最后一行不画
                             Rectangle {
                                 visible: !dirRow.lastRow
                                 anchors.left: parent.left
@@ -167,7 +159,7 @@ Item {
                                 color: Theme.lineSoft
                             }
 
-                            // 左：状态点 + 名称 / 文件数（.dir-left / .row-title / .row-desc）
+                            // 左：状态点 + 名称 / 文件数
                             Row {
                                 id: leftBox
                                 spacing: 8
@@ -176,7 +168,6 @@ Item {
                                 anchors.topMargin: dirRow.stacked ? dirRow.padTop : 0
                                 anchors.verticalCenter: dirRow.stacked ? undefined : parent.verticalCenter
 
-                                // .status-dot：7px 圆点 + 3px 外圈（用两个同心 Rectangle 画 box-shadow）
                                 Item {
                                     id: dot
                                     width: 13
@@ -224,7 +215,7 @@ Item {
                                 }
                             }
 
-                            // 中间：路径（.dir-path：等宽字体 / #f6f7f8 底 / 圆角 6 / padding 5px 8px）
+                            // 中间：路径
                             Rectangle {
                                 id: pathBox
                                 height: 23
@@ -250,13 +241,12 @@ Item {
                                     elide: Text.ElideMiddle
                                     font.pixelSize: Theme.px(10)
                                     font.family: Theme.fontMono
-                                    // .dir-path.strikethrough：失效目录加删除线并用 Theme.text3
                                     color: dirRow.dir.valid ? Theme.textPath : Theme.text3
                                     font.strikeout: !dirRow.dir.valid
                                 }
                             }
 
-                            // 右：刷新 / 打开 / 移除（.dir-actions，gap 5）；有效性只渲染，不给按钮
+                            // 右：打开 / 刷新 / 移除
                             Row {
                                 id: actionsRow
                                 spacing: 5
@@ -266,15 +256,23 @@ Item {
                                 anchors.verticalCenter: dirRow.stacked ? undefined : parent.verticalCenter
 
                                 Btn {
-                                    text: Lang.t("common.refresh")
-                                    small: true
-                                    onClicked: Store.refreshDir(dirRow.index)
-                                }
-
-                                Btn {
                                     text: Lang.t("dir.open")
                                     small: true
-                                    onClicked: Store.openDirInBrowse(dirRow.index)
+                                    onClicked: {
+                                        if (ConfigBridge.openDir(dirRow.index))
+                                            Store.goTo("browse")
+                                    }
+                                }
+
+                                // 刷新：单目录重扫会重建这个目录的记录
+                                Btn {
+                                    text: Lang.t("common.refresh")
+                                    small: true
+                                    onClicked: {
+                                        page.pendingAction = "refreshDir"
+                                        page.pendingIndex = dirRow.index
+                                        confirmDialog.open()
+                                    }
                                 }
 
                                 Btn {
@@ -296,38 +294,22 @@ Item {
         }
     }
 
-    // ---------- 系统目录选择框（Qt 6 Quick Dialogs）----------
-    // 选中 → Store.addDir(目录名, 绝对路径)；取消（onRejected 不实现）→ 什么都不做，也不弹 toast
+    // 系统目录选择框
+    // 与同步页「选择目录」/ 设置页导入导出用的是同一套系统选择器
+    // 选中 -> 把 file:// URL 原样交给桥（桥负责转成本地路径 + 校验 + 建索引） 取消 -> 什么都不做
     FolderDialog {
         id: dirDialog
 
         title: Lang.t("dir.browser_title")
-        // 标准路径（file:/// 形式）：已有索引目录就从第一个开始，否则从系统主目录开始
-        // （Qt 6.11 的 FolderDialog 没有 shortcuts 属性；StandardPaths.writableLocation 返回的就是 url）
-        currentFolder: Store.dirs.length > 0
-                       ? "file:///" + String(Store.dirs[0].path).replace(/\\/g, "/")
+        // 标准路径（file:/// 形式）：已有索引目录就从第一个开始 否则从系统主目录开始
+        currentFolder: ConfigBridge.dirs.length > 0
+                       ? "file:///" + String(ConfigBridge.dirs[0].path).replace(/\\/g, "/")
                        : StandardPaths.writableLocation(StandardPaths.HomeLocation)
 
-        onAccepted: {
-            // selectedFolder 是 url：去掉 file:/// 前缀 → 绝对路径；反斜杠统一成正斜杠
-            // （core 侧用 generic_u8string()，路径统一成 C:/xxx 形式）
-            var path = selectedFolder.toString()
-                                   .replace(/^file:\/\/\//, "")
-                                   .replace(/^file:\/\//, "")
-                                   .replace(/\\/g, "/")
-            // 去掉结尾多余的斜杠（根目录 "/" 除外），路径不带尾分隔符
-            if (path.length > 1)
-                path = path.replace(/\/+$/, "")
-            // 目录名取路径最后一段
-            var cut = path.lastIndexOf("/")
-            var name = cut >= 0 ? path.substring(cut + 1) : path
-            Store.addDir(name, path)
-        }
+        onAccepted: ConfigBridge.addDir(selectedFolder.toString())
     }
 
-    // ---------- 危险操作确认弹窗 ----------
-    // 行内按钮只负责把「要做什么 + 对哪一行」写进 pendingAction / pendingIndex 再 open()，
-    // 所以 Repeater 里不会一行一个 Dialog
+    // 危险操作确认弹窗
     Dialog {
         id: confirmDialog
         anchors.centerIn: parent
@@ -343,7 +325,9 @@ Item {
         }
 
         contentItem: Text {
-            text: page.pendingAction === "removeDir" ? Lang.t("confirm.remove_dir") : ""
+            text: page.pendingAction === "removeDir"
+                  ? Lang.t("confirm.remove_dir")
+                  : (page.pendingAction === "refreshDir" ? Lang.t("confirm.refresh_dir") : "")
             wrapMode: Text.WordWrap
             font.pixelSize: Theme.px(12)
             font.family: Theme.fontFamily
@@ -353,7 +337,7 @@ Item {
         footer: Item {
             implicitHeight: 44
 
-            // 取消：清掉待执行动作，什么都不做
+            // 取消：清掉待执行动作 什么都不做
             Btn {
                 text: Lang.t("confirm.cancel")
                 kind: "ghost"
@@ -367,7 +351,7 @@ Item {
                 }
             }
 
-            // 确认：先取出并清空待执行动作，再真正执行
+            // 确认：先取出并清空待执行动作 再真正执行（两个动作都走桥 桥里再碰 core）
             Btn {
                 text: Lang.t("common.ok")
                 kind: "danger"
@@ -380,8 +364,12 @@ Item {
                     page.pendingAction = ""
                     page.pendingIndex = -1
                     confirmDialog.close()
-                    if (action === "removeDir" && index >= 0)
-                        Store.removeDir(index)
+                    if (index < 0)
+                        return
+                    if (action === "removeDir")
+                        ConfigBridge.removeDir(index)
+                    else if (action === "refreshDir")
+                        ConfigBridge.refreshDir(index)
                 }
             }
         }

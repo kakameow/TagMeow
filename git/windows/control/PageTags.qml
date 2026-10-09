@@ -1,41 +1,30 @@
-// 标签库页（参考稿 #page-tags：HTML 1302-1372 行 + CSS .tag-manage-layout / .manage-grid / .manage-card
-//   / .input-row / .table-scroll / .manage-table / .display-group-card / .display-tag-pill）
-// 表格为自绘（QML 无 <table>）：表头随内容一起滚动，未做 sticky 吸顶
-// 只做简单增删（不接后端、不持久化），数据全部来自 Store 单例
-
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 
+// 标签库页面
+
 Item {
     id: page
-
-    // 参考稿 .manage-grid 在窄屏变一列（与 Theme.railWidth 一致用 980 断点）
     readonly property bool oneColumn: width < 980
 
-    // ---------- 固定尺寸比例（窗口锁定 1280×820，内容区可用高度 740：页面被填满，不整页滚动）----------
-    readonly property int contentH: 740     // 页面根节点高度 = 内容区可用高度
-    readonly property int cardH: 292        // 两张 manage-card 固定高度（17 标题 + 9 + 44 输入行 + 9 + 189 表格 + 24 padding）
-    // tag-display 固定可视高度：两列时 740 − 页头 − 卡片 292 − 两处 10 间距 = 376（页头按实测高度，底部不留空）
-    // 单列（<980）时两张卡片纵向堆叠，预览区取剩余高度，保证页面总高仍是 740（不溢出、不整页滚动）
-    readonly property int displayH: oneColumn
-                                    ? Math.max(0, contentH - headerBox.height - (cardH * 2 + 10) - 20)
-                                    : contentH - headerBox.height - 10 - cardH - 10
+    //  固定尺寸比例（窗口锁定 1280×820 内容区可用高度 740：页面被填满 不整页滚动）
+    readonly property int contentH: 740
+    readonly property int cardH: 292
 
-    // ---------- RGB 选色盘（参考稿 #cpBackdrop / .cp-modal，HTML 1603-1639）----------
-    // 选色盘当前 RGB（对应参考稿 cpR / cpG / cpB）：打开弹窗时用 Store.typeColor 初始化，不预置颜色
+    readonly property int displayH: oneColumn ? Math.max(0, contentH - headerBox.height - (cardH * 2 + 10) - 20) : contentH - headerBox.height - 10 - cardH - 10
+
     property int pickR: 0
     property int pickG: 0
     property int pickB: 0
 
-    // 危险操作确认：页级只放一个弹窗，待执行的动作与目标 id 存在 pendingAction / pendingId 里
-    // （pendingId 存的是待删的 typeId / tagId 或待改名的 typeId，不是表格行号，删行不影响它）
-    // pendingName 只在「重命名类型」时用：确认前先把新名称记下来，输入框本身保持不动
+    // 危险操作确认：页级只放一个弹窗 待执行的动作与目标 id 存在 pendingAction / pendingId 里
     property string pendingAction: ""
     property int pendingId: -1
+    property string pendingOldName: ""
     property string pendingName: ""
 
-    // "#abc" / "#AABBCC" → { r, g, b }；非法值回退到 Store.typeColor（仍非法才用黑色兜底）
+    // "#abc" / "#AABBCC" → { r, g, b } 非法值回退到 Store.typeColor（仍非法才用黑色兜底）
     function hexToRgb(hex) {
         var h = String(hex === undefined || hex === null ? "" : hex).trim()
         if (h.charAt(0) === "#")
@@ -55,7 +44,7 @@ Item {
         }
     }
 
-    // 0-255 取整（参考稿 clamp255）
+    // 0-255 取整
     function clamp255(n) {
         var v = Math.round(Number(n))
         if (isNaN(v))
@@ -63,25 +52,47 @@ Item {
         return Math.max(0, Math.min(255, v))
     }
 
-    // 单个通道 → 两位大写十六进制
+    // 单个通道 两位大写十六进制
     function toHex2(n) {
         var s = page.clamp255(n).toString(16).toUpperCase()
         return s.length < 2 ? "0" + s : s
     }
 
-    // r / g / b → "#RRGGBB"（大写，参考稿 rgbToHex）
+    // r / g / b → "#RRGGBB"
     function rgbToHex(r, g, b) {
         return "#" + page.toHex2(r) + page.toHex2(g) + page.toHex2(b)
     }
 
-    // 打开选色盘：用当前 Store.typeColor 初始化三个滑块（参考稿 openColorPicker）
+
+    // 这两个是**页面内的查询函数**，不是桥的 invokable —— 它们读 ConfigBridge.tags / ConfigBridge.types
+    function tagsOfType(typeId) {
+        var out = []
+        for (var i = 0; i < ConfigBridge.tags.length; i++) {
+            if (ConfigBridge.tags[i].typeId === typeId)
+                out.push(ConfigBridge.tags[i])
+        }
+        return out
+    }
+
+    function typeColorOf(typeId) {
+        for (var i = 0; i < ConfigBridge.types.length; i++) {
+            if (ConfigBridge.types[i].typeId === typeId) {
+                var c = ConfigBridge.types[i].color
+                // core 理论上不会给空颜色，兜一层免得 color 绑定报 "Unable to assign [undefined]"
+                return (c === undefined || c === null || c === "") ? Theme.accent : c
+            }
+        }
+        return Theme.accent
+    }
+
+    // 打开选色盘
     function openColorPicker() {
         var rgb = page.hexToRgb(Store.typeColor)
         page.setPickerRgb(rgb.r, rgb.g, rgb.b)
         colorPopup.open()
     }
 
-    // 把 RGB 同步到三个滑块 + HEX 输入框（参考稿 refreshPicker）
+    // 把 RGB 同步到三个滑块 + HEX 输入框
     function setPickerRgb(r, g, b) {
         page.pickR = page.clamp255(r)
         page.pickG = page.clamp255(g)
@@ -92,13 +103,13 @@ Item {
         hexInput.text = page.rgbToHex(page.pickR, page.pickG, page.pickB)
     }
 
-    // 回填 HEX 输入框的规范值；输入框正在编辑时不打断（参考稿 refreshPicker 的 activeElement 判断）
+    // 回填 HEX 输入框的规范值 输入框正在编辑时不打断（参考稿 refreshPicker 的 activeElement 判断）
     function syncHexField() {
         if (!hexInput.activeFocus)
             hexInput.text = page.rgbToHex(page.pickR, page.pickG, page.pickB)
     }
 
-    // HEX 手输：合法 6 位十六进制立刻同步滑块与预览；非法输入忽略，等失焦回填（参考稿 cpHex 的 input 事件）
+    // HEX 手输：合法 6 位十六进制立刻同步滑块与预览 非法输入忽略 等失焦回填
     function applyHexText() {
         var v = hexInput.text.trim()
         if (v.charAt(0) !== "#")
@@ -114,28 +125,27 @@ Item {
         bSlider.value = rgb.b
     }
 
-    // 确定：规范化为大写 "#RRGGBB" 写入 Store.typeColor；
-    // 已经选中类型时直接把这个颜色应用到该类型（对应源工程 onResetTypeColorClicked -> setTypeColor）
+    // 确定：规范化为大写 "#RRGGBB" 写入 Store.typeColor
     function confirmColorPicker() {
         var hex = page.rgbToHex(page.pickR, page.pickG, page.pickB)
         Store.typeColor = hex
         if (Store.selectedTypeId > 0) {
-            Store.setTypeColor(Store.selectedTypeId, hex)      // 成功时由 Store 提示"已更新类型颜色"
+            ConfigBridge.setTypeColor(Store.selectedTypeId, hex)      // 成功时由 Store 提示"已更新类型颜色"
         } else {
             Store.toast(Lang.t("editor.color_updated_prefix") + hex)
         }
         colorPopup.close()
     }
 
-    // 页面根节点固定为内容区可用高度（740），内部各块定高，因此不产生整页滚动、底部无空白
+    // 页面根节点固定为内容区可用高度740 内部各块定高因
     implicitHeight: page.contentH
 
     Column {
         id: col
         width: parent.width
-        spacing: 10   // .tag-manage-layout{gap:10px}
+        spacing: 10
 
-        // ---------- 页头 ----------
+        // 页头
         PageHeader {
             id: headerBox
             width: col.width
@@ -144,8 +154,6 @@ Item {
             desc: Lang.t("tag.desc")
         }
 
-        // ---------- .manage-grid：两列（<980 一列）----------
-        // 参考稿 .manage-grid 是 align-items:start（两卡各自内容高度）；按需求改成两列等高、底边对齐
         GridLayout {
             id: grid
             width: col.width
@@ -153,13 +161,13 @@ Item {
             columnSpacing: 10
             rowSpacing: 10
 
-            // ======== 类型管理卡片 ========
+            // 类型管理卡片
             Rectangle {
                 id: typeCard
                 implicitWidth: (grid.width - 10) / 2
-                implicitHeight: page.cardH             // 固定高度：292 = 17 标题 + 9 + 44 输入行 + 9 + 189 表格 + 24 padding
+                implicitHeight: page.cardH
                 Layout.fillWidth: true
-                Layout.fillHeight: !page.oneColumn    // 单列时不拉高，保持内容高度
+                Layout.fillHeight: !page.oneColumn
                 radius: 10
                 color: Theme.surface
                 border.width: 1
@@ -170,7 +178,7 @@ Item {
                     x: 12
                     y: 12
                     width: parent.width - 24
-                    spacing: 9   // .manage-card{gap:9px}
+                    spacing: 9
 
                     Text {
                         text: Lang.t("tag.types_title")
@@ -182,7 +190,6 @@ Item {
                         color: Theme.text
                     }
 
-                    // .input-row：灰底 / 圆角 8 / padding 8 / gap 6
                     Rectangle {
                         id: typeInputRow
                         width: parent.width
@@ -210,8 +217,6 @@ Item {
                                 color: Theme.text2
                             }
 
-                            // .color-block：28×28 / 圆角 7 / 2px 白边 + 1px 外描边；hover 外描边变 Theme.accent
-                            // 点击打开 RGB 选色盘（参考稿 colorBlock 的 click → openColorPicker）
                             Rectangle {
                                 id: typeColorBlock
                                 width: 28
@@ -221,7 +226,6 @@ Item {
                                 border.width: 1
                                 border.color: typeColorMouse.containsMouse ? Theme.accent : Theme.line2
 
-                                // 内层：当前类型色 + 2px 白边（参考稿 border:2px solid #fff）
                                 Rectangle {
                                     anchors.fill: parent
                                     anchors.margins: 1
@@ -240,7 +244,6 @@ Item {
                                 }
                             }
 
-                            // .input-field-sm：类型名称
                             TextField {
                                 id: typeNameInput
                                 width: 120
@@ -267,7 +270,7 @@ Item {
                                 kind: "primary"
                                 small: true
                                 onClicked: {
-                                    Store.addType(typeNameInput.text, Store.typeColor)
+                                    ConfigBridge.addType(typeNameInput.text, Store.typeColor)
                                     typeNameInput.text = ""
                                 }
                             }
@@ -287,7 +290,6 @@ Item {
                                 }
                             }
 
-                            // .input-field-sm：新名称
                             TextField {
                                 id: typeRenameInput
                                 width: 110
@@ -313,25 +315,27 @@ Item {
                                 text: Lang.t("common.rename")
                                 small: true
                                 onClicked: {
-                                    // 只「装弹」不执行：先校验，缺什么就提示什么，都不进确认弹窗
-                                    if (Store.selectedTypeId <= 0) {
+                                    // 语义：把**类型名称输入框**里的那个类型 重命名成**重命名输入框**里的名字
+                                    var oldName = typeNameInput.text.trim()
+                                    var newName = typeRenameInput.text.trim()
+                                    if (oldName.length === 0) {
                                         Store.toast(Lang.t("tag.pick_type_first"))
                                         return
                                     }
-                                    if (typeRenameInput.text.length === 0) {
+                                    if (newName.length === 0) {
                                         Store.toast(Lang.t("editor.name_required"))
                                         return
                                     }
                                     page.pendingAction = "renameType"
-                                    page.pendingId = Store.selectedTypeId
-                                    page.pendingName = typeRenameInput.text
+                                    page.pendingId = -1
+                                    page.pendingOldName = oldName
+                                    page.pendingName = newName
                                     confirmDialog.open()
                                 }
                             }
                         }
                     }
 
-                    // .table-scroll：固定高度 189 / 圆角 8 / 1px #eef0f2 / 内部竖向滚动
                     Rectangle {
                         id: typeTableBox
                         width: parent.width
@@ -444,23 +448,23 @@ Item {
                                     }
                                 }
 
-                                // 类型行：model 绑 Store.types.length，用 Store.types[index] 取值保证实时刷新
+                                // 类型行：model 绑 ConfigBridge.types.length 用 ConfigBridge.types[index] 取值保证实时刷新
                                 Repeater {
-                                    model: Store.types.length
+                                    model: ConfigBridge.types.length
 
                                     delegate: Item {
                                         id: typeRow
                                         required property int index
 
-                                        readonly property var typeItem: Store.types[index]
+                                        readonly property var typeItem: ConfigBridge.types[index]
                                         readonly property bool selected: Store.selectedTypeId === typeRow.typeItem.typeId
-                                        readonly property int tagTotal: Store.tagsOfType(typeRow.typeItem.typeId).length
+                                        readonly property int tagTotal: page.tagsOfType(typeRow.typeItem.typeId).length
                                         readonly property real nameColW: Math.max(60, typeRow.width - 156)
 
                                         width: parent.width
                                         height: 27
 
-                                        // 选中行 #eef1ff（Theme.accentSoft）/ hover #fafbfc（Theme.surface2），选中优先（参考稿 tbody tr:hover）
+                                        // 选中行
                                         Rectangle {
                                             anchors.fill: parent
                                             color: typeRow.selected ? Theme.accentSoft
@@ -468,7 +472,7 @@ Item {
                                         }
 
                                         Rectangle {
-                                            visible: typeRow.index < Store.types.length - 1
+                                            visible: typeRow.index < ConfigBridge.types.length - 1
                                             anchors.left: parent.left
                                             anchors.right: parent.right
                                             anchors.bottom: parent.bottom
@@ -476,16 +480,15 @@ Item {
                                             color: Theme.lineSoft
                                         }
 
-                                        // 行点击选中（在「删除」按钮下层，按钮点击不会传到这里）
-                                        // 顺带回填：颜色进选色入口、类型名进「重命名」输入框（源工程 onLibraryTypeClicked 的回填行为）
+                                        // 行点击选中（在「删除」按钮下层 按钮点击不会传到这里）
                                         MouseArea {
                                             id: typeRowMouse
                                             anchors.fill: parent
                                             hoverEnabled: true
                                             onClicked: {
                                                 Store.selectedTypeId = typeRow.typeItem.typeId
-                                                Store.typeColor = Store.typeColorOf(typeRow.typeItem.typeId)
-                                                typeRenameInput.text = typeRow.typeItem.name
+                                                Store.typeColor = page.typeColorOf(typeRow.typeItem.typeId)
+                                                typeNameInput.text = typeRow.typeItem.name
                                             }
                                         }
 
@@ -496,7 +499,7 @@ Item {
                                             height: 12
                                             radius: 6
                                             anchors.verticalCenter: parent.verticalCenter
-                                            color: Store.typeColorOf(typeRow.typeItem.typeId)
+                                            color: page.typeColorOf(typeRow.typeItem.typeId)
                                             border.width: 1
                                             border.color: "#0f000000"
                                         }
@@ -550,7 +553,7 @@ Item {
                                 x: Math.max(0, (typeFlick.width - width) / 2)
                                 y: Math.max(0, (typeFlick.height - height) / 2)
                                 width: Math.min(implicitWidth, typeFlick.width - 24)
-                                visible: Store.types.length === 0
+                                visible: ConfigBridge.types.length === 0
                                 text: Lang.t("editor.empty_types")
                                 horizontalAlignment: Text.AlignHCenter
                                 wrapMode: Text.WordWrap
@@ -563,13 +566,13 @@ Item {
                 }
             }
 
-            // ======== 标签管理卡片 ========
+            // 标签管理卡片
             Rectangle {
                 id: tagCard
                 implicitWidth: (grid.width - 10) / 2
-                implicitHeight: page.cardH             // 与类型管理卡片同高（292）
+                implicitHeight: page.cardH
                 Layout.fillWidth: true
-                Layout.fillHeight: !page.oneColumn    // 与类型管理卡片等高（底边对齐）
+                Layout.fillHeight: !page.oneColumn
                 radius: 10
                 color: Theme.surface
                 border.width: 1
@@ -592,7 +595,6 @@ Item {
                         color: Theme.text
                     }
 
-                    // .input-row：所属类型 / 标签名称 / 添加 / 删除
                     Rectangle {
                         id: tagInputRow
                         width: parent.width
@@ -620,12 +622,11 @@ Item {
                                 color: Theme.text2
                             }
 
-                            // 类型下拉：选中项与 Store.selectedTypeId 双向同步
                             ComboBox {
                                 id: tagTypeCombo
                                 width: 120
                                 height: 28
-                                model: Store.types
+                                model: ConfigBridge.types
                                 textRole: "name"
                                 leftPadding: 8
                                 rightPadding: 20
@@ -687,17 +688,17 @@ Item {
                                     }
                                 }
 
-                                // 选中的类型被删掉时退回第一个类型（参考稿 populateTypeSelect）
+                                // 选中的类型被删掉时退回第一个类型
                                 function syncIndex() {
-                                    for (var i = 0; i < Store.types.length; i++) {
-                                        if (Store.types[i].typeId === Store.selectedTypeId) {
+                                    for (var i = 0; i < ConfigBridge.types.length; i++) {
+                                        if (ConfigBridge.types[i].typeId === Store.selectedTypeId) {
                                             tagTypeCombo.currentIndex = i
                                             return
                                         }
                                     }
-                                    if (Store.types.length > 0) {
+                                    if (ConfigBridge.types.length > 0) {
                                         tagTypeCombo.currentIndex = 0
-                                        Store.selectedTypeId = Store.types[0].typeId
+                                        Store.selectedTypeId = ConfigBridge.types[0].typeId
                                     } else {
                                         tagTypeCombo.currentIndex = -1
                                     }
@@ -706,13 +707,19 @@ Item {
                                 Component.onCompleted: tagTypeCombo.syncIndex()
 
                                 onActivated: function (index) {
-                                    if (index >= 0 && index < Store.types.length)
-                                        Store.selectedTypeId = Store.types[index].typeId
+                                    if (index >= 0 && index < ConfigBridge.types.length)
+                                        Store.selectedTypeId = ConfigBridge.types[index].typeId
                                 }
 
                                 Connections {
+                                    // 选中项在 Store 纯 UI 态
                                     target: Store
                                     function onSelectedTypeIdChanged() { tagTypeCombo.syncIndex() }
+                                }
+
+                                Connections {
+                                    // 类型列表在桥 增删改之后桥会发 typesChanged
+                                    target: ConfigBridge
                                     function onTypesChanged() { tagTypeCombo.syncIndex() }
                                 }
                             }
@@ -743,7 +750,7 @@ Item {
                                 kind: "primary"
                                 small: true
                                 onClicked: {
-                                    Store.addTag(Store.selectedTypeId, tagNameInput.text)
+                                    ConfigBridge.addTag(Store.selectedTypeId, tagNameInput.text)
                                     tagNameInput.text = ""
                                 }
                             }
@@ -864,15 +871,15 @@ Item {
                                     }
                                 }
 
-                                // 标签行：只列当前选中类型的标签（参考稿 renderTagTable 行为）
+                                // 标签行：只列当前选中类型的标签
                                 Repeater {
-                                    model: Store.tagsOfType(Store.selectedTypeId).length
+                                    model: page.tagsOfType(Store.selectedTypeId).length
 
                                     delegate: Item {
                                         id: tagRow
                                         required property int index
 
-                                        readonly property var tagItem: Store.tagsOfType(Store.selectedTypeId)[index]
+                                        readonly property var tagItem: page.tagsOfType(Store.selectedTypeId)[index]
                                         readonly property bool selected: Store.selectedTagId === tagRow.tagItem.tagId
                                         readonly property real nameColW: Math.max(60, tagRow.width - 100)
 
@@ -887,7 +894,7 @@ Item {
                                         }
 
                                         Rectangle {
-                                            visible: tagRow.index < Store.tagsOfType(Store.selectedTypeId).length - 1
+                                            visible: tagRow.index < page.tagsOfType(Store.selectedTypeId).length - 1
                                             anchors.left: parent.left
                                             anchors.right: parent.right
                                             anchors.bottom: parent.bottom
@@ -909,7 +916,7 @@ Item {
                                             height: 12
                                             radius: 6
                                             anchors.verticalCenter: parent.verticalCenter
-                                            color: Store.typeColorOf(tagRow.tagItem.typeId)
+                                            color: page.typeColorOf(tagRow.tagItem.typeId)
                                             border.width: 1
                                             border.color: "#0f000000"
                                         }
@@ -950,7 +957,7 @@ Item {
                                 x: Math.max(0, (tagFlick.width - width) / 2)
                                 y: Math.max(0, (tagFlick.height - height) / 2)
                                 width: Math.min(implicitWidth, tagFlick.width - 24)
-                                visible: Store.tagsOfType(Store.selectedTypeId).length === 0
+                                visible: page.tagsOfType(Store.selectedTypeId).length === 0
                                 text: Lang.t("editor.empty_tags")
                                 horizontalAlignment: Text.AlignHCenter
                                 wrapMode: Text.WordWrap
@@ -964,7 +971,7 @@ Item {
             }
         }
 
-        // ---------- 整页标签预览 .tag-display：固定可视高度（740 下为 376）+ 内部竖向滚动 ----------
+        // 整页标签预览
         Flickable {
             id: displayFlick
             width: col.width
@@ -989,18 +996,17 @@ Item {
             Column {
                 id: displayCol
                 width: displayFlick.width
-                spacing: 8   // .tag-display{gap:8px}
+                spacing: 8
 
                 Repeater {
-                    model: Store.types.length
+                    model: ConfigBridge.types.length
 
                     delegate: Rectangle {
                         id: groupCard
                         required property int index
 
-                        readonly property var typeItem: Store.types[index]
-                        readonly property var groupTags: Store.tagsOfType(groupCard.typeItem.typeId)
-                        // pill 的 model：{ name, color }（颜色来自所属类型）
+                        readonly property var typeItem: ConfigBridge.types[index]
+                        readonly property var groupTags: page.tagsOfType(groupCard.typeItem.typeId)
                         readonly property var pillItems: {
                             var out = []
                             for (var i = 0; i < groupCard.groupTags.length; i++)
@@ -1009,8 +1015,7 @@ Item {
                         }
 
                         width: parent.width
-                        height: groupCol.height + 18   // .display-group-card{padding:9px 10px}
-                        radius: 9
+                        height: groupCol.height + 18
                         color: Theme.surface
                         border.width: 1
                         border.color: Theme.line
@@ -1022,7 +1027,6 @@ Item {
                             width: parent.width - 20
                             spacing: 7
 
-                            // .display-group-header：色块 + 类型名 + 右侧数量
                             Item {
                                 id: groupHead
                                 width: parent.width
@@ -1062,7 +1066,6 @@ Item {
                                 }
                             }
 
-                            // .display-tags
                             Flow {
                                 width: parent.width
                                 spacing: 5
@@ -1077,7 +1080,6 @@ Item {
                                         width: pillBox.width
                                         height: 25
 
-                                        // .display-tag-pill：高 24 / 圆角 6 / 白底 / 1px Theme.line2；hover 上浮 1px
                                         Rectangle {
                                             id: pillBox
                                             width: pillRow.implicitWidth + 18
@@ -1128,11 +1130,10 @@ Item {
                 }
             }
 
-            // 空态：core 还没给出类型数据时预览区显示灰字提示
             Text {
                 x: Math.max(0, (displayFlick.width - width) / 2)
                 y: Math.max(0, (displayFlick.height - height) / 2)
-                visible: Store.types.length === 0
+                visible: ConfigBridge.types.length === 0
                 text: Lang.t("tag.library_empty_hint")
                 font.pixelSize: Theme.px(11)
                 font.family: Theme.fontFamily
@@ -1141,9 +1142,9 @@ Item {
         }
     }
 
-    // ---------- 危险操作确认弹窗（删除类型 / 删除标签 / 重命名类型共用）----------
-    // 行内「删除」按钮与编辑器里的「删除」按钮都只写 pendingAction / pendingId 再 open()，
-    // Repeater 里不会一行一个 Dialog；「重命名」还额外把新名称写进 pendingName
+    // 危险操作确认弹窗（删除类型 / 删除标签 / 重命名类型共用）
+    // 行内「删除」按钮与编辑器里的「删除」按钮都只写 pendingAction / pendingId 再 open()
+    // Repeater 里不会一行一个 Dialog「重命名」还额外把新名称写进 pendingName
     Dialog {
         id: confirmDialog
         anchors.centerIn: parent
@@ -1159,7 +1160,6 @@ Item {
         }
 
         contentItem: Text {
-            // 文案跟着 pendingAction 走：删标签 / 重命名 / 其余（删类型）三种都对
             text: page.pendingAction === "removeTag" ? Lang.t("confirm.remove_tag")
                   : page.pendingAction === "renameType" ? Lang.t("confirm.rename_type")
                   : Lang.t("confirm.remove_type")
@@ -1172,7 +1172,7 @@ Item {
         footer: Item {
             implicitHeight: 44
 
-            // 取消：清掉待执行动作（含重命名记住的新名称），什么都不做
+            // 取消：清掉待执行动作
             Btn {
                 text: Lang.t("confirm.cancel")
                 kind: "ghost"
@@ -1182,15 +1182,16 @@ Item {
                 onClicked: {
                     page.pendingAction = ""
                     page.pendingId = -1
+                    page.pendingOldName = ""
                     page.pendingName = ""
                     confirmDialog.close()
                 }
             }
 
-            // 确认：先取出并清空待执行动作，再真正执行
+            // 确认：先取出并清空待执行动作 再真正执行
             Btn {
                 text: Lang.t("common.ok")
-                // 删除类操作用红按钮，重命名不是危险操作 -> 用主色按钮
+                // 删除类操作用红按钮 重命名不是危险操作 -> 用主色按钮
                 kind: page.pendingAction === "renameType" ? "primary" : "danger"
                 anchors.right: parent.right
                 anchors.rightMargin: 14
@@ -1198,32 +1199,35 @@ Item {
                 onClicked: {
                     var action = page.pendingAction
                     var id = page.pendingId
+                    var oldName = page.pendingOldName
                     var name = page.pendingName
                     page.pendingAction = ""
                     page.pendingId = -1
+                    page.pendingOldName = ""
                     page.pendingName = ""
                     confirmDialog.close()
                     if (action === "removeType" && id > 0)
-                        Store.removeType(id)
+                        ConfigBridge.removeType(id)
                     else if (action === "removeTag" && id > 0)
-                        Store.removeTag(id)
-                    else if (action === "renameType" && id > 0) {
-                        Store.renameType(id, name)
-                        typeRenameInput.text = ""
+                        ConfigBridge.removeTag(id)
+                    else if (action === "renameType" && oldName.length > 0) {
+                        // 源类型按名字找（类型名称输入框里那个）-> 改成重命名输入框里的名字
+                        // 成功才动输入框：名字输入框跟着走到改名后的类型上 重命名输入框清空
+                        if (ConfigBridge.renameType(oldName, name)) {
+                            typeNameInput.text = name
+                            typeRenameInput.text = ""
+                        }
                     }
                 }
             }
         }
     }
 
-    // ---------- RGB 选色盘弹窗（参考稿 #cpBackdrop / .cp-modal / .cp-body / .cp-actions）----------
-    // 点色块打开；点遮罩（CloseOnPressOutside）/ × / 取消 / Esc（CloseOnEscape）→ 关闭且不改色
+    // RGB 选色盘弹窗
     Popup {
         id: colorPopup
         width: 300
-        // 高度 = 标题栏 48 + 内容区 222（13 + 46 + 3×26 + 28 + 11×4 + 13）+ 按钮栏 50
         height: 320
-        // 居中于标签库页（Popup 默认贴左上角，必须显式定位）
         x: (page.width - width) / 2
         y: (page.height - height) / 2
         modal: true
@@ -1232,10 +1236,9 @@ Item {
         padding: 0
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
-        // 遮罩：参考稿 .cp-backdrop 的 rgba(15,18,24,.32)
+        // 遮罩
         Overlay.modal: Rectangle { color: "#520f1218" }
 
-        // .cp-modal：宽 300 / 圆角 12 / 1px Theme.line2 / 白底
         background: Rectangle {
             radius: 12
             color: Theme.surface
@@ -1248,7 +1251,6 @@ Item {
             width: parent.width
             height: 320
 
-            // .cp-head：11×13 padding + 下边框 1px Theme.line
             Item {
                 id: cpHead
                 width: parent.width
@@ -1264,7 +1266,6 @@ Item {
                     color: Theme.text
                 }
 
-                // .cp-head .icon-btn：26×26 / 圆角 6
                 Rectangle {
                     width: 26
                     height: 26
@@ -1299,7 +1300,6 @@ Item {
                 }
             }
 
-            // .cp-body：padding 13 / 行间距 11
             Item {
                 id: cpBody
                 width: parent.width
@@ -1312,7 +1312,6 @@ Item {
                     width: parent.width - 26
                     spacing: 11
 
-                    // .cp-preview：高 46 / 圆角 9 / 1px Theme.line2，背景实时跟随 RGB
                     Rectangle {
                         width: parent.width
                         height: 46
@@ -1322,7 +1321,6 @@ Item {
                         border.color: Theme.line2
                     }
 
-                    // .cp-slider-row：R —— 轨道高 6 / 圆角 3 / #000→#f00 渐变 + 15×15 白色圆手柄
                     Item {
                         id: rRow
                         width: parent.width
@@ -1354,7 +1352,6 @@ Item {
                             topPadding: 0
                             bottomPadding: 0
 
-                            // 值由 setPickerRgb() / applyHexText() 赋值，这里只把拖动结果写回 page.pickR
                             onValueChanged: {
                                 page.pickR = Math.round(value)
                                 page.syncHexField()
@@ -1385,7 +1382,6 @@ Item {
                             }
                         }
 
-                        // .cp-val：宽 32 / 右对齐 / 等宽
                         Text {
                             x: rRow.width - 32
                             width: 32
@@ -1399,7 +1395,6 @@ Item {
                         }
                     }
 
-                    // .cp-slider-row：G —— 轨道渐变 #000→#0f0
                     Item {
                         id: gRow
                         width: parent.width
@@ -1474,7 +1469,6 @@ Item {
                         }
                     }
 
-                    // .cp-slider-row：B —— 轨道渐变 #000→#00f
                     Item {
                         id: bRow
                         width: parent.width
@@ -1549,7 +1543,6 @@ Item {
                         }
                     }
 
-                    // .cp-hex-row：HEX 标签 + 可编辑输入框（等宽 / 大写 / 高 28）
                     Item {
                         id: hexRow
                         width: parent.width
@@ -1597,7 +1590,6 @@ Item {
                 }
             }
 
-            // .cp-actions：右对齐 取消 / 确定（padding 10×13 + 上边框 + #fafbfc 底）
             Rectangle {
                 id: cpActions
                 width: parent.width

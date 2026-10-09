@@ -1,4 +1,3 @@
-// 参考稿 .chip（筛选条件标签：圆点 + 名称 + 可删）
 import QtQuick
 
 Rectangle {

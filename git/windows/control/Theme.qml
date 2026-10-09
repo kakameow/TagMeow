@@ -1,44 +1,27 @@
-// TagMeow 新 UI 配色单例：日间 / 夜间两套颜色字典 + 与 Palette.js 同名的对外属性
-//
-// 来源与口径：
-//   日间表 = 安卓分支 values/colors.xml 的全部键 + 原型 Palette.js 的设计令牌（原型原有值逐字节保留）
-//   夜间表 = 安卓分支只有 values-night/themes.xml，没有 values-night/colors.xml；
-//            因此除页底色取自 MainActivity.buildThemeSwatch 的夜间色块 #202124（其描边 #3C3D40 用作线色锚点）
-//            之外，其余夜间值都是按深色底推导的协调值（推导值已在下表分组注明）
-//            —— 深底浅字：text 系为浅灰；边框/分隔线可见：line/line2/border 系比底色亮一档；
-//               accent 系略提亮但仍够深（accent #5c74f0 / hover #6e85ff：压在深底上依旧醒目，
-//               同时主按钮上的白字对比仍有 4.0 以上），chip / tiny-chip 三组（蓝 / 绿 / 素）各有独立夜间值；
-//               安卓原生键（text_primary…filter_only_border）的夜间值同样是推导值
-//
-// 用法：调用方把原来的「Palette 别名 + 点号」引用直接换成 Theme.xxx；设置页改 Theme.dark 即整界面实时换色
 pragma Singleton
 
 import QtQuick
 
+// TagMeow 新 UI 配色单例：日间 / 夜间两套颜色字典 + 与 Palette.js 同名的对外属性
+// 用法：调用方把原来的「Palette 别名 + 点号」引用直接换成 Theme.xxx 设置页改 Theme.dark 即整界面实时换色
+
 QtObject {
     id: theme
 
-    // false = 日间（默认）；true = 夜间
+    // false = 日间 默认; true = 夜间
     property bool dark: false
 
-    // ---------------- 全局字号缩放（由 ConfigBridge.fontSize 驱动，基准 12 -> 1.0） ----------------
-    // ConfigBridge.fontSize 就是 core 的 ./config/config.json（ConfigLoader::font_size_，默认 12）：
-    // 设置页改字号 -> 写 ConfigBridge.fontSize -> 改 ConfigLoader 字段并 saveConfig() 落盘
-    // -> fontSizeChanged -> 这里重算 -> 全界面重算
+    //  全局字号缩放（由 ConfigBridge.fontSize 驱动 基准 12 -> 1.0）
     readonly property int baseFontSize: ConfigBridge.fontSize > 0 ? ConfigBridge.fontSize : 12
     readonly property real fontScale: baseFontSize / 12
 
-    // 全局字号换算：设计稿里写死的字号 n 一律写成 font.pixelSize: Theme.px(n)
-    // 语义与旧工程一致（fontSize 等比级联）：按基准 12 等比缩放，返回值一定是整数（QML 的 font.pixelSize 是 int）
-    // 直接算 n * fontSize / 12 而不经过 fontScale：保证 fontSize == 12 时 px(n) === n，且不引入浮点偏差
-    // 注意：本文件内部不要用 px()（Theme 引用自己会成环），Theme.qml 自己也不设字号
+
     function px(n) {
         return Math.round(n * baseFontSize / 12)
     }
 
-    // ---------------- 日间表 ----------------
+    // 日间表
     readonly property var day: ({
-        // ----- 原型 Palette.js 原有令牌（原值） -----
         "bg": "#f4f5f7",
         "surface": "#ffffff",
         "surface2": "#fafbfc",
@@ -46,13 +29,13 @@ QtObject {
         "hover": "#eef0f3",
         "text": "#191b1f",
         "text2": "#5c6169",
-        "text3": "#8b9098",                 // 原 #8b9097 的近似字面值并入（差 1）
+        "text3": "#8b9098",
         "line": "#e6e8ec",
-        "line2": "#d9dce1",                 // 原 #cfd5dd（拖拽虚线）并入（差 4）
+        "line2": "#d9dce1",
         "accent": "#4b6bff",
         "accentHover": "#3f5ff0",
         "accentSoft": "#eef1ff",
-        "accentText": "#2f4cd6",            // 原 #3155d4（拖拽提示字）并入（差 2）
+        "accentText": "#2f4cd6",
         "danger": "#d84e59",
         "dangerLine": "#f4dce0",
         "ok": "#3fa06b",
@@ -67,24 +50,21 @@ QtObject {
         "chipPlainText": "#5d636b",
         "filterGroupBg": { "include": "#edf7f0", "exclude": "#fff1f2", "only": "#eef3ff" },
         "filterGroupLine": { "include": "#d9eee0", "exclude": "#f4dce0", "only": "#dde5ff" },
-        // 原 Palette.js 键表里有、文件里没写的页底色兜底（取值同安卓 page_bg）
         "pageBg": "#f5f6f8",
-
-        // ----- 原界面里硬编码、现归入字典的中性色（日间值 = 原字面值；括号里是被并入的近似字面值） -----
-        "surfaceInset": "#f7f8fa",          // 并入 #f8f9fb / #f6f7f8 / #f5f7fa
-        "surfaceInsetHover": "#f1f3f6",     // 并入 #f1f3f5 / #f1f2f4 / #e9ebef
-        "lineSoft": "#f0f1f3",              // 并入 #eff1f3 / #eef0f2 / #eceef2
+        "surfaceInset": "#f7f8fa",
+        "surfaceInsetHover": "#f1f3f6",
+        "lineSoft": "#f0f1f3",
         "borderFaint": "#e4e7eb",
-        "controlLine": "#cfd4da",           // 并入 #cbd3e2（胶囊描边 hover）
+        "controlLine": "#cfd4da",
         "scrollThumb": "#d3d7dd",
-        "scrollThumbHover": "#c3c8cf",      // 并入 #bcc1c9
+        "scrollThumbHover": "#c3c8cf",
         "iconFaint": "#b0b5bc",
-        "textDeep": "#3d434a",              // 并入 #41464d
+        "textDeep": "#3d434a",
         "textPath": "#555b63",
         "textMid": "#646a72",
         "textDim": "#7b8188",
         "textGhost": "#9ca2a9",
-        "tintBlue": "#edf4ff",              // 并入 #f2f5ff / #edf1ff（拖拽高亮）
+        "tintBlue": "#edf4ff",
         "tintPurple": "#f5efff",
         "tintRed": "#fff0f0",
         "tintGreen": "#e5f7ee",
@@ -96,8 +76,6 @@ QtObject {
         "accentLineSoft": "#c3ceff",
         "accentIcon": "#7b8ce8",
         "okDot": "#46b77a",
-
-        // ----- 安卓 values/colors.xml 原有键（原值） -----
         "black": "#000000",
         "white": "#ffffff",
         "page_bg": "#f5f6f8",
@@ -125,10 +103,9 @@ QtObject {
         "filter_only_border": "#b9a8ff"
     })
 
-    // ---------------- 夜间表（除注明外均为按深色底推导） ----------------
+    // 夜间表
     readonly property var night: ({
-        // ----- 原型令牌 -----
-        "bg": "#202124",                    // 源：MainActivity.buildThemeSwatch 夜间色块底色（安卓夜间锚点）
+        "bg": "#202124",
         "surface": "#2a2c30",
         "surface2": "#24262a",
         "surface3": "#2f3237",
@@ -136,9 +113,9 @@ QtObject {
         "text": "#e8eaed",
         "text2": "#b0b6be",
         "text3": "#838a93",
-        "line": "#3a3e44",                  // 参考锚点 #3c3d40（安卓夜间色块描边）
+        "line": "#3a3e44",
         "line2": "#464a51",
-        "accent": "#5c74f0",                // 比日间亮一档仍够深：主按钮白字保持可读，压在深底上依旧醒目
+        "accent": "#5c74f0",
         "accentHover": "#6e85ff",
         "accentSoft": "#262d45",
         "accentText": "#a9b8ff",
@@ -156,7 +133,7 @@ QtObject {
         "chipPlainText": "#aeb4bc",
         "filterGroupBg": { "include": "#1f3129", "exclude": "#3a2427", "only": "#262b45" },
         "filterGroupLine": { "include": "#2f4b3c", "exclude": "#5c3339", "only": "#3b4675" },
-        "pageBg": "#202124",                // 源：同上（= 安卓 page_bg 夜间锚点）
+        "pageBg": "#202124",
         "surfaceInset": "#232528",
         "surfaceInsetHover": "#2f3237",
         "lineSoft": "#363a40",
@@ -182,11 +159,9 @@ QtObject {
         "accentLineSoft": "#3c4a8c",
         "accentIcon": "#93a6ff",
         "okDot": "#4fbf8b",
-
-        // ----- 安卓原生键（推导） -----
         "black": "#000000",
         "white": "#ffffff",
-        "page_bg": "#202124",               // 源：安卓夜间锚点
+        "page_bg": "#202124",
         "segmented_bg": "#24262a",
         "inset_bg": "#2c2f34",
         "divider": "#363a40",
@@ -200,7 +175,7 @@ QtObject {
         "text_button": "#c2c7ce",
         "text_button_2": "#b8bec6",
         "text_hint_strong": "#5a6069",
-        "on_primary_text": "#16181c",       // 夜间主按钮改用浅底，按钮文字随之转深
+        "on_primary_text": "#16181c",
         "primary_button_bg": "#e8eaed",
         "danger_text": "#f07a83",
         "filter_include_bg": "#1e2a3a",
@@ -211,7 +186,7 @@ QtObject {
         "filter_only_border": "#464e86"
     })
 
-    // ---------------- 对外属性：名字与 Palette.js 一一对应 ----------------
+    // 对外属性
     readonly property color bg: dark ? night.bg : day.bg
     readonly property color surface: dark ? night.surface : day.surface
     readonly property color surface2: dark ? night.surface2 : day.surface2
@@ -244,7 +219,7 @@ QtObject {
     readonly property var filterGroupBg: dark ? night.filterGroupBg : day.filterGroupBg
     readonly property var filterGroupLine: dark ? night.filterGroupLine : day.filterGroupLine
 
-    // 原界面硬编码、现归入字典的中性色
+    // 原界面硬编码 现归入字典的中性色
     readonly property color surfaceInset: dark ? night.surfaceInset : day.surfaceInset
     readonly property color surfaceInsetHover: dark ? night.surfaceInsetHover : day.surfaceInsetHover
     readonly property color lineSoft: dark ? night.lineSoft : day.lineSoft
@@ -271,7 +246,6 @@ QtObject {
     readonly property color accentIcon: dark ? night.accentIcon : day.accentIcon
     readonly property color okDot: dark ? night.okDot : day.okDot
 
-    // 安卓原生键名（与上面的原型名并存，便于直接按安卓表取色）
     readonly property color black: dark ? night.black : day.black
     readonly property color white: dark ? night.white : day.white
     readonly property color page_bg: dark ? night.page_bg : day.page_bg
@@ -298,7 +272,6 @@ QtObject {
     readonly property color filter_only_bg: dark ? night.filter_only_bg : day.filter_only_bg
     readonly property color filter_only_border: dark ? night.filter_only_border : day.filter_only_border
 
-    // ---------------- 非颜色令牌（原 Palette.js 常量，与主题无关） ----------------
     readonly property int sidebar: 212
     readonly property int sidebarNarrow: 190
     readonly property int rail: 264
@@ -313,7 +286,7 @@ QtObject {
     readonly property string fontFamily: "Segoe UI Variable Text, Segoe UI, Microsoft YaHei, sans-serif"
     readonly property string fontMono: "Consolas, ui-monospace, monospace"
 
-    // ---------------- 断点（参考稿 @media 1180 / 980 / 760 / 420） ----------------
+    // 断点
     function sidebarWidth(w) {
         return w < 1180 ? sidebarNarrow : sidebar
     }

@@ -92,8 +92,8 @@ ApplicationWindow {
 
             Repeater {
                 model: [
-                    { label: Lang.t("stat.files_prefix"), value: Store.fileCount() },
-                    { label: Lang.t("stat.tags_prefix"), value: Store.tagCount() }
+                    { label: Lang.t("stat.files_prefix"), value: ConfigBridge.fileCount },
+                    { label: Lang.t("stat.tags_prefix"), value: ConfigBridge.tags.length }
                 ]
 
                 delegate: Rectangle {
@@ -168,7 +168,7 @@ ApplicationWindow {
                 glyph: "▦"
                 iconSource: "qrc:/img/file.svg"
                 text: Lang.t("browse.files")
-                count: Store.fileCount()
+                count: ConfigBridge.fileCount
                 active: Store.currentPage === "browse"
                 onClicked: Store.currentPage = "browse"
             }
@@ -178,7 +178,7 @@ ApplicationWindow {
                 glyph: "▱"
                 iconSource: "qrc:/img/folder.svg"
                 text: Lang.t("nav.directory")
-                count: Store.dirs.length
+                count: ConfigBridge.dirs.length
                 active: Store.currentPage === "dirs"
                 onClicked: Store.currentPage = "dirs"
             }
@@ -188,7 +188,7 @@ ApplicationWindow {
                 glyph: "◇"
                 iconSource: "qrc:/img/tag.svg"
                 text: Lang.t("tag.library_title")
-                count: Store.tagCount()
+                count: ConfigBridge.tags.length
                 active: Store.currentPage === "tags"
                 onClicked: Store.currentPage = "tags"
             }
@@ -436,7 +436,7 @@ ApplicationWindow {
                         anchors.right: parent.right
                         anchors.rightMargin: 12
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "×"
+                        text: "x"
                         font.pixelSize: Theme.px(16)
                         color: Theme.text3
 
@@ -493,7 +493,7 @@ ApplicationWindow {
                             }
 
                             Text {
-                                text: "→"
+                                text: "->"
                                 font.pixelSize: Theme.px(12)
                                 color: Theme.text3
                                 anchors.verticalCenter: parent.verticalCenter

@@ -1,16 +1,14 @@
-// 参考稿 .nav-item（侧栏导航项：图标 + 文本 + 计数，active 高亮）
-// 宽度由使用处指定（侧栏里铺满，窄屏横排时按内容宽）
 import QtQuick
 
 Rectangle {
     id: item
 
-    property string glyph: ""        // 兜底：没给 iconSource 时画这个文字符号
-    property string iconSource: ""   // 可选 svg 图标（qrc:/img/xxx.svg），给了就用图标
+    property string glyph: ""
+    property string iconSource: ""
     property string text: ""
     property string count: ""
     property bool active: false
-    property bool compact: false      // 窄屏（<760）横向排列时用
+    property bool compact: false
     signal clicked()
 
     implicitHeight: 32
@@ -28,7 +26,7 @@ Rectangle {
         x: 9
         spacing: 8
 
-        // 图标槽：固定 18×18，有 iconSource 就画 svg，否则退回 glyph 文字（两者占位一致，布局不变）
+        // 图标槽：固定 18×18，有 iconSource 就画 svg 否则退回 glyph 文字（两者占位一致 布局不变）
         Item {
             id: iconSlot
             width: 18

@@ -1,28 +1,9 @@
-// 同步页：服务端共享 + 客户端下载
-// 参考稿 #page-sync（HTML 1375-1443 行）与 CSS .sync-layout / .sync-panel /
-// .sync-form-row / .input-field / .queue-header / .queue-list / .queue-item / .server-list（540-568 行）
-//
-// 数据全部来自 ConfigBridge（core 的 SyncServer / SyncClient 桥接层），本页没有假数据 / 假提示：
-//   * 发送队列 = ConfigBridge.serverQueue（SyncServer::getTaskQueue() 的快照）
-//   * 设备列表 = ConfigBridge.clientServers（SyncClient::getServers() 的快照）
-//   * 每个按钮都落到 core 的真实接口（见 page.runAction），没有"只弹一句按钮名"的占位提示
-// 服务端：
-//   * 服务器名称默认 tagmeow（Store.serverName），启动时交给 SyncServer::start
-//   * 共享目录一行两个按钮：「选择目录」打开系统目录框只负责把路径写进输入框（输入框本身可写），
-//     「加入发送队列」才把输入框里的目录推入 SyncServer 的队列
-//   * 入队 / 停服 / 断开客户端后 core 会给回报 -> serverQueueChanged -> 列表重新渲染
-// 客户端：
-//   * 保存目录来自 config.json 的 DownloadPath（默认 ./download），只在"没在下载"时能改
-//   * 「加入管理目录」把"具体下载目录"downloadPath/<最近一次下载的任务目录> 加进受管目录并建索引
-//
-// 字号说明：参考稿的 11.5 / 10.5px 在 Qt 6.11 里写不了字面量（font.pixelSize 是整型，
-// 会报 Invalid property assignment: int expected），所以统一向下取整，注释里保留原值。
-
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
-// FolderDialog：共享目录 / 保存目录走系统目录选择框（PageSettings 的导出导入也是这么做的）
 import QtQuick.Dialogs
+
+// 同步页面
 
 Item {
     id: page
