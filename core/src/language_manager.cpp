@@ -50,9 +50,28 @@ bool LanguageManager::loadLanguage(const std::string &language_name_utf8)
 
     for (const auto &item : config["text"])
     {
-        std::string id = item["id"].get<std::string>();
-        std::string text = item["str"].get<std::string>();
-        language_dictionary_[id] = text;
+        if (!item.is_object())
+        {
+            continue;
+        }
+
+        if (item.contains("id") && item.contains("str"))
+        {
+            if (item["id"].is_string() && item["str"].is_string())
+            {
+                language_dictionary_[item["id"].get<std::string>()] = item["str"].get<std::string>();
+            }
+
+            continue;
+        }
+
+        for (auto it = item.begin(); it != item.end(); ++it)
+        {
+            if (it.value().is_string())
+            {
+                language_dictionary_[it.key()] = it.value().get<std::string>();
+            }
+        }
     }
 
     error_string_.clear();
