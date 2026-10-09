@@ -296,7 +296,7 @@ QtObject {
         "confirm.refresh_dir": "确定重新扫描这个目录？会按磁盘现状重建该目录的索引记录（不动磁盘文件）。",
         "confirm.remove_type": "确定删除这个类型？该类型下的标签会一起被移除。",
         "confirm.remove_tag": "确定删除这个标签？已经赋值给文件的记录也会被移除。",
-        "confirm.convert_mode": "确定转换存储模式？会对全部受管文件批量改写（Sidecar ⇄ Filename）。",
+        "confirm.convert_mode": "确定转换存储模式？会对全部受管文件批量改写（Sidecar <-> Filename）。",
         "confirm.refresh_index": "确定刷新索引？会按受管目录整体重扫一遍并重建索引记录（不动磁盘文件）。",
         "confirm.cleanup": "确定清除失效数据？只删数据库里磁盘上已不存在的记录，磁盘文件一个都不碰。",
         "tool.done": "操作完成",
