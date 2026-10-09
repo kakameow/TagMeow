@@ -1,5 +1,5 @@
 {
-    "name": "en",
+    "name": "en-us",
     "version": "2.0",
     "text": [
     { "app.name": "TagMeow" },
@@ -72,7 +72,7 @@
     { "dir.added": "Directory added and indexed" },
     { "dir.removed_prefix": "Removed " },
     { "dir.refreshed": "Rescanned %1" },
-    { "dir.open_pending": "Open %1: the Files page is not connected yet; noted for now" },
+    { "dir.open_pending": "Open %1:" },
 
     { "tag.eyebrow": "Workspace / Tag Library" },
     { "tag.desc": "Manage tag types and tags. Supports adding, deleting, and renaming, with live preview of tag groups." },

@@ -72,7 +72,7 @@
     { "dir.added": "目录已添加并建立索引" },
     { "dir.removed_prefix": "已移除 " },
     { "dir.refreshed": "已重新扫描 %1" },
-    { "dir.open_pending": "打开 %1：文件页还没接上，先记着" },
+    { "dir.open_pending": "打开 %1：" },
 
     { "tag.eyebrow": "工作区 / 标签库" },
     { "tag.desc": "管理标签类型与标签，支持添加、删除、重命名，并实时预览标签组。" },

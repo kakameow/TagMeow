@@ -4,9 +4,9 @@ pragma Singleton
 
 // 取值顺序（配合 core 的 LanguageManager）：
 //   1. core 的字典优先：language/<当前语言>.json 里的 id -> str 翻译与切换都由 core 的
-//      LanguageManager 负责 —— loadLanguageList("./language") 扫目录列表、loadLanguage 切语言，
+//      LanguageManager 负责 —— loadLanguageList("./language") 扫目录列表 loadLanguage 切语言
 //      ConfigBridge 持有它并把 text(id) 暴露给 QML；
-//   2. core 字典里没有这个 id 时 落回下面这张**中文兜底表**。
+//   2. core 字典里没有这个 id 时 落回下面这张**中文兜底表**
 //
 
 // 其它约定：
@@ -35,6 +35,7 @@ QtObject {
     // a / b / c / d 依次替换 %1 %2 %3 %4（含 %1$d / %1$s 写法）
     function t(key, a, b, c, d) {
         // 先读兜底表：它依赖 lang.current 切语言时所有 Lang.t(...) 的绑定才会自动重算
+        var language = lang.current
         var table = lang.fallbackTable
         // core 的字典（language/*.json）：core 里没这个 id 时 ConfigBridge.text 返回空串
         var text = ConfigBridge.text(String(key))
@@ -131,7 +132,7 @@ QtObject {
         "dir.added": "目录已添加并建立索引",
         "dir.removed_prefix": "已移除 ",
         "dir.refreshed": "已重新扫描 %1",
-        "dir.open_pending": "打开 %1：文件页还没接上，先记着",
+        "dir.open_pending": "打开 %1：",
 
         // ===== 标签库页（android editor.* / tag.*）=====
         "tag.eyebrow": "工作区 / 标签库",
