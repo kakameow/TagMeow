@@ -1031,6 +1031,8 @@ bool ConfigBridge::search(const QStringList &include, const QStringList &exclude
     last_dirs_ = dirs;
     has_searched_ = true;
 
+    // core 的 searchByTags 是同步的（跑完才回来），所以先亮"搜索中"，把查询排到下一轮事件循环：
+    // 界面才有机会把加载态画出来，而不是整窗先卡一下
     if (!searching_)
     {
         searching_ = true;
@@ -1091,32 +1093,14 @@ bool ConfigBridge::runPendingSearch()
         options.dirs_.push_back(std::filesystem::u8path(dir.toUtf8().toStdString()));
     }
 
+    // 只把 core 的记录留下来 "喂到哪一段才拼哪一段"
+    // 顺序就是 core 给的顺序
     pending_infos_ = ts_.searchByTags(options);
-
-    // 平铺结果也把受管的 子 目录渲染出来：目录排前面 文件排后面 各自按名字
-    std::stable_sort(pending_infos_.begin(), pending_infos_.end(),
-                     [](const table::FileInfo &left, const table::FileInfo &right)
-                     {
-                         std::error_code left_ec;
-                         std::error_code right_ec;
-                         const std::filesystem::path left_path = std::filesystem::u8path(left.path_);
-                         const std::filesystem::path right_path = std::filesystem::u8path(right.path_);
-                         const bool left_dir = std::filesystem::is_directory(left_path, left_ec) && !left_ec;
-                         const bool right_dir = std::filesystem::is_directory(right_path, right_ec) && !right_ec;
-
-                         if (left_dir != right_dir)
-                         {
-                            return left_dir;
-                         }
-
-                         const QString left_name = QFileInfo(pathToQString(left_path)).fileName();
-                         const QString right_name = QFileInfo(pathToQString(right_path)).fileName();
-                         return QString::localeAwareCompare(left_name, right_name) < 0;
-                     });
-    pending_offset_ = 0;
+    pending_row_offset_ = 0;
     browse_files_.clear();
 
-    // 三个标签容器都为空时 core 的语义是"返回没有标签的文件" 不是错误 只有真的查不动了（DB 报错）
+    // 三个标签容器都为空时 core 的语义是"返回没有标签的文件" 不是错误
+    // 只有真的查不动了（DB 报错）才打扰用户
     const std::string db_error = ts_.getDBError();
 
     if (pending_infos_.empty() && !db_error.empty() && db_error.compare(0, 5, "[tip]") != 0)
@@ -1124,51 +1108,129 @@ bool ConfigBridge::runPendingSearch()
         reportError(QString::fromUtf8(db_error));
     }
 
-    setTip(QStringLiteral("[tip] search include=%1 exclude=%2 only=%3 dirs=%4 -> %5").arg(last_include_.size()).arg(last_exclude_.size()).arg(last_only_.size()).arg(last_dirs_.size()).arg(pending_infos_.size()));
+    setTip(QStringLiteral("[tip] search include=%1 exclude=%2 only=%3 dirs=%4 -> %5").arg(last_include_.size()).arg(last_only_.size()).arg(last_dirs_.size()).arg(pending_infos_.size()));
+
+    // 先把窗口清空（加载态盖在上面）随后拼并喂第一段
     emit browseChanged();
     feedBrowseBatch();
     return true;
 }
 
+int ConfigBridge::browseTotal() const
+{
+    return static_cast<int>(pending_infos_.size());
+}
+
 void ConfigBridge::feedBrowseBatch()
 {
-    // 列表按 ListView 的 cacheBuffer 只建可视的那几行 "动态加载渲染"
-    constexpr int BATCH_SIZE = 150;
-
+    // 界面只渲染一个范围：拼好下一段 BROWSE_PAGE_SIZE 行交给界面（只有这一段会去 stat 磁盘）
     const int total = static_cast<int>(pending_infos_.size());
-    int appended = 0;
+    const int limit = pending_row_offset_ + BROWSE_PAGE_SIZE;
+    const int end = total < limit ? total : limit;
 
-    while (pending_offset_ < total && appended < BATCH_SIZE)
+    while (pending_row_offset_ < end)
     {
-        const QVariantMap row = makeBrowseRow(pending_infos_[static_cast<std::size_t>(pending_offset_)], true);
+        const QVariantMap row = makeBrowseRow(pending_infos_[static_cast<std::size_t>(pending_row_offset_)], true);
 
         if (!row.isEmpty())
         {
             browse_files_.append(row);
         }
 
-        pending_offset_++;
-        appended++;
+        pending_row_offset_++;
     }
 
     emit browseChanged();
 
-    if (pending_offset_ < total)
-    {
-        QTimer::singleShot(0, this, [this]() { feedBrowseBatch(); });
-        return;
-    }
-
-    pending_infos_.clear();
-    pending_offset_ = 0;
-
+    // 首屏一出去就把"正在搜索"收掉：searching 只表示"正在查"
     if (searching_)
     {
         searching_ = false;
         emit searchStateChanged();
     }
 
-    logNow(QStringLiteral("[tip] browse results ready: %1 row(s)").arg(browse_files_.size()).toStdString());
+    if (pending_row_offset_ < total)
+    {
+        // 还有剩下的：等界面滚到底再来取
+        return;
+    }
+
+    logNow(QStringLiteral("[tip] browse window ready: %1 of %2 row(s)")
+               .arg(browse_files_.size())
+               .arg(total)
+               .toStdString());
+}
+
+bool ConfigBridge::loadMoreRows()
+{
+    if (pending_row_offset_ >= static_cast<int>(pending_infos_.size()))
+    {
+        return false;
+    }
+
+    feedBrowseBatch();
+    return true;
+}
+
+void ConfigBridge::patchBrowseRow(const QString &file_path, const QString &real_path)
+{
+    // 标签写完只改这一行：从 core 把这条记录重读出来重新拼一行替换掉 在层级里就重扫当前这一层
+    if (!level_path_.empty())
+    {
+        refreshLevel();
+        return;
+    }
+
+    if (file_path.isEmpty())
+    {
+        return;
+    }
+
+    for (int i = 0; i < browse_files_.size(); i++)
+    {
+        if (browse_files_.at(i).toMap().value(QStringLiteral("path")).toString() != file_path)
+        {
+            continue;
+        }
+
+        const QString lookup = real_path.isEmpty() ? file_path : real_path;
+        const std::optional<table::FileInfo> info = ts_.getFileInfo(localPathFromUrl(lookup));
+
+        if (!info.has_value())
+        {
+            // 记录已经不在索引里了：把这一行从窗口里去掉
+            browse_files_.removeAt(i);
+            emit browseChanged();
+            return;
+        }
+        
+        if (info.has_value())
+        {
+            const QVariantMap row = makeBrowseRow(*info, true);
+
+            if (!row.isEmpty())
+            {
+                browse_files_[i] = row;
+            }
+        }
+
+        emit browseChanged();
+        return;
+    }
+
+    // 这一行不在当前窗口里（还没滚到 / 已被筛掉）：什么都不用做 下次搜索自然会一致
+}
+
+void ConfigBridge::refreshBrowseView()
+{
+    // 层级浏览只按目录渲染
+    if (!level_path_.empty())
+    {
+        refreshLevel();
+        return;
+    }
+
+    rerunLastSearch();
 }
 
 bool ConfigBridge::rerunLastSearch()
@@ -1447,8 +1509,20 @@ bool ConfigBridge::assignTagToFile(const QString &file_path, const QString &tag)
     const QString real_path = pathToQString(ts_.getLastFilePath());
     logNow(QStringLiteral("[tip] assign tag %1 -> %2").arg(trimmed_tag).arg(real_path).toStdString());
 
-    rerunLastSearch();
-    emit libraryChanged();
+    // Filename 模式下加/删标签会把文件改名：库里的记录跟着换成**新路径**，
+    const std::filesystem::path last_path = ts_.getLastFilePath();
+
+    if (!real_path.isEmpty() && real_path != pathToQString(path))
+    {
+        ts_.removeFile(path);
+        ts_.updateFile(last_path);
+        logNow(QStringLiteral("[tip] filename mode rename synced: %1 -> %2")
+                   .arg(pathToQString(path))
+                   .arg(real_path)
+                   .toStdString());
+    }
+
+    patchBrowseRow(file_path, real_path);
     return true;
 }
 
@@ -1471,8 +1545,18 @@ bool ConfigBridge::removeTagFromFile(const QString &file_path, const QString &ta
 
     logNow(QStringLiteral("[tip] remove tag %1 <- %2").arg(trimmed_tag).arg(pathToQString(path)).toStdString());
 
-    rerunLastSearch();
-    emit libraryChanged();
+    // Filename 模式下加/删标签会把文件改名：库里的记录跟着换成新路径
+    const std::filesystem::path last_path = ts_.getLastFilePath();
+    const QString real_path = last_path.empty() ? QString() : pathToQString(last_path);
+
+    if (!real_path.isEmpty() && real_path != pathToQString(path))
+    {
+        ts_.removeFile(path);
+        ts_.updateFile(last_path);
+        logNow(QStringLiteral("[tip] filename mode rename synced: %1 -> %2").arg(pathToQString(path)).arg(real_path).toStdString());
+    }
+
+    patchBrowseRow(file_path, real_path);
     return true;
 }
 
@@ -1492,7 +1576,7 @@ bool ConfigBridge::removeFileFromIndex(const QString &file_path)
     }
 
     setTip(QStringLiteral("[tip] file removed from index: %1").arg(pathToQString(path)));
-    rerunLastSearch();
+    patchBrowseRow(file_path);
     emit libraryChanged();
     return true;
 }

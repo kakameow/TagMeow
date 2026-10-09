@@ -812,7 +812,11 @@ bool TagFileManager::convertMode(const std::filesystem::path &file_path_utf8, St
     }
 
     // 写入可能改了文件名（Filename 模式）-> 删旧格式要用改名之后的路径
-    const std::filesystem::path written_path = (to_mode == StoreMode::Filename && !tags.empty()) ? buildTaggedPath(file_path_utf8, tags) : file_path_utf8;
+    // 注意：Filename 模式下**标签列表为空也必须改名**（去掉名字里的 {[...]} 块）。
+    // 原来这里带了 "&& !tags.empty()" 的守卫：删掉最后一个标签时 tags 变成空 ->
+    // 不改名 -> 名字里还留着 {[tag]} -> 而 Filename 模式又是从文件名读标签的 ->
+    // 那个标签立刻"复活"，表现为"最后一个标签永远删不掉"。
+    const std::filesystem::path written_path = (to_mode == StoreMode::Filename) ? buildTaggedPath(file_path_utf8, tags) : file_path_utf8;
 
     if (!keep_old)
     {
@@ -1269,11 +1273,10 @@ bool TagFileManager::writeTagsToFile(const std::filesystem::path &file_path, con
     }
     else
     {
-        // 标签为空时不动文件名：转换时"源里没标签"是正常情况 不能顺手把名字里原有的内容抹掉
-        if (tags.empty())
-        {
-            return true;
-        }
+        // 注意：这里**不能**在 tags 为空时早退（原来的写法是 `if (tags.empty()) return true;`）。
+        // 删掉最后一个标签时 tags 正好变空 -> 早退 -> 名字里的 {[...]} 块没摘掉 ->
+        // 而 Filename 模式是从文件名读标签的 -> 那个标签立刻"复活"（"最后一个标签永远删不掉"）。
+        // 转换时"源里没标签"的文件本来就不带 {[...]} 块 -> 下面的 removeTagsFromFilename 是恒等操作，安全。
 
         // 整名作用域：本来就没有名字部分 先补一个毫秒时间戳前缀再写标签
         // （前缀只能加在最前面 作用域必须留在名字结尾 加在后面以后就再也去不掉了）

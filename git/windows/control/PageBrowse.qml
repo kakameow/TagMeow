@@ -49,7 +49,13 @@ Item {
     Connections {
         target: ConfigBridge
 
-        function onBrowseChanged() { fileListHost.positionViewAtBeginning() }
+        // 新搜索才回到顶部；滚到底加载下一页时保持当前位置（不然每喂一段就跳回开头）
+        function onBrowseChanged() {
+            if (ConfigBridge.browseTotal !== page.lastBrowseTotal) {
+                page.lastBrowseTotal = ConfigBridge.browseTotal
+                fileListHost.positionViewAtBeginning()
+            }
+        }
     }
 
     Connections {
@@ -110,6 +116,8 @@ Item {
     readonly property bool levelMode: ConfigBridge.browseLevel.length > 0
     readonly property var rows: page.levelMode ? ConfigBridge.browseEntries : ConfigBridge.browseFiles
     readonly property int rowCount: page.rows.length
+    // 上一次的结果总条数：用来区分"新搜索"和"滚动加载下一页"
+    property int lastBrowseTotal: -1
 
     // 页面根节点固定填满内容区（StackLayout 用 implicitHeight 运行期用父高）不再跟内容走高
     implicitHeight: page.fixedHeight
@@ -599,7 +607,12 @@ Item {
                             height: fileListArea.height - 12
                             clip: true
                             boundsBehavior: Flickable.StopAtBounds
-                            model: page.rows
+                            model: page.row
+                            // UI 只渲染一个范围：桥手里留着完整结果 滚到底再要下一段
+                            onAtYEndChanged: {
+                                if (atYEnd)
+                                    ConfigBridge.loadMoreRows()
+                            }
                             spacing: 1
                             cacheBuffer: 400                                 // 可视范围外只多建这一小段
 
@@ -901,6 +914,7 @@ Item {
                         // ConfigBridge.browseFiles ListView 只建可视的那几行 —— 列表就是动态加载渲染出来的
                         Rectangle {
                             anchors.fill: parent
+                            z: -1
                             visible: ConfigBridge.searching
                             color: Theme.surface
                             opacity: 0.72
@@ -908,6 +922,7 @@ Item {
 
                         Text {
                             anchors.centerIn: parent
+                            z: -1
                             visible: ConfigBridge.searching
                             text: Lang.t("browse.searching")
                             font.pixelSize: Theme.px(11)

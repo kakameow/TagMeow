@@ -90,7 +90,7 @@ public:
     bool removeFile(const std::filesystem::path &path_utf8);
     std::vector<table::FileInfo> searchByTags(const FileDatabase::SearchOptions &opts) const;
     std::optional<table::FileInfo> getFileInfo(const std::filesystem::path &path) const;
-    // files 表的记录条数（= 索引里有多少条记录 含目录记录）；失败返回 -1
+    // files 表的记录条数（= 索引里有多少条记录 含目录记录）失败返回 -1
     int getFileCount() const;
     // 清除失效记录（磁盘上已不存在的文件）：只删数据库记录 磁盘文件一个都不碰
     // removed_count 非空时写入删掉的记录条数
@@ -102,12 +102,6 @@ public:
     // Filename 模式下加/删标签会重命名文件 该值与传入路径可能不同(数据库已按此路径同步)
     const std::filesystem::path &getLastFilePath() const;
 
-    // ---- 结果回报 ----
-    // 写操作只返回 bool；"成功了几个"这类数据一律走上面那些带 nullptr 默认值的 out 参数带出去
-    //（例：reLoadRoot(roots, &indexed, &root_count) / convertMode(from, to, false, &converted)）。
-    // 下面四个 getter 只提供给人看 / 进日志的说明文字：失败是 "[warning] ..." / "[error] ..."，
-    // 成功是可以带数字的 "[tip] ..."（例："[tip] reLoadRoot indexed=42 roots=2"），空串表示无需上报。
-    // 想拿来做判断请用 out 参数，不要解析这些字符串。
     std::string getLastError() const;
     // FileDatabase 错误信息
     std::string getDBError() const;

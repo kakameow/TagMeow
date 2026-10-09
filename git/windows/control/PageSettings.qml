@@ -48,6 +48,55 @@ Item {
         Theme.dark = (ConfigBridge.theme === 1)     // 0 = 白 / 日间，1 = 黑 / 夜间
     }
 
+    // 数据与工具：确认 + 结果提示
+    // 危险 / 批量操作都先过确认弹窗确认后执行 再弹一个"成功与否"的结果弹窗
+    // （成功显示桥从 core 读回来的数据回报 lastReport 失败显示 lastError）
+    property string pendingFile: ""
+
+    function askConfirm(action) {
+        page.pendingAction = action
+        confirmDialog.open()
+    }
+
+    // 每个动作在界面上叫什么（结果弹窗标题用）
+    function actionLabel(action) {
+        if (action === "convertMode")
+            return Lang.t("settings.mode")
+        if (action === "refreshIndex")
+            return Lang.t("settings.refresh_index")
+        if (action === "cleanup")
+            return Lang.t("settings.cleanup")
+        if (action === "export")
+            return Lang.t("btn.export")
+        if (action === "import")
+            return Lang.t("btn.import")
+        return action
+    }
+
+    // 真正执行 + 弹结果（export / import 的路径放在 pendingFile 里）
+    function runTool(action) {
+        var ok = false
+
+        if (action === "convertMode")
+            ok = ConfigBridge.convertMode()
+        else if (action === "refreshIndex")
+            ok = ConfigBridge.refreshIndex()
+        else if (action === "cleanup")
+            ok = ConfigBridge.clearInvalidData()
+        else if (action === "export")
+            ok = ConfigBridge.exportLibrary(page.pendingFile)
+        else if (action === "import")
+            ok = ConfigBridge.importLibrary(page.pendingFile)
+
+        // 先弹提示
+        var label = page.actionLabel(action)
+        var detail = ok ? ConfigBridge.lastReport : ConfigBridge.lastError()
+        var tail = detail.length > 0 ? " · " + detail : ""
+        Store.toast(Lang.t(ok ? "tool.done" : "tool.failed") + " · " + label + tail)
+
+        return ok
+    }
+
     // 一行设置项：图标 + 标题/描述 + 右侧内容
     component SettingRow: Rectangle {
         id: row
@@ -511,10 +560,7 @@ Item {
                         valueText: ConfigBridge.tagMode
                         showChevron: true
                         // 批量改写全部受管文件：先弹确认 确认后才真的转换
-                        onClicked: {
-                            page.pendingAction = "convertMode"
-                            confirmDialog.open()
-                        }
+                        onClicked: page.askConfirm("convertMode")
                     }
 
                     SettingRow {
@@ -522,7 +568,8 @@ Item {
                         title: Lang.t("settings.refresh_index")
                         desc: Lang.t("settings.refresh_desc")
                         showChevron: true
-                        onClicked: ConfigBridge.refreshIndex()
+                        // 整体重扫会重建索引 先确认 确认后弹"成功与否"结果
+                        onClicked: page.askConfirm("refreshIndex")
                     }
 
                     SettingRow {
@@ -530,7 +577,8 @@ Item {
                         title: Lang.t("settings.cleanup")
                         desc: Lang.t("settings.cleanup_desc")
                         showChevron: true
-                        onClicked: ConfigBridge.clearInvalidData()
+                        // 删数据库记录也是破坏性操作 同样先确认再执行
+                        onClicked: page.askConfirm("cleanup")
                     }
 
                     SettingRow {
@@ -590,7 +638,7 @@ Item {
         }
     }
 
-    //  危险操作确认弹窗
+    // 危险操作确认弹窗
     Dialog {
         id: confirmDialog
         anchors.centerIn: parent
@@ -606,7 +654,9 @@ Item {
         }
 
         contentItem: Text {
-            text: page.pendingAction === "convertMode" ? Lang.t("confirm.convert_mode") : ""
+            text: page.pendingAction === "convertMode" ? Lang.t("confirm.convert_mode")
+                : (page.pendingAction === "refreshIndex" ? Lang.t("confirm.refresh_index")
+                : (page.pendingAction === "cleanup" ? Lang.t("confirm.cleanup") : ""))
             wrapMode: Text.WordWrap
             font.pixelSize: Theme.px(12)
             font.family: Theme.fontFamily
@@ -640,8 +690,8 @@ Item {
                     var action = page.pendingAction
                     page.pendingAction = ""
                     confirmDialog.close()
-                    if (action === "convertMode")
-                        ConfigBridge.convertMode()
+                    if (action.length > 0)
+                        page.runTool(action)
                 }
             }
         }
@@ -655,7 +705,10 @@ Item {
         fileMode: FileDialog.SaveFile
         defaultSuffix: "json"
         nameFilters: ["TagMeow JSON (*.json)"]
-        onAccepted: ConfigBridge.exportLibrary(selectedFile.toString())
+        onAccepted: {
+            page.pendingFile = selectedFile.toString()
+            page.runTool("export")
+        }
     }
 
     FileDialog {
@@ -664,6 +717,9 @@ Item {
         title: Lang.t("btn.import")
         fileMode: FileDialog.OpenFile
         nameFilters: ["TagMeow JSON (*.json)"]
-        onAccepted: ConfigBridge.importLibrary(selectedFile.toString())
+        onAccepted: {
+            page.pendingFile = selectedFile.toString()
+            page.runTool("import")
+        }
     }
 }
