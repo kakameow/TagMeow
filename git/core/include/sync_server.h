@@ -20,8 +20,8 @@
 // 工作流程
 // 1. start() 启动工作线程 无客户端时：周期广播一次消息 + 轮询接受连接（非阻塞 accept + 短休眠）
 //    两者在同一线程交替执行 保证 stop() 可打断
-// 2. 客户端连接成功：停止广播，从队列取目录逐个发送其中所有文件
-//    每个文件：发送文件头 -> 等待客户端回复 1 字节（'1' = 发送数据，'0' = 跳过）
+// 2. 客户端连接成功：停止广播 从队列取目录逐个发送其中所有文件
+//    每个文件：发送文件头 -> 等待客户端回复 1 字节（'1' = 发送数据'0' = 跳过）
 //    会话期间 enqueueDirectory() 推入的目录会继续按序发送
 // 3. 队列为空：等待 empty_queue_wait 分钟（期间有新目录继续发送）超时仍为空才断开客户端
 //    断开前先发"会话结束"控制帧并等客户端确认（有界） 确认成功才算正常结束
@@ -41,7 +41,7 @@ public:
     SyncServer(const SyncServer &) = delete;
     SyncServer &operator=(const SyncServer &) = delete;
 
-    // 启动工作线程：绑定 TCP 端口（port == 0 时由系统分配，广播广告实际端口）
+    // 启动工作线程：绑定 TCP 端口（port == 0 时由系统分配 广播广告实际端口）
     // 返回 false 表示启动失败（ec 说明） 成功后工作线程运行
     // 工作线程回调（勿在回调内做阻塞或 UI 操作）：
     //   cb(true, errc::no_message_available) —— 会话中发送队列为空 上层可趁等待期继续入队
@@ -108,7 +108,7 @@ private:
     bool tryAccept(std::error_code &ec);
     // 发送一个目录：每个文件 发送文件头 -> 等待客户端回复 -> 决定是否发送数据
     bool sendDirectory(const std::filesystem::path &dir, std::error_code &ec);
-    // 等待客户端回复一个字节（'1' = 发送 '0' = 跳过；其他值视为协议错误）
+    // 等待客户端回复一个字节（'1' = 发送 '0' = 跳过 其他值视为协议错误）
     bool waitForClientReply(std::error_code &ec, bool &shouldSend);
     // 断开并清理客户端连接（workerLoop / stop 共用）
     void closeClient(std::error_code &ec);

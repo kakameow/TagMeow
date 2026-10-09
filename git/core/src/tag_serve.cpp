@@ -137,7 +137,7 @@ bool TagServe::reLoadRoot(std::vector<std::filesystem::path> root_list_utf8, int
         return false;
     }
 
-    // 数据走 out 参数；error_string_ 只留给人看
+    // 数据走 out 参数 error_string_ 写日志
     const int indexed = db_.countFiles();
     const int roots = static_cast<int>(root_list_.size());
 
@@ -249,7 +249,6 @@ bool TagServe::reLoadRoot(std::filesystem::path dir_path_utf8, int *indexed_coun
         }
     }
 
-    // 数据走 out 参数；error_string_ 保留 insertDirectory 的提示（"[tip] N entry(ies) were skipped" 之类）
     const int indexed = db_.countFiles();
     if (indexed_count != nullptr)
     {

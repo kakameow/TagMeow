@@ -36,7 +36,7 @@ public:
     // indexed_count 非空时写入重扫后索引里的记录条数
     bool reLoadRoot(std::filesystem::path dir_path_utf8, int *indexed_count = nullptr);
     // 替换根目录列表 并同步更新数据库 删除旧目录数据插入新目录数据
-    // indexed_count 非空时写入重扫后索引里的记录条数；root_count 非空时写入本次扫了几个根
+    // indexed_count 非空时写入重扫后索引里的记录条数 root_count 非空时写入本次扫了几个根
     bool reLoadRoot(std::vector<std::filesystem::path> root_list_utf8, int *indexed_count = nullptr, int *root_count = nullptr);
     // 更换数据库文件路径 但不自动同步文件系统 需要手动调用 updateRoots
     bool reLoadDB(std::filesystem::path db_path_utf8);
@@ -70,7 +70,7 @@ public:
     bool removeFileTag(const std::filesystem::path &file_path_utf8, const std::string &tag);
     bool removeFileTag(const std::filesystem::path &file_path_utf8, const std::vector<std::string> &tags);
     // 转换 root 目录列表内的全部文件 如果某文件失败将跳过该文件 如果 keep_old 为 false 只有在全部文件转换成功才删除 如果成功会将默认模式设置为 to_mode
-    // converted_count 非空时写入转换成功的文件数；failed_count 非空时写入失败的文件数
+    // converted_count 非空时写入转换成功的文件数 failed_count 非空时写入失败的文件数
     bool convertMode(TagFileManager::StoreMode from_mode, TagFileManager::StoreMode to_mode, bool keep_old = false,
                      int *converted_count = nullptr, int *failed_count = nullptr);
     void setDefaultMode(const TagFileManager::StoreMode mode);

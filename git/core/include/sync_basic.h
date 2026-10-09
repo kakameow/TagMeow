@@ -26,7 +26,7 @@
 
 // 模块三 同步收发基础层 —— 设计约束（全部同步 不重试）
 // 1. 所有接口均为同步阻塞实现 无异步回调
-// 2. BroadcastSender::send 只单次发送，重复广播由调用方循环控制，不重试；
+// 2. BroadcastSender::send 只单次发送 重复广播由调用方循环控制 不重试
 // 3. BroadcastReceiver::scan 阻塞收集“所有”合法广播后返回：
 //    持续接收直到出现安静期（quiet_timeout 内无任何报文）或达到 max_servers /
 //    total_timeout 按 ip:port 去重 非法报文与魔术字不匹配仅跳过 不中断扫描
@@ -61,7 +61,7 @@ struct UDPMessage
     std::string name_;       // 服务器名称
     std::string ip_;         // IP 地址
     std::uint16_t port_;     // TCP 端口
-    std::string magic_word_; // 广播报文魔术字 接收端过滤用，对应 json 字段 "magic_word"
+    std::string magic_word_; // 广播报文魔术字 接收端过滤用 对应 json 字段 "magic_word"
 };
 
 struct ServerInfo
@@ -94,7 +94,7 @@ private:
 };
 
 // UDP 广播接收器 scan() 阻塞收集所有合法广播后返回
-//   已知限制(设计如此 未改动): 接收器必须绑定 UDP_DEFAULT_PORT(11451) 才能收到服务端发往该端口的广播。
+//   已知限制(设计如此 未改动): 接收器必须绑定 UDP_DEFAULT_PORT(11451) 才能收到服务端发往该端口的广播
 //   同一台机器同时运行多个实例时该端口会被多个接收器同时占用:
 //   Windows 下重复绑定(SO_REUSEADDR)后广播报文只投递给其中一个接收者(通常先占用的实例)
 //   后启动实例的 scan() 收不到任何报文(或绑定失败) 表现为"客户端搜索不到设备"
@@ -111,8 +111,8 @@ public:
     BroadcastReceiver(const BroadcastReceiver &) = delete;
     BroadcastReceiver &operator=(const BroadcastReceiver &) = delete;
 
-    // 收集所有合法广播 按 ip:port 去重 后返回。
-    // 结束条件（任一）：出现安静期 / 收集满 max_servers 台 / 超过 total_timeout。
+    // 收集所有合法广播 按 ip:port 去重 后返回
+    // 结束条件（任一）：出现安静期 / 收集满 max_servers 台 / 超过 total_timeout
     // 安静期结束视为正常结束 ec 清零 无服务器也返回空列表而非错误
     // 套接字级错误通过 ec 上报 此时返回已收集的部分结果
     std::vector<ServerInfo> scan(std::error_code &ec, std::size_t max_servers = 128, std::chrono::milliseconds total_timeout = std::chrono::milliseconds(2000));
@@ -123,7 +123,7 @@ private:
     std::chrono::milliseconds quiet_timeout_;
 
     static bool parseUDPMessage(const std::string &data, UDPMessage &out_msg);
-    // SO_RCVTIMEO 到期类错误 无包可收判定：Windows 为 WSAETIMEDOUT，POSIX 为 EAGAIN/EWOULDBLOCK
+    // SO_RCVTIMEO 到期类错误 无包可收判定：Windows 为 WSAETIMEDOUT POSIX 为 EAGAIN/EWOULDBLOCK
     static bool isReceiveQuietEnd(const std::error_code &ec);
     static std::string serverKey(const ServerInfo &s);
 };
